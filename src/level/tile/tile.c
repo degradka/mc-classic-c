@@ -28,13 +28,12 @@ static inline int shouldRenderFace(const Level* lvl, int x, int y, int z, int la
 
 // helper to compute UVs from atlas slot (16x16 tiles on 256x256)
 static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
-    // 16x16 tiles in a 256x256 atlas
-    float minU = (slot % 16) / 16.0f;
-    float minV = (slot / 16) / 16.0f;
-    *u0 = minU;
-    *v0 = minV;
-    *u1 = minU + 16.0f / 256.0f;
-    *v1 = minV + 16.0f / 256.0f;
+    float xt = (slot % 16) * 16.0f;
+    float yt = (slot / 16) * 16.0f;
+    *u0 = xt / 256.0f;
+    *v0 = yt / 256.0f;
+    *u1 = (xt + 15.99f) / 256.0f;
+    *v1 = (yt + 15.99f) / 256.0f;
 }
 
 static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
@@ -138,19 +137,25 @@ static int Grass_getTexture(const Tile* self, int face) {
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
-    if (Level_isLit(lvl, x, y, z)) {
-        // try 4 random neighbors
-        for (int i = 0; i < 4; ++i) {
-            int tx = x + (rand() % 3) - 1;  // [-1..+1]
-            int ty = y + (rand() % 5) - 3;  // [-3..+1] (matches Java’s skew)
-            int tz = z + (rand() % 3) - 1;  // [-1..+1]
-            if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty, tz)) {
-                level_setTile(lvl, tx, ty, tz, TILE_GRASS.id);
-            }
-        }
-    } else {
-        // no sunlight: turn into dirt
+
+    // 25% chance to do any work this tick
+    if ((rand() & 3) != 0) return;
+
+    // Decay if no light above
+    if (!Level_isLit(lvl, x, y + 1, z)) {
         level_setTile(lvl, x, y, z, TILE_DIRT.id);
+        return;
+    }
+
+    // Try to spread to nearby dirt that has light above it
+    for (int i = 0; i < 4; ++i) {
+        int xt = x + (rand() % 3) - 1;   // [-1..+1]
+        int yt = y + (rand() % 5) - 3;   // [-3..+1]
+        int zt = z + (rand() % 3) - 1;   // [-1..+1]
+        if (Level_getTile(lvl, xt, yt, zt) == TILE_DIRT.id &&
+            Level_isLit(lvl, xt, yt + 1, zt)) {
+            level_setTile(lvl, xt, yt, zt, TILE_GRASS.id);
+        }
     }
 }
 
@@ -164,49 +169,44 @@ static int Bush_getAABB(const Tile* self, int x,int y,int z, AABB* out){
 static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
                         int layer, int x, int y, int z)
 {
-    // Visibility rule: render in exactly one of the two layers (lit xor shadow),
-    // like the rest of tiles. Use the same lit test the shared renderer uses.
+    // Only render in the matching light layer (lit XOR (layer==1))
     const int lit = (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
                     ? 1
                     : (y >= lvl->lightDepths[x + z * lvl->width]);
     if ( ((lit ^ (layer == 1)) == 0) ) return;
 
-    // Bush uses atlas slot 15 in this commit
-    float u0, v0, u1, v1;
+    float u0,v0,u1,v1;
     calcUV(self->textureId, &u0,&v0,&u1,&v1);
 
-    // Slight shading like leaves; you can also just use 1,1,1
-    const float shade = 0.8f;
-    Tessellator_color(t, shade, shade, shade);
+    // 0.0.13a uses white (byte) color
+    Tessellator_colorBytes(t, 255, 255, 255);
 
-    const float X0 = (float)x, X1 = (float)x + 1.0f;
-    const float Y0 = (float)y, Y1 = (float)y + 1.0f;
-    const float Z0 = (float)z, Z1 = (float)z + 1.0f;
+    const int rots = 2;
+    const float cx = x + 0.5f;
+    const float cz = z + 0.5f;
+    const float y0 = (float)y;
+    const float y1 = (float)y + 1.0f;
 
-    // We draw both sides of each diagonal plane (so it's visible with culling on).
-    // Plane A: from (x,*,z) to (x+1,*,z+1)  (diagonal ↘)
-    //   front
-    Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X1, Y1, Z1, u1, v0);
-    Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X0, Y0, Z0, u0, v1);
-    //   back
-    Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X0, Y0, Z0, u0, v1);
-    Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X1, Y1, Z1, u1, v0);
+    for (int r = 0; r < rots; ++r) {
+        float ang = (float)(r * M_PI / rots + 0.7853981633974483); // +45°
+        float xa = (float)(sin(ang) * 0.5);
+        float za = (float)(cos(ang) * 0.5);
 
-    // Plane B: from (x+1,*,z) to (x,*,z+1)   (diagonal ↙)
-    //   front
-    Tessellator_vertexUV(t, X1, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X0, Y1, Z1, u1, v0);
-    Tessellator_vertexUV(t, X0, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X1, Y0, Z0, u0, v1);
-    //   back
-    Tessellator_vertexUV(t, X1, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X1, Y0, Z0, u0, v1);
-    Tessellator_vertexUV(t, X0, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X0, Y1, Z1, u1, v0);
+        float x0 = cx - xa, x1 = cx + xa;
+        float z0 = cz - za, z1 = cz + za;
+
+        // Front
+        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
+        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
+
+        // Back (note UVs match 0.0.13a)
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+    }
 }
 
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {

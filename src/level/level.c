@@ -43,7 +43,7 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
             if (prev != d && level->renderer) {
                 int ylMin = prev < d ? prev : d;
                 int ylMax = prev > d ? prev : d;
-                levelRenderer_lightColumnChanged(level->renderer, x, z, ylMin, ylMax);
+                LevelRenderer_lightColumnChanged(level->renderer, x, z, ylMin, ylMax);
             }
         }
     }
@@ -175,7 +175,7 @@ bool Level_load(Level* level) {
 
     // notify renderer for a full refresh
     if (level->renderer) {
-        levelRenderer_allChanged(level, level->renderer);
+        LevelRenderer_allChanged(level, level->renderer);
     }
     return true;
 }
@@ -195,7 +195,7 @@ bool level_setTile(Level* level, int x, int y, int z, int type) {
 
     level->blocks[index] = (byte)type;
     calcLightDepths(level, x, z, 1, 1);
-    if (level->renderer) levelRenderer_tileChanged(level->renderer, x, y, z);
+    if (level->renderer) LevelRenderer_tileChanged(level->renderer, x, y, z);
     return true;
 }
 

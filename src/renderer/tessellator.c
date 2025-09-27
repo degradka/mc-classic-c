@@ -5,16 +5,6 @@
 
 Tessellator TESSELLATOR;
 
-static inline void Tessellator_colorBytes(Tessellator* t, unsigned char r, unsigned char g, unsigned char b) {
-    Tessellator_color(t, r/255.0f, g/255.0f, b/255.0f);
-}
-static inline void Tessellator_colorInt(Tessellator* t, int c) {
-    unsigned char r = (c >> 16) & 0xFF;
-    unsigned char g = (c >>  8) & 0xFF;
-    unsigned char b = (c      ) & 0xFF;
-    Tessellator_color(t, r/255.0f, g/255.0f, b/255.0f);
-}
-
 void Tessellator_begin(Tessellator* t) {
     Tessellator_clear(t);
 }

@@ -28,12 +28,12 @@ void LevelRenderer_render(const LevelRenderer* renderer, int layer);
 void LevelRenderer_destroy(LevelRenderer* renderer);
 
 void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
-void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
-void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
-void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
+void LevelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
+void LevelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
+void LevelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
 void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, int mode, int tileId);
 
-int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+int  LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
 
 #endif  // LEVELRENDERER_H

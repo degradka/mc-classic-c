@@ -198,14 +198,14 @@ void LevelRenderer_setDirty(const LevelRenderer* r, int minX, int minY, int minZ
     }
 }
 
-void levelRenderer_tileChanged(LevelRenderer* r, int x, int y, int z) {
+void LevelRenderer_tileChanged(LevelRenderer* r, int x, int y, int z) {
     LevelRenderer_setDirty(r, x - 1, y - 1, z - 1, x + 1, y + 1, z + 1);
 }
 
-void levelRenderer_lightColumnChanged(LevelRenderer* r, int x, int z, int minY, int maxY) {
+void LevelRenderer_lightColumnChanged(LevelRenderer* r, int x, int z, int minY, int maxY) {
     LevelRenderer_setDirty(r, x - 1, minY - 1, z - 1, x + 1, maxY + 1, z + 1);
 }
 
-void levelRenderer_allChanged(Level* level, LevelRenderer* r) {
+void LevelRenderer_allChanged(Level* level, LevelRenderer* r) {
     LevelRenderer_setDirty(r, 0, 0, 0, level->width, level->depth, level->height);
 }
