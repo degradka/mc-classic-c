@@ -1,0 +1,5 @@
+*.c linguist-language=C
+*.h linguist-language=C
+
+stb_image.h linguist-vendored
+stb_vorbis.c linguist-vendored
