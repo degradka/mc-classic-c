@@ -1,7 +1,7 @@
 // level/tile/tile.c — registry, per-face textures, render helpers
 
 #include "tile.h"
-#include "../../particle/particleengine.h"
+#include "../../particle/particle_engine.h"
 #include "../../particle/particle.h"
 #include <string.h>
 

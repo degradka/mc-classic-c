@@ -1,6 +1,6 @@
-// particle/particleengine.c
+// particle/particle_engine.c
 
-#include "particleengine.h"
+#include "particle_engine.h"
 #include <stdlib.h>
 #include <math.h>
 #include "../renderer/textures.h"

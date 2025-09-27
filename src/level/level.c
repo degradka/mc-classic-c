@@ -1,7 +1,7 @@
 // level/level.c — world storage, lighting columns, IO, and solid-cube queries
 
 #include "level.h"
-#include "levelrenderer.h"
+#include "level_renderer.h"
 #include "tile/tile.h"
 #include "perlin.h"
 
