@@ -13,11 +13,11 @@
 #include "common.h"
 
 #include "level/level.h"
-#include "level/levelrenderer.h"
+#include "level/level_renderer.h"
 #include "renderer/frustum.h"
 #include "level/tile/tile.h"
 #include "renderer/textures.h"
-#include "particle/particleengine.h"
+#include "particle/particle_engine.h"
 #include "player.h"
 #include "character/zombie.h"
 #include "timer.h"

@@ -5,7 +5,7 @@
 
 #include "../entity.h"
 #include "cube.h"
-#include "zombiemodel.h"
+#include "zombie_model.h"
 
 typedef struct {
     Entity base;

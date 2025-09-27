@@ -1,4 +1,4 @@
-// character/zombiemodel.h: the zombie model
+// character/zombie_model.h: the plain humanoid model, network players use it
 
 #ifndef ZOMBIE_MODEL_H
 #define ZOMBIE_MODEL_H

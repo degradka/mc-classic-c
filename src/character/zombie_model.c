@@ -1,6 +1,6 @@
-// character/zombiemodel.c: the zombie model
+// character/zombie_model.c
 
-#include "zombiemodel.h"
+#include "zombie_model.h"
 #include "../common.h"
 #include <math.h>
 

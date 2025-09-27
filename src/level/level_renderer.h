@@ -1,4 +1,4 @@
-// level/levelrenderer.h: chunk grid, culling, dirty chunks, and the hit highlight
+// level/level_renderer.h: chunk grid, culling, dirty chunks, and the hit highlight
 
 #ifndef LEVELRENDERER_H
 #define LEVELRENDERER_H

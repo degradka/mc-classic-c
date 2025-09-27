@@ -1,11 +1,11 @@
-// level/levelrenderer.c
+// level/level_renderer.c
 
 #include <GL/glew.h>
 #include <GL/glu.h>
 #include <GLFW/glfw3.h>
 #include <stdlib.h>
 
-#include "levelrenderer.h"
+#include "level_renderer.h"
 #include "level.h"
 #include "chunk.h"
 #include "../renderer/frustum.h"
@@ -57,9 +57,9 @@ void LevelRenderer_destroy(LevelRenderer* r) {
     free(r->chunks);
 }
 
-/* --- dirty-chunk prioritization -------------------------------------------- */
+/* dirty chunk prioritization */
 
-// sort state for qsort comparator
+/* dirty chunk prioritization */
 static const Player* gSortPlayer = NULL;
 static long long gSortNow = 0;
 
@@ -151,10 +151,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     switch (h->f) {
         case 0: ny = -1; break; // bottom
         case 1: ny =  1; break; // top
-        case 2: nz = -1; break; // -Z
-        case 3: nz =  1; break; // +Z
-        case 4: nx = -1; break; // -X
-        case 5: nx =  1; break; // +X
+        case 2: nz = -1; break; // negative Z
+        case 3: nz =  1; break; // positive Z
+        case 4: nx = -1; break; // negative X
+        case 5: nx =  1; break; // positive X
     }
     const int x = h->x + nx, y = h->y + ny, z = h->z + nz;
 

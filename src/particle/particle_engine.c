@@ -1,6 +1,6 @@
-// particle/particleengine.c
+// particle/particle_engine.c
 
-#include "particleengine.h"
+#include "particle_engine.h"
 #include <stdlib.h>
 #include <math.h>
 #include "../renderer/textures.h"
@@ -58,7 +58,6 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
 
     float cameraXWithY = -cameraZ * sinf(pitchRad);
     float cameraZWithY =  cameraX * sinf(pitchRad);
-    // ----------------------------------------------
 
     glColor4f(0.8f, 0.8f, 0.8f, 1.0f);
 
