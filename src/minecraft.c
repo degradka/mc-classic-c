@@ -325,7 +325,7 @@ static int raycast_block(const Level* lvl,
         if (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
             return 0;
 
-            // Any non-air tile is pickable (bushes, etc.), even if not solid.
+        // Any non-air tile is pickable (bushes, etc.), even if not solid.
         int id = Level_getTile(lvl, x, y, z);
         if (id != 0) {
             if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
