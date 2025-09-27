@@ -1,4 +1,4 @@
-// level/frustum.h — extract frustum planes from GL matrices & AABB test
+// renderer/frustum.h — extract frustum planes from GL matrices & AABB test
 
 #ifndef FRUSTUM_H
 #define FRUSTUM_H

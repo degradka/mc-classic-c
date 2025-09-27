@@ -1,11 +1,21 @@
-// level/tessellator.c — client-side batched immediate-mode for quads
+// renderer/tessellator.c — client-side batched immediate-mode for quads
 
 #include <string.h>
 #include "tessellator.h"
 
 Tessellator TESSELLATOR;
 
-void Tessellator_init(Tessellator* t) {
+static inline void Tessellator_colorBytes(Tessellator* t, unsigned char r, unsigned char g, unsigned char b) {
+    Tessellator_color(t, r/255.0f, g/255.0f, b/255.0f);
+}
+static inline void Tessellator_colorInt(Tessellator* t, int c) {
+    unsigned char r = (c >> 16) & 0xFF;
+    unsigned char g = (c >>  8) & 0xFF;
+    unsigned char b = (c      ) & 0xFF;
+    Tessellator_color(t, r/255.0f, g/255.0f, b/255.0f);
+}
+
+void Tessellator_begin(Tessellator* t) {
     Tessellator_clear(t);
 }
 
@@ -26,7 +36,7 @@ void Tessellator_vertex(Tessellator* t, float x, float y, float z) {
 
     t->vertices++;
     if (t->vertices == MAX_VERTICES) {
-        Tessellator_flush(t);
+        Tessellator_end(t);
     }
 }
 
@@ -50,7 +60,7 @@ void Tessellator_setIgnoreColor(Tessellator* t, int ignore) {
     t->ignoreColor = ignore ? 1 : 0;
 }
 
-void Tessellator_flush(Tessellator* t) {
+void Tessellator_end(Tessellator* t) {
     // reset client states so stale arrays (e.g., colors) don't affect us
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);

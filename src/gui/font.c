@@ -56,9 +56,9 @@ void Font_init(Font* f, const char* path) {
             for (int y = 0; y < 8 && emptyColumn; ++y) {
                 int yPixel = yt * 8 + y;
                 int idx = (yPixel * w + xPixel) * 4; // RGBA
-                // treat as “ink” if alpha > 128
-                unsigned char a = img[idx + 3];
-                if (a > 128) emptyColumn = 0;
+                // checks the blue channel (>128) to decide if a column has ink
+                unsigned char b = img[idx + 2];
+                if (b > 128) emptyColumn = 0;
             }
         }
         if (i == 32) x = 4; // space = half width
@@ -79,7 +79,7 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
     glEnable(GL_TEXTURE_2D);
     bind((int)f->texture);
 
-    Tessellator_init(t);
+    Tessellator_begin(t);
     Tessellator_color(t, r, g, b);
 
     int xo = 0;
@@ -115,7 +115,7 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
         xo += f->charWidth[c];
     }
 
-    Tessellator_flush(t);
+    Tessellator_end(t);
     glDisable(GL_TEXTURE_2D);
 }
 

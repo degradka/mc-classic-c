@@ -1,4 +1,4 @@
-// textures.c - texture loader
+// renderer/textures.c - texture loader
 
 #include "textures.h"
 #define STB_IMAGE_IMPLEMENTATION

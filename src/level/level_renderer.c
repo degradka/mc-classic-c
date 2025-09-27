@@ -132,11 +132,11 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
         glColor4f(1.f, 1.f, 1.f, a);
 
-        Tessellator_init(&TESSELLATOR);
+        Tessellator_begin(&TESSELLATOR);
         for (int face = 0; face < 6; ++face) {
             Face_render(&TESSELLATOR, h->x, h->y, h->z, face);
         }
-        Tessellator_flush(&TESSELLATOR);
+        Tessellator_end(&TESSELLATOR);
 
         glDisable(GL_BLEND);
         return;
@@ -167,10 +167,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         glBindTexture(GL_TEXTURE_2D, r->terrainTex);
 
         Tessellator_setIgnoreColor(&TESSELLATOR, 1); // Java: t.noColor()
-        Tessellator_init(&TESSELLATOR);
+        Tessellator_begin(&TESSELLATOR);
         t->render(t, &TESSELLATOR, r->level, 0, x, y, z);
         t->render(t, &TESSELLATOR, r->level, 1, x, y, z);
-        Tessellator_flush(&TESSELLATOR);
+        Tessellator_end(&TESSELLATOR);
         Tessellator_setIgnoreColor(&TESSELLATOR, 0);
 
         glDisable(GL_TEXTURE_2D);
