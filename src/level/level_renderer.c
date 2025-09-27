@@ -106,8 +106,8 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     gSortNow    = currentTimeMillis();
     qsort(list, (size_t)n, sizeof(Chunk*), dirty_cmp);
 
-    // rebuild up to 8 per frame
-    int limit = n < 8 ? n : 8;
+    // rebuild up to 4 per frame
+    int limit = n < 4 ? n : 4; // was 8
     for (int i = 0; i < limit; ++i) {
         Chunk_rebuild(list[i], 0);
         Chunk_rebuild(list[i], 1);

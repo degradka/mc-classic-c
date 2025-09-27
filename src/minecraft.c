@@ -447,7 +447,7 @@ static void handleBlockClicks(GLFWwindow* w) {
             // --- DESTROY
             int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
             const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-            bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
+            bool changed = Level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
             if (t && changed) {
                 Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
             }
@@ -474,7 +474,7 @@ static void handleBlockClicks(GLFWwindow* w) {
                     if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
                 }
                 if (!blocked) {
-                    level_setTile(&level, x, y, z, selectedTileId);
+                    Level_setTile(&level, x, y, z, selectedTileId);
                 }
             }
         }

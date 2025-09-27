@@ -16,6 +16,7 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->depth = depth;
     level->renderer = NULL;
     level->unprocessed = 0;
+    level->randValue = (unsigned)rand();
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -38,7 +39,7 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
             int prev = level->lightDepths[x + z * level->width];
             int d = level->depth - 1;
             while (d > 0 && !Level_isLightBlocker(level, x, d, z)) d--;
-            level->lightDepths[x + z * level->width] = d;
+            level->lightDepths[x + z * level->width] = d + 1;
 
             if (prev != d && level->renderer) {
                 int ylMin = prev < d ? prev : d;
@@ -187,13 +188,21 @@ void Level_save(const Level* level) {
     gzclose(f);
 }
 
-bool level_setTile(Level* level, int x, int y, int z, int type) {
+bool Level_setTile(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
 
     int index = (y * level->height + z) * level->width + x;
     if (level->blocks[index] == (byte)type) return false;
 
     level->blocks[index] = (byte)type;
+
+    Level_neighborChanged(level, x-1, y,   z,   type);
+    Level_neighborChanged(level, x+1, y,   z,   type);
+    Level_neighborChanged(level, x,   y-1, z,   type);
+    Level_neighborChanged(level, x,   y+1, z,   type);
+    Level_neighborChanged(level, x,   y,   z-1, type);
+    Level_neighborChanged(level, x,   y,   z+1, type);
+
     calcLightDepths(level, x, z, 1, 1);
     if (level->renderer) LevelRenderer_tileChanged(level->renderer, x, y, z);
     return true;
@@ -218,15 +227,29 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 
 void Level_onTick(Level* level) {
     level->unprocessed += level->width * level->height * level->depth;
-    int ticks = level->unprocessed / 400;
-    level->unprocessed -= ticks * 400;
+    int ticks = level->unprocessed / 200;   // was 400
+    level->unprocessed -= ticks * 200;
 
     for (int i = 0; i < ticks; ++i) {
-        int x = rand() % level->width;
-        int y = rand() % level->depth;
-        int z = rand() % level->height;
+        // LCG like Java
+        level->randValue = level->randValue * 1664525u + 1013904223u;
+        int x = (level->randValue >> 16) & (level->width  - 1);
+        level->randValue = level->randValue * 1664525u + 1013904223u;
+        int y = (level->randValue >> 16) & (level->depth  - 1);
+        level->randValue = level->randValue * 1664525u + 1013904223u;
+        int z = (level->randValue >> 16) & (level->height - 1);
+
         int id = Level_getTile(level, x, y, z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (t && t->onTick) t->onTick(t, level, x, y, z);
+    }
+}
+
+void Level_neighborChanged(Level* level, int x, int y, int z, int type) {
+    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return;
+    int id = Level_getTile(level, x, y, z);
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    if (t && t->neighborChanged) {
+        t->neighborChanged(t, level, x, y, z, type);
     }
 }

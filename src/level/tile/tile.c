@@ -143,7 +143,7 @@ static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
 
     // Decay if no light above
     if (!Level_isLit(lvl, x, y + 1, z)) {
-        level_setTile(lvl, x, y, z, TILE_DIRT.id);
+        Level_setTile(lvl, x, y, z, TILE_DIRT.id);
         return;
     }
 
@@ -154,7 +154,7 @@ static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
         int zt = z + (rand() % 3) - 1;   // [-1..+1]
         if (Level_getTile(lvl, xt, yt, zt) == TILE_DIRT.id &&
             Level_isLit(lvl, xt, yt + 1, zt)) {
-            level_setTile(lvl, xt, yt, zt, TILE_GRASS.id);
+            Level_setTile(lvl, xt, yt, zt, TILE_GRASS.id);
         }
     }
 }
@@ -213,7 +213,7 @@ static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
     int below = Level_getTile(lvl, x, y-1, z);
     if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
-        level_setTile(lvl, x, y, z, 0);
+        Level_setTile(lvl, x, y, z, 0);
     }
 }
 

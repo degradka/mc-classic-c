@@ -22,6 +22,8 @@ struct Tile {
     int  (*blocksLight)(const Tile* self);
     // return 1 and fill *out on success; return 0 if no collision box
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
+    
+    void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int changedType);
 };
 
 // Global registry, index by tile id (0..255)
