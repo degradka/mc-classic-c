@@ -13,9 +13,12 @@ extern Tessellator TESSELLATOR;
 static long long CHUNK_TotalTimeNS  = 0;
 static int       CHUNK_TotalUpdates = 0;
 
-void Chunk_init(Chunk* c, Level* level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+void Chunk_init(Chunk* c, Level* level,
+                int minX, int minY, int minZ,
+                int maxX, int maxY, int maxZ,
+                int terrainTex) {
     c->level   = level;
-    c->texture = loadTexture("resources/terrain.png", GL_NEAREST);
+    c->texture = terrainTex;
 
     c->minX = minX; c->minY = minY; c->minZ = minZ;
     c->maxX = maxX; c->maxY = maxY; c->maxZ = maxZ;
@@ -35,25 +38,33 @@ void Chunk_rebuild(Chunk* c, int layer) {
     c->dirty = false;
 
     glNewList(c->lists + layer, GL_COMPILE);
+
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, c->texture);
+
     Tessellator_begin(&TESSELLATOR);
 
     int tiles = 0;
-    // (coarse timing)
     long long nsStart = getCurrentTimeInNanoseconds();
 
     for (int x = c->minX; x < c->maxX; ++x)
     for (int y = c->minY; y < c->maxY; ++y)
     for (int z = c->minZ; z < c->maxZ; ++z) {
         int tileId = Level_getTile(c->level, x, y, z);
-        if (tileId > 0) {
-            const Tile* t = gTiles[tileId];
-            if (t && t->render) {
-                t->render(t, &TESSELLATOR, c->level, layer, x, y, z);
-                tiles++;
-            }
+        if (tileId <= 0) continue;
+
+        const Tile* t = gTiles[tileId];
+        if (!t || !t->render) continue;
+
+        int isLiquid = t->getLiquidType ? (t->getLiquidType(t) != LIQ_NONE) : 0;
+        if (isLiquid) {
+            if (layer != 2) continue;
+        } else {
+            if (layer == 2) continue;
         }
+
+        t->render(t, &TESSELLATOR, c->level, layer, x, y, z);
+        tiles++;
     }
 
     Tessellator_end(&TESSELLATOR);

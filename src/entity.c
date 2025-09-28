@@ -33,7 +33,7 @@ void Entity_setPosition(Entity* e, double x, double y, double z) {
 
 void Entity_resetPosition(Entity* e) {
     const float x = (float)rand() / (float)RAND_MAX * e->level->width;
-    const float y = (float)e->level->depth + 10.0f;
+    const float y = (float)e->level->depth;
     const float z = (float)rand() / (float)RAND_MAX * e->level->height;
     Entity_setPosition(e, x, y, z);
 }
@@ -53,7 +53,6 @@ void Entity_onTick(Entity* e) {
 
 void Entity_move(Entity* e, double dx, double dy, double dz) {
     const double ox = dx, oy = dy, oz = dz;
-
     AABB expanded = AABB_expand(&e->boundingBox, dx, dy, dz);
     ArrayList_AABB hits = Level_getCubes(e->level, &expanded);
 
@@ -66,6 +65,7 @@ void Entity_move(Entity* e, double dx, double dy, double dz) {
     for (int i = 0; i < hits.size; ++i) dz = AABB_clipZCollide(&hits.aabbs[i], &e->boundingBox, dz);
     AABB_move(&e->boundingBox, 0.0, 0.0, dz);
 
+    e->horizontalCollision = !((ox == dx) && (oz == dz));
     e->onGround = (oy != dy) && (oy < 0.0);
 
     if (ox != dx) e->motionX = 0.0;
@@ -104,4 +104,20 @@ void Entity_remove(Entity* e) {
 void Entity_setSize(Entity* e, float width, float height) {
     e->boundingBoxWidth  = width;
     e->boundingBoxHeight = height;
+}
+
+bool Entity_isFree(const Entity* e, float dx, float dy, float dz) {
+    // copy the current box and translate it by (dx,dy,dz)
+    AABB moved = e->boundingBox;
+    AABB_move(&moved, dx, dy, dz);
+
+    // check solid collisions
+    ArrayList_AABB hits = Level_getCubes(e->level, &moved);
+    bool blocked = (hits.size > 0);
+
+    // check liquids as well (matches Java logic used by isFree)
+    if (!blocked) blocked = Level_containsAnyLiquid(e->level, &moved);
+
+    if (hits.aabbs) free(hits.aabbs);
+    return !blocked;
 }

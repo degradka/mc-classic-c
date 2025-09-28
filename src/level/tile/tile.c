@@ -38,6 +38,8 @@ static inline int shouldRenderFace_layered(const Level* lvl, int x, int y, int z
     return ((lit ^ (layer == 1)) != 0);
 }
 
+static int Tile_default_mayPick(const Tile* self){ (void)self; return 1; }
+
 // helper to compute UVs from atlas slot (16x16 tiles on 256x256)
 static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
     float xt = (slot % 16) * 16.0f;
@@ -125,12 +127,14 @@ const Tile* gTiles[256] = { 0 };
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     Tile_setShape(t, 0.f,0.f,0.f, 1.f,1.f,1.f);
-    t->getTexture = getTex ? getTex : Tile_default_getTexture;
-    t->render = Tile_render_shared;
-    t->onTick = NULL;
-    t->isSolid     = Tile_default_isSolid;
-    t->blocksLight = Tile_default_blocksLight;
-    t->getAABB     = Tile_default_getAABB;
+
+    t->getTexture      = getTex ? getTex : Tile_default_getTexture;
+    t->render          = Tile_render_shared;
+    t->onTick          = NULL;
+    t->isSolid         = Tile_default_isSolid;
+    t->blocksLight     = Tile_default_blocksLight;
+    t->getAABB         = Tile_default_getAABB;
+    t->mayPick         = Tile_default_mayPick;
     t->neighborChanged = Tile_default_neighborChanged;
     t->getLiquidType   = Tile_default_getLiquidType;
 

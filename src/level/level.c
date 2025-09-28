@@ -127,35 +127,48 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
     ArrayList_AABB out = { .size = 0, .capacity = 16 };
     out.aabbs = (AABB*)malloc((size_t)out.capacity * sizeof(AABB));
 
-    int x0 = (int)aabb->minX;
-    int x1 = (int)(aabb->maxX + 1.0);
-    int y0 = (int)aabb->minY;
-    int y1 = (int)(aabb->maxY + 1.0);
-    int z0 = (int)aabb->minZ;
-    int z1 = (int)(aabb->maxZ + 1.0);
-
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (z0 < 0) z0 = 0;
-
-    if (x1 > level->width)  x1 = level->width;
-    if (y1 > level->depth)  y1 = level->depth;
-    if (z1 > level->height) z1 = level->height;
+    int x0 = (int)floor(aabb->minX);
+    int x1 = (int)floor(aabb->maxX + 1.0);
+    int y0 = (int)floor(aabb->minY);
+    int y1 = (int)floor(aabb->maxY + 1.0);
+    int z0 = (int)floor(aabb->minZ);
+    int z1 = (int)floor(aabb->maxZ + 1.0);
 
     for (int x = x0; x < x1; ++x)
     for (int y = y0; y < y1; ++y)
     for (int z = z0; z < z1; ++z) {
-        int id = Level_getTile(level, x, y, z);
-        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-        if (!t) continue;
-        // Classic tiles are axis-aligned unit cubes; keep the hook anyway:
-        AABB box = AABB_create(x, y, z, x+1, y+1, z+1);
-        if (t->isSolid && t->isSolid(t)) {
-            if (out.size == out.capacity) {
-                out.capacity *= 2;
-                out.aabbs = (AABB*)realloc(out.aabbs, (size_t)out.capacity * sizeof(AABB));
+
+        const int in =
+            (x >= 0 && y >= 0 && z >= 0 &&
+             x < level->width && y < level->depth && z < level->height);
+
+        if (in) {
+            int id = Level_getTile(level, x, y, z);
+            const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+            if (!t) continue;
+
+            // ask the tile for its collision box
+            AABB box;
+            if (t->getAABB && t->getAABB(t, x, y, z, &box)) {
+                if (out.size == out.capacity) {
+                    out.capacity *= 2;
+                    out.aabbs = (AABB*)realloc(out.aabbs, (size_t)out.capacity * sizeof(AABB));
+                }
+                out.aabbs[out.size++] = box;
             }
-            out.aabbs[out.size++] = box;
+        } else {
+            // out-of-bounds: use unbreakable tile’s AABB (id 7)
+            const Tile* ub = gTiles[7];
+            if (ub && ub->getAABB) {
+                AABB box;
+                if (ub->getAABB(ub, x, y, z, &box)) {
+                    if (out.size == out.capacity) {
+                        out.capacity *= 2;
+                        out.aabbs = (AABB*)realloc(out.aabbs, (size_t)out.capacity * sizeof(AABB));
+                    }
+                    out.aabbs[out.size++] = box;
+                }
+            }
         }
     }
     return out;
@@ -265,4 +278,56 @@ void Level_neighborChanged(Level* level, int x, int y, int z, int changedType) {
     if (t && t->neighborChanged) {
         t->neighborChanged(t, level, x, y, z, changedType);
     }
+}
+
+bool Level_containsAnyLiquid(const Level* level, const AABB* box) {
+    int x0 = (int)floorf(box->minX);
+    int x1 = (int)floorf(box->maxX + 1.f);
+    int y0 = (int)floorf(box->minY);
+    int y1 = (int)floorf(box->maxY + 1.f);
+    int z0 = (int)floorf(box->minZ);
+    int z1 = (int)floorf(box->maxZ + 1.f);
+
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (z0 < 0) z0 = 0;
+
+    if (x1 > level->width)  x1 = level->width;
+    if (y1 > level->depth)  y1 = level->depth;
+    if (z1 > level->height) z1 = level->height;
+
+    for (int x = x0; x < x1; ++x)
+    for (int y = y0; y < y1; ++y)
+    for (int z = z0; z < z1; ++z) {
+        int id = Level_getTile(level, x, y, z);
+        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+        if (t && t->getLiquidType && t->getLiquidType(t) > 0) return true;
+    }
+    return false;
+}
+
+bool Level_containsLiquid(const Level* level, const AABB* box, int liquidId) {
+    int x0 = (int)floorf(box->minX);
+    int x1 = (int)floorf(box->maxX + 1.f);
+    int y0 = (int)floorf(box->minY);
+    int y1 = (int)floorf(box->maxY + 1.f);
+    int z0 = (int)floorf(box->minZ);
+    int z1 = (int)floorf(box->maxZ + 1.f);
+
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (z0 < 0) z0 = 0;
+    
+    if (x1 > level->width)  x1 = level->width;
+    if (y1 > level->depth)  y1 = level->depth;
+    if (z1 > level->height) z1 = level->height;
+
+    for (int x = x0; x < x1; ++x)
+    for (int y = y0; y < y1; ++y)
+    for (int z = z0; z < z1; ++z) {
+        int id = Level_getTile(level, x, y, z);
+        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+        if (t && t->getLiquidType && t->getLiquidType(t) == liquidId) return true;
+    }
+    return false;
 }

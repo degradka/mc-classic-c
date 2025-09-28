@@ -45,6 +45,8 @@ static int prevNum6 = GLFW_RELEASE;
 static int prevNum7 = GLFW_RELEASE, prevNum8 = GLFW_RELEASE;
 static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
+static int prevF    = GLFW_RELEASE;
+static int prevR    = GLFW_RELEASE;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
 static int gYMouseAxis = 1;            // toggled by Y key (1 or -1)
@@ -83,10 +85,44 @@ static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mo
     }
 }
 
+// helper: is player head in a liquid?
+static int player_liquid_type(const Player* p) {
+    int x = (int)floor(p->e.x);
+    int y = (int)floor(p->e.y + 0.12f); // same offset as Java
+    int z = (int)floor(p->e.z);
+    int id = Level_getTile(p->e.level, x, y, z);
+    if (id <= 0 || id >= 256) return LIQ_NONE;
+    const Tile* t = gTiles[id];
+    return (t && t->getLiquidType) ? t->getLiquidType(t) : LIQ_NONE;
+}
+
 static void setupFog(int type) {
     glEnable(GL_FOG);
     glFogi(GL_FOG_MODE, GL_EXP);
 
+    // --- NEW: fluid fog override ---
+    int liq = player_liquid_type(&player);
+    if (liq == LIQ_WATER) {
+        glFogf(GL_FOG_DENSITY, 0.1f);
+        GLfloat waterFog[4] = { 0.02f, 0.02f, 0.20f, 1.0f };
+        glFogfv(GL_FOG_COLOR, waterFog);
+        GLfloat waterLight[4] = { 0.3f, 0.3f, 0.7f, 1.0f };
+        glEnable(GL_LIGHTING);
+        glEnable(GL_COLOR_MATERIAL);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, waterLight);
+        return; // skip normal fog
+    } else if (liq == LIQ_LAVA) {
+        glFogf(GL_FOG_DENSITY, 2.0f);
+        GLfloat lavaFog[4] = { 0.6f, 0.1f, 0.0f, 1.0f };
+        glFogfv(GL_FOG_COLOR, lavaFog);
+        GLfloat lavaLight[4] = { 0.4f, 0.3f, 0.3f, 1.0f };
+        glEnable(GL_LIGHTING);
+        glEnable(GL_COLOR_MATERIAL);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lavaLight);
+        return; // skip normal fog
+    }
+
+    // --- original day/shadow fog below ---
     if (type == 0) { // daylight
         glFogf(GL_FOG_DENSITY, 0.001f);
         glFogfv(GL_FOG_COLOR, fogColorDaylight);
@@ -97,7 +133,6 @@ static void setupFog(int type) {
         glFogfv(GL_FOG_COLOR, fogColorShadow);
         glEnable(GL_LIGHTING);
         glEnable(GL_COLOR_MATERIAL);
-
         GLfloat ambient[4] = { 0.6f, 0.6f, 0.6f, 1.0f };
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
     }
@@ -173,13 +208,6 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Player_init(p, lvl);
 
     ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain);
-
-    mobCount = 0;
-    for (int i = 0; i < 10 && i < MAX_MOBS; ++i) {
-        Zombie_init(&mobs[mobCount], lvl, 128.0, 0.0, 129.0);
-        Entity_resetPosition(&mobs[mobCount].base);
-        mobCount++;
-    }
 
     Timer_init(&timer, 20.0f);
 
@@ -450,6 +478,18 @@ static void handleGameplayKeys(GLFWwindow* w) {
         gYMouseAxis *= -1;
     }
     prevY = kY;
+
+    int f = glfwGetKey(w, GLFW_KEY_F);
+    if (f == GLFW_PRESS && prevF == GLFW_RELEASE) {
+        LevelRenderer_toggleDrawDistance(&levelRenderer);
+    }
+    prevF = f;
+
+    int r = glfwGetKey(w, GLFW_KEY_R);
+    if (r == GLFW_PRESS && prevR == GLFW_RELEASE) {
+        Entity_resetPosition(&player.e);
+    }
+    prevR = r;
 }
 
 static void handleBlockClicks(GLFWwindow* w) {
@@ -552,7 +592,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     setupCamera(p, t);
 
     setupFog(0);
-    LevelRenderer_render(lr, 0);    // lit layer
+    LevelRenderer_render(lr, p, 0);    // lit layer
 
     // Zombies in sunlight (lit)
     for (int i = 0; i < mobCount; ++i) {
@@ -565,7 +605,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     ParticleEngine_render(&particleEngine, p, t, 0);
 
     setupFog(1);
-    LevelRenderer_render(lr, 1);    // shadow layer
+    LevelRenderer_render(lr, p, 1);    // shadow layer
 
     // Zombies in shadow (not lit)
     for (int i = 0; i < mobCount; ++i) {
@@ -584,7 +624,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     GLboolean prevDepthMask; glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
     glDepthMask(GL_FALSE);
 
-    LevelRenderer_render(lr, 2);
+    LevelRenderer_render(lr, p, 2);
 
     glDepthMask(prevDepthMask);
     glDisable(GL_BLEND);
@@ -597,6 +637,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
         if (wasAlpha) glDisable(GL_ALPHA_TEST);
         LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHitOutline(&player, &hitResult, gEditMode, selectedTileId);
         if (wasAlpha) glEnable(GL_ALPHA_TEST);
     }
 

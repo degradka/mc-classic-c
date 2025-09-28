@@ -20,6 +20,7 @@ typedef struct Entity {
     float boundingBoxHeight;
 
     bool   onGround;
+    bool   horizontalCollision;
     float  heightOffset;
     bool   removed;
 } Entity;
@@ -34,6 +35,7 @@ void Entity_moveRelative(Entity* e, float x, float z, float speed);
 bool Entity_isLit(const Entity* e);
 void Entity_remove(Entity* e);
 void Entity_setSize(Entity* e, float width, float height);
+bool Entity_isFree(const Entity* e, float dx, float dy, float dz);
 
 #endif
 

@@ -18,6 +18,8 @@ static void calcUV_liquid(int slot, float* u0, float* v0, float* u1, float* v1) 
     *v1 = (yt + 15.99f) / 256.0f;
 }
 
+static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
+
 static void Liquid_emit_face_both(Tessellator* t,
                                   float ax,float ay,float az, float bx,float by,float bz,
                                   float cx,float cy,float cz, float dx,float dy,float dz,
@@ -219,13 +221,14 @@ static int Liquid_getLiquidType(const Tile* self) { return ((const LiquidTile*)s
 
 void LiquidTile_init(LiquidTile* lt, int id, int liquidType, int isCalm) {
     // defaults shared with Tile_registerAll
-    lt->base.id          = id;
-    lt->base.textureId   = (liquidType == LIQ_LAVA) ? 30 : 14;
-    lt->base.getTexture  = Liquid_getTexture;
-    lt->base.render      = Liquid_render;
-    lt->base.isSolid     = Liquid_isSolid;
-    lt->base.blocksLight = Liquid_blocksLight;
-    lt->base.getAABB     = Liquid_getAABB;
+    lt->base.id            = id;
+    lt->base.textureId     = (liquidType == LIQ_LAVA) ? 30 : 14;
+    lt->base.getTexture    = Liquid_getTexture;
+    lt->base.render        = Liquid_render;
+    lt->base.isSolid       = Liquid_isSolid;
+    lt->base.blocksLight   = Liquid_blocksLight;
+    lt->base.getAABB       = Liquid_getAABB;
+    lt->base.mayPick       = Liquid_mayPick;
     lt->base.getLiquidType = Liquid_getLiquidType;
 
     lt->liquidType = liquidType;

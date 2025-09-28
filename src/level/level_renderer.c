@@ -26,6 +26,7 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     r->level        = level;
     r->terrainTex   = terrainTex;
     level->renderer = r;
+    r->drawDistance = 0;
 
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     r->chunks = (Chunk*)malloc((size_t)total * sizeof(Chunk));
@@ -38,12 +39,17 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
         int minChunkY = y * CHUNK_SIZE, maxChunkY = MIN(level->depth,  (y + 1) * CHUNK_SIZE);
         int minChunkZ = z * CHUNK_SIZE, maxChunkZ = MIN(level->height, (z + 1) * CHUNK_SIZE);
         Chunk_init(&r->chunks[(x + y * r->chunkAmountX) * r->chunkAmountZ + z],
-                   level, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
+                level, minChunkX, minChunkY, minChunkZ,
+                maxChunkX, maxChunkY, maxChunkZ,
+                r->terrainTex);
     }
 }
 
-void LevelRenderer_render(const LevelRenderer* r, int layer) {
+void LevelRenderer_render(const LevelRenderer* r, const Player* player, int layer) {
     frustum_calculate();
+
+    const float dd = (r->drawDistance == 0) ? -1.0f : (256.0f / (float)(1 << r->drawDistance));
+    const double dd2 = (dd < 0.0f) ? -1.0 : (double)dd * (double)dd;
 
     const int translucent = (layer == 2);
     GLboolean oldBlend = glIsEnabled(GL_BLEND);
@@ -60,15 +66,21 @@ void LevelRenderer_render(const LevelRenderer* r, int layer) {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
         int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-        for (int i = 0; i < total; ++i)
-            if (frustum_isVisible(&r->chunks[i].boundingBox))
+        for (int i = 0; i < total; ++i) {
+            if (frustum_isVisible(&r->chunks[i].boundingBox)) {
+                if (dd2 > 0.0 && Chunk_distanceToSqr(&r->chunks[i], player) > dd2) continue;
                 Chunk_render(&r->chunks[i], layer);
+            }
+        }
 
         // --- pass 2: FRONT faces
         glCullFace(GL_BACK);
-        for (int i = 0; i < total; ++i)
-            if (frustum_isVisible(&r->chunks[i].boundingBox))
+        for (int i = 0; i < total; ++i) {
+            if (frustum_isVisible(&r->chunks[i].boundingBox)) {
+                if (dd2 > 0.0 && Chunk_distanceToSqr(&r->chunks[i], player) > dd2) continue;
                 Chunk_render(&r->chunks[i], layer);
+            }
+        }
 
         // restore
         if (!oldCull) glDisable(GL_CULL_FACE);
@@ -79,9 +91,12 @@ void LevelRenderer_render(const LevelRenderer* r, int layer) {
 
     // opaque layers (0,1) as before
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-    for (int i = 0; i < total; ++i)
-        if (frustum_isVisible(&r->chunks[i].boundingBox))
+    for (int i = 0; i < total; ++i) {
+        if (frustum_isVisible(&r->chunks[i].boundingBox)) {
+            if (dd2 > 0.0 && Chunk_distanceToSqr(&r->chunks[i], player) > dd2) continue;
             Chunk_render(&r->chunks[i], layer);
+        }
+    }
 }
 
 void LevelRenderer_destroy(LevelRenderer* r) {
@@ -211,6 +226,41 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     glDisable(GL_BLEND);
 }
 
+void LevelRenderer_renderHitOutline(Player* p, HitResult* h, int mode, int tileId) {
+    (void)p;
+    (void)tileId;
+    float x = (float)h->x, y = (float)h->y, z = (float)h->z;
+    if (mode == 1) {
+        if (h->f == 0) y -= 1; else if (h->f == 1) y += 1;
+        else if (h->f == 2) z -= 1; else if (h->f == 3) z += 1;
+        else if (h->f == 4) x -= 1; else if (h->f == 5) x += 1;
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.f, 0.f, 0.f, 0.4f);
+
+    glBegin(GL_LINE_LOOP);  // bottom
+    glVertex3f(x, y, z); glVertex3f(x+1, y, z);
+    glVertex3f(x+1, y, z+1); glVertex3f(x, y, z+1);
+    glEnd();
+
+    glBegin(GL_LINE_LOOP);  // top
+    glVertex3f(x, y+1, z); glVertex3f(x+1, y+1, z);
+    glVertex3f(x+1, y+1, z+1); glVertex3f(x, y+1, z+1);
+    glEnd();
+
+    glBegin(GL_LINES);      // verticals
+    glVertex3f(x, y, z);       glVertex3f(x, y+1, z);
+    glVertex3f(x+1, y, z);     glVertex3f(x+1, y+1, z);
+    glVertex3f(x+1, y, z+1);   glVertex3f(x+1, y+1, z+1);
+    glVertex3f(x, y, z+1);     glVertex3f(x, y+1, z+1);
+    glEnd();
+
+    glDisable(GL_BLEND);
+}
+
+
 void LevelRenderer_setDirty(const LevelRenderer* r, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     minX /= CHUNK_SIZE; minY /= CHUNK_SIZE; minZ /= CHUNK_SIZE;
     maxX /= CHUNK_SIZE; maxY /= CHUNK_SIZE; maxZ /= CHUNK_SIZE;
@@ -240,4 +290,8 @@ void LevelRenderer_lightColumnChanged(LevelRenderer* r, int x, int z, int minY, 
 
 void LevelRenderer_allChanged(Level* level, LevelRenderer* r) {
     LevelRenderer_setDirty(r, 0, 0, 0, level->width, level->depth, level->height);
+}
+
+void LevelRenderer_toggleDrawDistance(LevelRenderer* r) {
+    r->drawDistance = (r->drawDistance + 1) % 4;
 }

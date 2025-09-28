@@ -31,6 +31,7 @@ struct Tile {
     int  (*isSolid)(const Tile* self);
     int  (*blocksLight)(const Tile* self);
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
+    int  (*mayPick)(const Tile* self);
 
     int  (*getLiquidType)(const Tile* self);
 };

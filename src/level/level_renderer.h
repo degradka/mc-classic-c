@@ -21,10 +21,12 @@ typedef struct LevelRenderer {
 
     Level*      level;
     int         terrainTex;
+
+    int         drawDistance;
 } LevelRenderer;
 
 void LevelRenderer_init(LevelRenderer* renderer, Level* level, int terrainTex);
-void LevelRenderer_render(const LevelRenderer* renderer, int layer);
+void LevelRenderer_render(const LevelRenderer* renderer, const Player* player, int layer);
 void LevelRenderer_destroy(LevelRenderer* renderer);
 
 void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
@@ -33,7 +35,10 @@ void LevelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int
 void LevelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
 void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, int mode, int tileId);
+void LevelRenderer_renderHitOutline(struct Player* p, struct HitResult* h, int mode, int tileId);
 
 int  LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+
+void LevelRenderer_toggleDrawDistance(LevelRenderer* r);
 
 #endif  // LEVELRENDERER_H

@@ -58,4 +58,8 @@ void  Level_onTick(Level* level);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 void  Level_neighborChanged(Level* level, int x, int y, int z, int type);
 
+bool Level_containsAnyLiquid(const Level* level, const AABB* box);
+bool Level_containsLiquid   (const Level* level, const AABB* box, int liquidId);
+static inline float Level_getGroundLevel(void) { return 32.0f; }
+
 #endif  // LEVEL_H
