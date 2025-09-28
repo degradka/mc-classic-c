@@ -28,7 +28,7 @@ void Chunk_init(Chunk* c, Level* level, int minX, int minY, int minZ, int maxX, 
     c->z = (minZ + maxZ) * 0.5;
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
-    c->lists = glGenLists(2);
+    c->lists = glGenLists(LAYER_COUNT);
 }
 
 void Chunk_rebuild(Chunk* c, int layer) {

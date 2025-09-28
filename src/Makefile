@@ -16,8 +16,9 @@ SRC = minecraft.c player.c timer.c  hitresult.c \
       character/polygon.c character/cube.c level/perlin.c \
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
-      renderer/frustum.c gui/font.c #comm/socket_connection.c \
-      #comm/socket_server.c server/client.c server/minecraft_server.c
+      renderer/frustum.c gui/font.c level/tile/liquid_tile.c #comm/socket_connection.c \
+      #comm/socket_server.c server/client.c server/minecraft_server.c \
+      
 
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)

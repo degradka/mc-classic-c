@@ -8,6 +8,8 @@
 #include "../renderer/tessellator.h"
 #include "../phys/aabb.h"
 
+#define LAYER_COUNT 3
+
 struct Level; typedef struct Level Level;
 struct Player; typedef struct Player Player;
 

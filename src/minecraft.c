@@ -42,6 +42,7 @@ static int prevEnter = GLFW_RELEASE;
 static int prevNum1 = GLFW_RELEASE, prevNum2 = GLFW_RELEASE;
 static int prevNum3 = GLFW_RELEASE, prevNum4 = GLFW_RELEASE;
 static int prevNum6 = GLFW_RELEASE;
+static int prevNum7 = GLFW_RELEASE, prevNum8 = GLFW_RELEASE;
 static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
 
@@ -253,7 +254,23 @@ static void drawGui(float partialTicks) {
     Tessellator_begin(&hudTess);
     const Tile* hand = gTiles[selectedTileId];
     if (hand && hand->render) {
-        hand->render(hand, &hudTess, &level, 0, -2, 0, 0);
+        int layer = 0;
+        if (hand->getLiquidType && hand->getLiquidType(hand) != LIQ_NONE) {
+            layer = 2;
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            GLboolean alphaWasOn = glIsEnabled(GL_ALPHA_TEST);
+            if (alphaWasOn) glDisable(GL_ALPHA_TEST);
+            glDepthMask(GL_FALSE);
+
+            hand->render(hand, &hudTess, &level, layer, -2, 0, 0);
+
+            glDepthMask(GL_TRUE);
+            if (alphaWasOn) glEnable(GL_ALPHA_TEST);
+            glDisable(GL_BLEND);
+        } else {
+            hand->render(hand, &hudTess, &level, 0, -2, 0, 0);
+        }
     }
     Tessellator_end(&hudTess);
 
@@ -261,7 +278,7 @@ static void drawGui(float partialTicks) {
     glPopMatrix();
 
     // Top-left: version + stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.11a", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.13a", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -328,8 +345,17 @@ static int raycast_block(const Level* lvl,
         // Any non-air tile is pickable (bushes, etc.), even if not solid.
         int id = Level_getTile(lvl, x, y, z);
         if (id != 0) {
-            if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
-            return 1;
+            const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+
+            int canPick = 1;
+            // If this tile reports a liquid type, skip it
+            if (t && t->getLiquidType && t->getLiquidType(t) != LIQ_NONE)
+                canPick = 0;
+
+            if (canPick) {
+                if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
+                return 1;
+            }
         }
 
         if (tMaxX < tMaxY) {
@@ -398,12 +424,18 @@ static void handleGameplayKeys(GLFWwindow* w) {
     int n3 = glfwGetKey(w, GLFW_KEY_3);
     int n4 = glfwGetKey(w, GLFW_KEY_4);
     int n6 = glfwGetKey(w, GLFW_KEY_6);
+    int n7 = glfwGetKey(w, GLFW_KEY_7);
+    int n8 = glfwGetKey(w, GLFW_KEY_8);
     if (n1 == GLFW_PRESS && prevNum1 == GLFW_RELEASE) selectedTileId = 1;  // rock
     if (n2 == GLFW_PRESS && prevNum2 == GLFW_RELEASE) selectedTileId = 3;  // dirt
     if (n3 == GLFW_PRESS && prevNum3 == GLFW_RELEASE) selectedTileId = 4;  // stone brick
     if (n4 == GLFW_PRESS && prevNum4 == GLFW_RELEASE) selectedTileId = 5;  // wood
     if (n6 == GLFW_PRESS && prevNum6 == GLFW_RELEASE) selectedTileId = 6;  // bush
+    if (n7 == GLFW_PRESS && prevNum7 == GLFW_RELEASE) selectedTileId = 8;   // water (flowing/source)
+    if (n8 == GLFW_PRESS && prevNum8 == GLFW_RELEASE) selectedTileId = 10;  // lava  (flowing/source)
     prevNum1 = n1; prevNum2 = n2; prevNum3 = n3; prevNum4 = n4; prevNum6 = n6;
+    prevNum7 = n7; 
+    prevNum8 = n8;
 
     // G = spawn zombie at player
     int g = glfwGetKey(w, GLFW_KEY_G);
@@ -544,6 +576,18 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     }
 
     ParticleEngine_render(&particleEngine, p, t, 1);
+
+    setupFog(0);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GLboolean prevDepthMask; glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
+    glDepthMask(GL_FALSE);
+
+    LevelRenderer_render(lr, 2);
+
+    glDepthMask(prevDepthMask);
+    glDisable(GL_BLEND);
 
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);

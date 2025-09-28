@@ -55,6 +55,7 @@ bool  Level_isLit(const Level* level, int x, int y, int z);
 
 void  Level_onTick(Level* level);
 
-void Level_neighborChanged(Level* level, int x, int y, int z, int changedType);
+bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
+void  Level_neighborChanged(Level* level, int x, int y, int z, int type);
 
 #endif  // LEVEL_H

@@ -245,11 +245,24 @@ void Level_onTick(Level* level) {
     }
 }
 
-void Level_neighborChanged(Level* level, int x, int y, int z, int type) {
-    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return;
+bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
+    if (x < 0 || y < 0 || z < 0 ||
+        x >= level->width || y >= level->depth || z >= level->height) return false;
+
+    int index = (y * level->height + z) * level->width + x;
+    if (level->blocks[index] == (byte)type) return false;
+
+    level->blocks[index] = (byte)type;
+    return true;
+}
+
+void Level_neighborChanged(Level* level, int x, int y, int z, int changedType) {
+    if (x < 0 || y < 0 || z < 0 ||
+        x >= level->width || y >= level->depth || z >= level->height) return;
+
     int id = Level_getTile(level, x, y, z);
     const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
     if (t && t->neighborChanged) {
-        t->neighborChanged(t, level, x, y, z, type);
+        t->neighborChanged(t, level, x, y, z, changedType);
     }
 }

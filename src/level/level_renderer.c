@@ -45,12 +45,43 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
 void LevelRenderer_render(const LevelRenderer* r, int layer) {
     frustum_calculate();
 
-    int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-    for (int i = 0; i < total; ++i) {
-        if (frustum_isVisible(&r->chunks[i].boundingBox)) {
-            Chunk_render(&r->chunks[i], layer);
-        }
+    const int translucent = (layer == 2);
+    GLboolean oldBlend = glIsEnabled(GL_BLEND);
+    GLboolean oldCull  = glIsEnabled(GL_CULL_FACE);
+    GLboolean depthMask;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+
+    if (translucent) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);           // no depth writes for translucent
+
+        // --- pass 1: BACK faces (draw what's behind first)
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
+        for (int i = 0; i < total; ++i)
+            if (frustum_isVisible(&r->chunks[i].boundingBox))
+                Chunk_render(&r->chunks[i], layer);
+
+        // --- pass 2: FRONT faces
+        glCullFace(GL_BACK);
+        for (int i = 0; i < total; ++i)
+            if (frustum_isVisible(&r->chunks[i].boundingBox))
+                Chunk_render(&r->chunks[i], layer);
+
+        // restore
+        if (!oldCull) glDisable(GL_CULL_FACE);
+        glDepthMask(depthMask);
+        if (!oldBlend) glDisable(GL_BLEND);
+        return;
     }
+
+    // opaque layers (0,1) as before
+    int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
+    for (int i = 0; i < total; ++i)
+        if (frustum_isVisible(&r->chunks[i].boundingBox))
+            Chunk_render(&r->chunks[i], layer);
 }
 
 void LevelRenderer_destroy(LevelRenderer* r) {
@@ -111,6 +142,7 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     for (int i = 0; i < limit; ++i) {
         Chunk_rebuild(list[i], 0);
         Chunk_rebuild(list[i], 1);
+        Chunk_rebuild(list[i], 2);
     }
 
     free(list);

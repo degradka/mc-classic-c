@@ -1,9 +1,15 @@
 // level/tile/tile.c — registry, per-face textures, render helpers
 
 #include "tile.h"
+#include "liquid_tile.h"
 #include "../../particle/particle_engine.h"
 #include "../../particle/particle.h"
 #include <string.h>
+
+static int  Tile_default_getLiquidType(const Tile* self){ (void)self; return LIQ_NONE; }
+static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x,int y,int z,int type){
+    (void)self; (void)lvl; (void)x; (void)y; (void)z; (void)type;
+}
 
 static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
@@ -30,10 +36,10 @@ static inline int shouldRenderFace(const Level* lvl, int x, int y, int z, int la
 static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
     float xt = (slot % 16) * 16.0f;
     float yt = (slot / 16) * 16.0f;
-    *u0 = xt / 256.0f;
-    *v0 = yt / 256.0f;
-    *u1 = (xt + 15.99f) / 256.0f;
-    *v1 = (yt + 15.99f) / 256.0f;
+    *u0 = (xt + 0.01f)   / 256.0f;
+    *v0 = (yt + 0.01f)   / 256.0f;
+    *u1 = (xt + 15.99f)  / 256.0f;
+    *v1 = (yt + 15.99f)  / 256.0f;
 }
 
 static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
@@ -118,6 +124,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->isSolid     = Tile_default_isSolid;
     t->blocksLight = Tile_default_blocksLight;
     t->getAABB     = Tile_default_getAABB;
+    t->neighborChanged = Tile_default_neighborChanged;
+    t->getLiquidType   = Tile_default_getLiquidType;
 
     gTiles[id] = t;
 }
@@ -128,6 +136,12 @@ Tile TILE_STONEBRICK;
 Tile TILE_WOOD;
 Tile TILE_GRASS;
 Tile TILE_BUSH;
+
+Tile TILE_UNBREAKABLE;
+LiquidTile TILE_WATER;
+LiquidTile TILE_CALM_WATER;
+LiquidTile TILE_LAVA;
+LiquidTile TILE_CALM_LAVA;
 
 /* Grass (per-face textures) — face map: top=0, bottom=2, sides=3 */
 static int Grass_getTexture(const Tile* self, int face) {
@@ -219,6 +233,7 @@ static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
 
 void Tile_registerAll(void) {
     memset((void*)gTiles, 0, sizeof(gTiles));
+
     registerTile(&TILE_ROCK,       1,  1,  NULL);
     registerTile(&TILE_GRASS,      2,  3,  Grass_getTexture);
     registerTile(&TILE_DIRT,       3,  2,  NULL);
@@ -226,6 +241,20 @@ void Tile_registerAll(void) {
     registerTile(&TILE_WOOD,       5,  4,  NULL);
     registerTile(&TILE_BUSH,       6, 15,  NULL);
 
+    // id 7: unbreakable (solid/blocksLight, cube AABB)
+    registerTile(&TILE_UNBREAKABLE, 7, 17, NULL);
+
+    // liquids: 8..11
+    LiquidTile_init(&TILE_WATER,       8, LIQ_WATER, 0);
+    LiquidTile_init(&TILE_CALM_WATER,  9, LIQ_WATER, 1);
+    LiquidTile_init(&TILE_LAVA,       10, LIQ_LAVA,  0);
+    LiquidTile_init(&TILE_CALM_LAVA,  11, LIQ_LAVA,  1);
+    gTiles[8]  = &TILE_WATER.base;
+    gTiles[9]  = &TILE_CALM_WATER.base;
+    gTiles[10] = &TILE_LAVA.base;
+    gTiles[11] = &TILE_CALM_LAVA.base;
+
+    // existing grass/bush overrides
     TILE_GRASS.onTick     = Grass_onTick;
 
     TILE_BUSH.isSolid     = Bush_isSolid;
