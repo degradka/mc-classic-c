@@ -5,9 +5,11 @@
 
 #include "../level.h"
 #include "../../renderer/tessellator.h"
+#include "../../player.h"
 
 struct ParticleEngine; typedef struct ParticleEngine ParticleEngine;
 typedef struct Tile Tile;
+struct Player; typedef struct Player Player;
 
 enum {
     LIQ_NONE  = 0,
@@ -18,6 +20,8 @@ enum {
 struct Tile {
     int id;
     int textureId;
+
+    float x0, y0, z0, x1, y1, z1;
 
     int  (*getTexture)(const Tile* self, int face);
     void (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);
@@ -53,6 +57,9 @@ void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
 void Face_render(Tessellator* t, int x, int y, int z, int face);
+void Face_render_culled(const Player* p, Tessellator* t, int x, int y, int z, int face);
+
+void Tile_setShape(Tile* t, float x0,float y0,float z0,float x1,float y1,float z1);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 

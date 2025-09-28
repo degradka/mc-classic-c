@@ -9,12 +9,31 @@
 
 /* ---- helpers ------------------------------------------------------------ */
 
-static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
-    float minU = (slot % 16) / 16.0f;
-    float minV = (slot / 16) / 16.0f;
-    *u0 = minU; *v0 = minV;
-    *u1 = minU + 16.0f / 256.0f;
-    *v1 = minV + 16.0f / 256.0f;
+static void calcUV_liquid(int slot, float* u0, float* v0, float* u1, float* v1) {
+    float xt = (slot % 16) * 16.0f;
+    float yt = (slot / 16) * 16.0f;
+    *u0 = xt / 256.0f;
+    *v0 = yt / 256.0f;
+    *u1 = (xt + 15.99f) / 256.0f;
+    *v1 = (yt + 15.99f) / 256.0f;
+}
+
+static void Liquid_emit_face_both(Tessellator* t,
+                                  float ax,float ay,float az, float bx,float by,float bz,
+                                  float cx,float cy,float cz, float dx,float dy,float dz,
+                                  float u0,float v0,float u1,float v1)
+{
+    // front (matches Tile.renderFace)
+    Tessellator_vertexUV(t, ax, ay, az, u0, v1);
+    Tessellator_vertexUV(t, bx, by, bz, u0, v0);
+    Tessellator_vertexUV(t, cx, cy, cz, u1, v0);
+    Tessellator_vertexUV(t, dx, dy, dz, u1, v1);
+
+    // back (matches Tile.renderBackFace)
+    Tessellator_vertexUV(t, dx, dy, dz, u0, v1);
+    Tessellator_vertexUV(t, cx, cy, cz, u0, v0);
+    Tessellator_vertexUV(t, bx, by, bz, u1, v0);
+    Tessellator_vertexUV(t, ax, ay, az, u1, v1);
 }
 
 static int liquid_shouldRenderFace(const LiquidTile* lt, const Level* lvl, int nx, int ny, int nz, int layer) {
@@ -45,60 +64,54 @@ static void Liquid_render(const Tile* self, Tessellator* t, const Level* lvl, in
     if (lt->liquidType == LIQ_WATER && layer != 2) return;
 
     int tex = self->getTexture(self, 0);
-    float u0,v0,u1,v1; calcUV(tex, &u0,&v0,&u1,&v1);
+    float u0,v0,u1,v1; calcUV_liquid(tex, &u0,&v0,&u1,&v1);
 
-    float X0 = (float)x, X1 = (float)x + 1.0f;
-    float Y0 = (float)y, Y1 = (float)y + 1.0f;
-    float Z0 = (float)z, Z1 = (float)z + 1.0f;
+    const float x0 = x + self->x0, x1 = x + self->x1;
+    const float y0 = y + self->y0, y1 = y + self->y1;
+    const float z0 = z + self->z0, z1 = z + self->z1;
 
     Tessellator_color(t, 1.0f, 1.0f, 1.0f);
 
-    // bottom (0): neighbor at (x, y-1, z)
+    // bottom (face 0)
     if (liquid_shouldRenderFace(lt, lvl, x, y-1, z, layer)) {
-        Tessellator_vertexUV(t, X0, Y0, Z1, u0, v1);
-        Tessellator_vertexUV(t, X0, Y0, Z0, u0, v0);
-        Tessellator_vertexUV(t, X1, Y0, Z0, u1, v0);
-        Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
+        Liquid_emit_face_both(t,
+            x0,y0,z1,  x0,y0,z0,  x1,y0,z0,  x1,y0,z1,
+            u0,v0,u1,v1);
     }
 
-    // top (1): neighbor at (x, y+1, z)
+    // top (1)
     if (liquid_shouldRenderFace(lt, lvl, x, y+1, z, layer)) {
-        Tessellator_vertexUV(t, X1, Y1, Z1, u1, v1);
-        Tessellator_vertexUV(t, X1, Y1, Z0, u1, v0);
-        Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-        Tessellator_vertexUV(t, X0, Y1, Z1, u0, v1);
+        Liquid_emit_face_both(t,
+            x1,y1,z1,  x1,y1,z0,  x0,y1,z0,  x0,y1,z1,
+            u0,v0,u1,v1);
     }
 
-    // -Z (2): neighbor at (x, y, z-1)
+    // -Z (2)
     if (liquid_shouldRenderFace(lt, lvl, x, y, z-1, layer)) {
-        Tessellator_vertexUV(t, X0, Y1, Z0, u1, v0);
-        Tessellator_vertexUV(t, X1, Y1, Z0, u0, v0);
-        Tessellator_vertexUV(t, X1, Y0, Z0, u0, v1);
-        Tessellator_vertexUV(t, X0, Y0, Z0, u1, v1);
+        Liquid_emit_face_both(t,
+            x0,y1,z0,  x1,y1,z0,  x1,y0,z0,  x0,y0,z0,
+            u0,v0,u1,v1);
     }
 
-    // +Z (3): neighbor at (x, y, z+1)
+    // +Z (3)
     if (liquid_shouldRenderFace(lt, lvl, x, y, z+1, layer)) {
-        Tessellator_vertexUV(t, X0, Y1, Z1, u0, v0);
-        Tessellator_vertexUV(t, X0, Y0, Z1, u0, v1);
-        Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
-        Tessellator_vertexUV(t, X1, Y1, Z1, u1, v0);
+        Liquid_emit_face_both(t,
+            x0,y1,z1,  x0,y0,z1,  x1,y0,z1,  x1,y1,z1,
+            u0,v0,u1,v1);
     }
 
-    // -X (4): neighbor at (x-1, y, z)
+    // -X (4)
     if (liquid_shouldRenderFace(lt, lvl, x-1, y, z, layer)) {
-        Tessellator_vertexUV(t, X0, Y1, Z1, u1, v0);
-        Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-        Tessellator_vertexUV(t, X0, Y0, Z0, u0, v1);
-        Tessellator_vertexUV(t, X0, Y0, Z1, u1, v1);
+        Liquid_emit_face_both(t,
+            x0,y1,z1,  x0,y1,z0,  x0,y0,z0,  x0,y0,z1,
+            u0,v0,u1,v1);
     }
 
-    // +X (5): neighbor at (x+1, y, z)
+    // +X (5)
     if (liquid_shouldRenderFace(lt, lvl, x+1, y, z, layer)) {
-        Tessellator_vertexUV(t, X1, Y0, Z1, u0, v1);
-        Tessellator_vertexUV(t, X1, Y0, Z0, u1, v1);
-        Tessellator_vertexUV(t, X1, Y1, Z0, u1, v0);
-        Tessellator_vertexUV(t, X1, Y1, Z1, u0, v0);
+        Liquid_emit_face_both(t,
+            x1,y0,z1,  x1,y0,z0,  x1,y1,z0,  x1,y1,z1,
+            u0,v0,u1,v1);
     }
 }
 
@@ -170,11 +183,6 @@ static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, i
 
 /* Calm variant: on neighbor air, convert back to flowing; uses the same struct+render */
 
-static void Calm_tick(const Tile* self, Level* lvl, int x, int y, int z) {
-    (void)self; (void)lvl; (void)x; (void)y; (void)z;
-    // calm tiles do not tick (Java calm tick is empty)
-}
-
 static void Calm_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int changedType) {
     LiquidTile* lt = (LiquidTile*)self;
 
@@ -225,8 +233,10 @@ void LiquidTile_init(LiquidTile* lt, int id, int liquidType, int isCalm) {
     lt->calmTileId = isCalm ? id : (id+1);
     lt->spreadSpeed = (liquidType == LIQ_WATER) ? 8 : 2;
 
+    Tile_setShape(&lt->base, 0.f, -0.1f, 0.f, 1.f, 0.9f, 1.f);
+
     if (isCalm) {
-        lt->base.onTick          = Calm_tick;
+        lt->base.onTick          = NULL;
         lt->base.neighborChanged = Calm_neighborChanged;
     } else {
         lt->base.onTick          = Liquid_tick;
