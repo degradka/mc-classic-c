@@ -23,6 +23,7 @@ void Chunk_init(Chunk* c, Level* level, int minX, int minY, int minZ, int maxX, 
     c->maxX = maxX; c->maxY = maxY; c->maxZ = maxZ;
     c->dirty = true;
     c->dirtiedTime = currentTimeMillis();
+    c->visible = false;
 
     // precompute chunk center for distance checks
     c->x = (minX + maxX) * 0.5;

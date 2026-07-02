@@ -44,6 +44,7 @@ static int prevNum3 = GLFW_RELEASE, prevNum4 = GLFW_RELEASE;
 static int prevNum6 = GLFW_RELEASE;
 static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
+static int prevI    = GLFW_RELEASE;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
 static int gYMouseAxis = 1;            // toggled by Y key (1 or -1)
@@ -420,6 +421,13 @@ static void handleGameplayKeys(GLFWwindow* w) {
         gYMouseAxis *= -1;
     }
     prevY = kY;
+
+    // I = cycle draw distance (Java key 33 = 'I')
+    int kI = glfwGetKey(w, GLFW_KEY_I);
+    if (kI == GLFW_PRESS && prevI == GLFW_RELEASE) {
+        LevelRenderer_toggleDrawDistance(&levelRenderer);
+    }
+    prevI = kI;
 }
 
 static void handleBlockClicks(GLFWwindow* w) {
@@ -525,13 +533,14 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     Frustum frustum;
     frustum_calculate(&frustum);
+    LevelRenderer_cull(lr, &frustum);
 
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
     setupFog(0);
-    LevelRenderer_render(lr, 0);    // lit layer
+    LevelRenderer_render(lr, p, 0);    // lit layer
 
     // Zombies in sunlight (lit)
     for (int i = 0; i < mobCount; ++i) {
@@ -544,7 +553,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     ParticleEngine_render(&particleEngine, p, t, 0);
 
     setupFog(1);
-    LevelRenderer_render(lr, 1);    // shadow layer
+    LevelRenderer_render(lr, p, 1);    // shadow layer
 
     // Zombies in shadow (not lit)
     for (int i = 0; i < mobCount; ++i) {
@@ -563,12 +572,18 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
 
+    LevelRenderer_renderSurroundingGround(lr);
+
     if (!isHitNull) {
         GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
         if (wasAlpha) glDisable(GL_ALPHA_TEST);
         LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         if (wasAlpha) glEnable(GL_ALPHA_TEST);
     }
+
+    setupFog(0);
+    LevelRenderer_renderSurroundingWater(lr);
 
     drawGui(t);
 

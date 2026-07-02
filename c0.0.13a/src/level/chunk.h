@@ -23,6 +23,7 @@ typedef struct Chunk {
     int  lists;
     bool dirty;
     long long dirtiedTime;
+    bool visible; // set once per frame by LevelRenderer_cull
 
     double x, y, z;
 } Chunk;

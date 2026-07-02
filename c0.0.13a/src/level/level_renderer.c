@@ -10,6 +10,7 @@
 #include "chunk.h"
 #include "../renderer/frustum.h"
 #include "tile/tile.h"
+#include "../renderer/textures.h"
 #include "../timer.h"
 #include "../hitresult.h"
 #include "../player.h"
@@ -19,7 +20,109 @@
 static Tessellator TESSELLATOR;
 
 extern Tessellator TESSELLATOR;  // use the global, like chunks do
-Frustum frustum;
+
+// c0.0.13a addition: an "infinite horizon" illusion — tiles rock.png/water.png
+// far out past the map edges so the world doesn't look like it has a hard
+// boundary. Compiled once into display lists (surroundLists +0 ground, +1 water).
+static void compileSurroundingGround(LevelRenderer* r) {
+    glEnable(GL_TEXTURE_2D);
+    GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, rockTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    const float y = 32.0f - 2.0f; // Level.getGroundLevel() - 2 (ground level is hardcoded 32)
+    int s = 128;
+    if (s > r->level->width)  s = r->level->width;
+    if (s > r->level->height) s = r->level->height;
+    const int d = 5;
+
+    Tessellator_begin(&TESSELLATOR);
+    for (int xx = -s * d; xx < r->level->width + s * d; xx += s) {
+        for (int zz = -s * d; zz < r->level->height + s * d; zz += s) {
+            float yy = y;
+            if (xx >= 0 && zz >= 0 && xx < r->level->width && zz < r->level->height) yy = 0.0f;
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + s), 0.0f, (float)s);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + s), (float)s, (float)s);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + 0), (float)s, 0.0f);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + 0), 0.0f, 0.0f);
+        }
+    }
+    Tessellator_end(&TESSELLATOR);
+
+    // map-edge "walls" down to the ground plane
+    glBindTexture(GL_TEXTURE_2D, rockTex);
+    glColor3f(0.8f, 0.8f, 0.8f);
+    Tessellator_begin(&TESSELLATOR);
+    for (int xx = 0; xx < r->level->width; xx += s) {
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), 0.0f, 0.0f, 0.0f, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), 0.0f, 0.0f, (float)s, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), y,    0.0f, (float)s, y);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), y,    0.0f, 0.0f, y);
+
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), y,    (float)r->level->height, 0.0f, y);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), y,    (float)r->level->height, (float)s, y);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), 0.0f, (float)r->level->height, (float)s, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), 0.0f, (float)r->level->height, 0.0f, 0.0f);
+    }
+    glColor3f(0.6f, 0.6f, 0.6f);
+    for (int zz = 0; zz < r->level->height; zz += s) {
+        Tessellator_vertexUV(&TESSELLATOR, 0.0f, y,    (float)(zz + 0), 0.0f, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, 0.0f, y,    (float)(zz + s), (float)s, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, 0.0f, 0.0f, (float)(zz + s), (float)s, y);
+        Tessellator_vertexUV(&TESSELLATOR, 0.0f, 0.0f, (float)(zz + 0), 0.0f, y);
+
+        Tessellator_vertexUV(&TESSELLATOR, (float)r->level->width, 0.0f, (float)(zz + 0), 0.0f, y);
+        Tessellator_vertexUV(&TESSELLATOR, (float)r->level->width, 0.0f, (float)(zz + s), (float)s, y);
+        Tessellator_vertexUV(&TESSELLATOR, (float)r->level->width, y,    (float)(zz + s), (float)s, 0.0f);
+        Tessellator_vertexUV(&TESSELLATOR, (float)r->level->width, y,    (float)(zz + 0), 0.0f, 0.0f);
+    }
+    Tessellator_end(&TESSELLATOR);
+
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
+
+static void compileSurroundingWater(LevelRenderer* r) {
+    glEnable(GL_TEXTURE_2D);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    GLuint waterTex = loadTexture("resources/water.png", GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, waterTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    const float y = 32.0f; // Level.getGroundLevel()
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    int s = 128;
+    if (s > r->level->width)  s = r->level->width;
+    if (s > r->level->height) s = r->level->height;
+    const int d = 5;
+
+    Tessellator_begin(&TESSELLATOR);
+    for (int xx = -s * d; xx < r->level->width + s * d; xx += s) {
+        for (int zz = -s * d; zz < r->level->height + s * d; zz += s) {
+            float yy = y - 0.1f;
+            if (xx < 0 || zz < 0 || xx >= r->level->width || zz >= r->level->height) {
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + s), 0.0f, (float)s);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + s), (float)s, (float)s);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + 0), (float)s, 0.0f);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + 0), 0.0f, 0.0f);
+
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + 0), 0.0f, 0.0f);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + 0), (float)s, 0.0f);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + s), yy, (float)(zz + s), (float)s, (float)s);
+                Tessellator_vertexUV(&TESSELLATOR, (float)(xx + 0), yy, (float)(zz + s), 0.0f, (float)s);
+            }
+        }
+    }
+    Tessellator_end(&TESSELLATOR);
+
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
 
 void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     r->chunkAmountX = level->width  / CHUNK_SIZE;
@@ -32,7 +135,8 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
 
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     r->chunks = (Chunk*)malloc((size_t)total * sizeof(Chunk));
-    if (!r->chunks) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
+    r->sortedChunks = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
+    if (!r->chunks || !r->sortedChunks) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
 
     for (int x = 0; x < r->chunkAmountX; x++)
     for (int y = 0; y < r->chunkAmountY; y++)
@@ -40,59 +144,102 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
         int minChunkX = x * CHUNK_SIZE, maxChunkX = MIN(level->width,  (x + 1) * CHUNK_SIZE);
         int minChunkY = y * CHUNK_SIZE, maxChunkY = MIN(level->depth,  (y + 1) * CHUNK_SIZE);
         int minChunkZ = z * CHUNK_SIZE, maxChunkZ = MIN(level->height, (z + 1) * CHUNK_SIZE);
-        Chunk_init(&r->chunks[(x + y * r->chunkAmountX) * r->chunkAmountZ + z],
-                   level, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
+        int idx = (x + y * r->chunkAmountX) * r->chunkAmountZ + z;
+        Chunk_init(&r->chunks[idx], level, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
+        r->sortedChunks[idx] = &r->chunks[idx];
+    }
+
+    r->drawDistance = 0;
+    // force an immediate distance re-sort on the first render() call
+    r->lastSortX = r->lastSortY = r->lastSortZ = -900000.0;
+
+    r->surroundLists = glGenLists(2);
+    glNewList(r->surroundLists + 0, GL_COMPILE);
+    compileSurroundingGround(r);
+    glEndList();
+    glNewList(r->surroundLists + 1, GL_COMPILE);
+    compileSurroundingWater(r);
+    glEndList();
+}
+
+void LevelRenderer_cull(LevelRenderer* r, const Frustum* frustum_) {
+    int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
+    for (int i = 0; i < total; ++i) {
+        r->chunks[i].visible = frustum_isVisible(frustum_, &r->chunks[i].boundingBox) ? true : false;
     }
 }
 
-void LevelRenderer_render(const LevelRenderer* r, int layer) {
-    frustum_calculate(&frustum);
+void LevelRenderer_toggleDrawDistance(LevelRenderer* r) {
+    r->drawDistance = (r->drawDistance + 1) % 4;
+}
 
+void LevelRenderer_renderSurroundingGround(const LevelRenderer* r) {
+    glCallList(r->surroundLists + 0);
+}
+
+void LevelRenderer_renderSurroundingWater(const LevelRenderer* r) {
+    glCallList(r->surroundLists + 1);
+}
+
+static const Player* gDistPlayer = NULL;
+static int distance_cmp(const void* a, const void* b) {
+    const Chunk* c1 = *(const Chunk* const*)a;
+    const Chunk* c2 = *(const Chunk* const*)b;
+    return (Chunk_distanceToSqr(c1, gDistPlayer) < Chunk_distanceToSqr(c2, gDistPlayer)) ? -1 : 1;
+}
+
+void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
+
+    double xd = player->e.x - r->lastSortX;
+    double yd = player->e.y - r->lastSortY;
+    double zd = player->e.z - r->lastSortZ;
+    if (xd * xd + yd * yd + zd * zd > 64.0) {
+        r->lastSortX = player->e.x;
+        r->lastSortY = player->e.y;
+        r->lastSortZ = player->e.z;
+        gDistPlayer = player;
+        qsort(r->sortedChunks, (size_t)total, sizeof(Chunk*), distance_cmp);
+    }
+
     for (int i = 0; i < total; ++i) {
-        if (frustum_isVisible(&frustum, &r->chunks[i].boundingBox)) {
-            Chunk_render(&r->chunks[i], layer);
+        Chunk* c = r->sortedChunks[i];
+        if (!c->visible) continue;
+        double dd = (double)(256 / (1 << r->drawDistance));
+        if (r->drawDistance == 0 || Chunk_distanceToSqr(c, player) < dd * dd) {
+            Chunk_render(c, layer);
         }
     }
 }
 
 void LevelRenderer_destroy(LevelRenderer* r) {
     free(r->chunks);
+    free(r->sortedChunks);
 }
 
 /* --- dirty-chunk prioritization -------------------------------------------- */
 
 // sort state for qsort comparator
 static const Player* gSortPlayer = NULL;
-static long long gSortNow = 0;
 
+// matches c0.0.13a's simplified DirtyChunkSorter: visible chunks first (using
+// the flag LevelRenderer_cull already set this frame), then nearest first.
+// The old dirtiedTime/staleness tiebreak was dropped in this version.
 static int dirty_cmp(const void* a, const void* b) {
     const Chunk* c1 = *(const Chunk* const*)a;
     const Chunk* c2 = *(const Chunk* const*)b;
 
     if (c1 == c2) return 0;
 
-    // visible chunks first
-    int v1 = frustum_isVisible(&frustum, &c1->boundingBox);
-    int v2 = frustum_isVisible(&frustum, &c2->boundingBox);
-    if (v1 && !v2) return -1;
-    if (v2 && !v1) return  1;
+    if (c1->visible && !c2->visible) return -1;
+    if (c2->visible && !c1->visible) return  1;
 
-    // higher priority to larger dirty duration (mirror Java logic: they compare ints after /2000)
-    int d1 = (int)((gSortNow - c1->dirtiedTime) / 2000LL);
-    int d2 = (int)((gSortNow - c2->dirtiedTime) / 2000LL);
-    if (d1 < d2) return -1;
-    if (d1 > d2) return  1;
-
-    // finally, closer to player first
     double dist1 = Chunk_distanceToSqr(c1, gSortPlayer);
     double dist2 = Chunk_distanceToSqr(c2, gSortPlayer);
     return (dist1 < dist2) ? -1 : 1;
 }
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
-    frustum_calculate(&frustum);
-
     // collect dirty chunk pointers
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     Chunk** list = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
@@ -106,11 +253,10 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
 
     // sort with priorities
     gSortPlayer = player;
-    gSortNow    = currentTimeMillis();
     qsort(list, (size_t)n, sizeof(Chunk*), dirty_cmp);
 
-    // rebuild up to 8 per frame
-    int limit = n < 8 ? n : 8;
+    // rebuild up to 4 per frame (c0.0.13a halved MAX_REBUILDS_PER_FRAME from 8)
+    int limit = n < 4 ? n : 4;
     for (int i = 0; i < limit; ++i) {
         Chunk_rebuild(list[i], 0);
         Chunk_rebuild(list[i], 1);
@@ -178,6 +324,53 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
 
         glDisable(GL_TEXTURE_2D);
     }
+
+    glDisable(GL_BLEND);
+}
+
+// c0.0.13a addition: literal thin black wireframe box around the targeted
+// block/placement cell (separate from the pulsing tint in LevelRenderer_renderHit).
+void LevelRenderer_renderHitOutline(HitResult* h, int mode) {
+    if (!h) return;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.4f);
+
+    float x = (float)h->x, y = (float)h->y, z = (float)h->z;
+    if (mode == 1) {
+        switch (h->f) {
+            case 0: y -= 1.0f; break;
+            case 1: y += 1.0f; break;
+            case 2: z -= 1.0f; break;
+            case 3: z += 1.0f; break;
+            case 4: x -= 1.0f; break;
+            case 5: x += 1.0f; break;
+        }
+    }
+
+    glBegin(GL_LINE_STRIP);
+    glVertex3f(x,        y, z);
+    glVertex3f(x + 1.0f, y, z);
+    glVertex3f(x + 1.0f, y, z + 1.0f);
+    glVertex3f(x,        y, z + 1.0f);
+    glVertex3f(x,        y, z);
+    glEnd();
+
+    glBegin(GL_LINE_STRIP);
+    glVertex3f(x,        y + 1.0f, z);
+    glVertex3f(x + 1.0f, y + 1.0f, z);
+    glVertex3f(x + 1.0f, y + 1.0f, z + 1.0f);
+    glVertex3f(x,        y + 1.0f, z + 1.0f);
+    glVertex3f(x,        y + 1.0f, z);
+    glEnd();
+
+    glBegin(GL_LINES);
+    glVertex3f(x,        y,        z);        glVertex3f(x,        y + 1.0f, z);
+    glVertex3f(x + 1.0f, y,        z);        glVertex3f(x + 1.0f, y + 1.0f, z);
+    glVertex3f(x + 1.0f, y,        z + 1.0f); glVertex3f(x + 1.0f, y + 1.0f, z + 1.0f);
+    glVertex3f(x,        y,        z + 1.0f); glVertex3f(x,        y + 1.0f, z + 1.0f);
+    glEnd();
 
     glDisable(GL_BLEND);
 }
