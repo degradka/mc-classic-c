@@ -20,6 +20,9 @@ struct Tile {
     int textureId;
     int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
 
+    // liquids only, the flowing and calm ids
+    int tileId, calmTileId, spreadSpeed;
+
     int  (*getTexture)(const Tile* self, int face);
     void (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);
     void (*onTick)(const Tile* self, Level* lvl, int x, int y, int z);
@@ -28,6 +31,8 @@ struct Tile {
     int  (*blocksLight)(const Tile* self);
     // 0 when there is no collision box
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
+
+    void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
 };
 
 // indexed by tile id

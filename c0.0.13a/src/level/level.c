@@ -183,6 +183,13 @@ void Level_save(const Level* level) {
     gzclose(f);
 }
 
+static void notifyNeighborChanged(Level* level, int x, int y, int z, int type) {
+    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return;
+    int id = Level_getTile(level, x, y, z);
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    if (t && t->neighborChanged) t->neighborChanged(t, level, x, y, z, type);
+}
+
 bool level_setTile(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
 
@@ -190,8 +197,24 @@ bool level_setTile(Level* level, int x, int y, int z, int type) {
     if (level->blocks[index] == (byte)type) return false;
 
     level->blocks[index] = (byte)type;
+
+    notifyNeighborChanged(level, x - 1, y, z, type);
+    notifyNeighborChanged(level, x + 1, y, z, type);
+    notifyNeighborChanged(level, x, y - 1, z, type);
+    notifyNeighborChanged(level, x, y + 1, z, type);
+    notifyNeighborChanged(level, x, y, z - 1, type);
+    notifyNeighborChanged(level, x, y, z + 1, type);
+
     calcLightDepths(level, x, z, 1, 1);
     if (level->renderer) levelRenderer_tileChanged(level->renderer, x, y, z);
+    return true;
+}
+
+bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
+    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
+    int index = (y * level->height + z) * level->width + x;
+    if (level->blocks[index] == (byte)type) return false;
+    level->blocks[index] = (byte)type;
     return true;
 }
 
@@ -214,8 +237,8 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 
 void Level_onTick(Level* level) {
     level->unprocessed += level->width * level->height * level->depth;
-    int ticks = level->unprocessed / 400;
-    level->unprocessed -= ticks * 400;
+    int ticks = level->unprocessed / 200;
+    level->unprocessed -= ticks * 200;
 
     for (int i = 0; i < ticks; ++i) {
         int x = rand() % level->width;
