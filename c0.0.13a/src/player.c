@@ -22,27 +22,56 @@ void Player_onTick(Player* p, GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
         Entity_resetPosition(&p->e);
     }
+
+    bool inWater = Entity_isInWater(&p->e);
+    bool inLava  = Entity_isInLava(&p->e);
+
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) forward -= 1.0f;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) forward += 1.0f;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) strafe  -= 1.0f;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) strafe  += 1.0f;
 
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && p->e.onGround) {
-        p->e.motionY = 0.5f;
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+        if (inWater || inLava) {
+            p->e.motionY += 0.04;
+        } else if (p->e.onGround) {
+            p->e.motionY = 0.42;
+        }
     }
 
-    Entity_moveRelative(&p->e, strafe, forward, p->e.onGround ? 0.1f : 0.02f);
+    if (inWater) {
+        double yo = p->e.y;
+        Entity_moveRelative(&p->e, strafe, forward, 0.02f);
+        Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
+        p->e.motionX *= 0.8;
+        p->e.motionY *= 0.8;
+        p->e.motionZ *= 0.8;
+        p->e.motionY -= 0.02;
+        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6 - p->e.y + yo, p->e.motionZ)) {
+            p->e.motionY = 0.3;
+        }
+    } else if (inLava) {
+        double yo = p->e.y;
+        Entity_moveRelative(&p->e, strafe, forward, 0.02f);
+        Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
+        p->e.motionX *= 0.5;
+        p->e.motionY *= 0.5;
+        p->e.motionZ *= 0.5;
+        p->e.motionY -= 0.02;
+        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6 - p->e.y + yo, p->e.motionZ)) {
+            p->e.motionY = 0.3;
+        }
+    } else {
+        Entity_moveRelative(&p->e, strafe, forward, p->e.onGround ? 0.1f : 0.02f);
+        Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
+        p->e.motionX *= 0.91;
+        p->e.motionY *= 0.98;
+        p->e.motionZ *= 0.91;
+        p->e.motionY -= 0.08;
 
-    p->e.motionY -= 0.08f; // gravity
-
-    Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
-
-    p->e.motionX *= 0.91f;
-    p->e.motionY *= 0.98f;
-    p->e.motionZ *= 0.91f;
-
-    if (p->e.onGround) {
-        p->e.motionX *= 0.7f;
-        p->e.motionZ *= 0.7f;
+        if (p->e.onGround) {
+            p->e.motionX *= 0.6;
+            p->e.motionZ *= 0.6;
+        }
     }
 }

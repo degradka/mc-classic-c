@@ -59,4 +59,4 @@ rubydung
 *.dat
 
 # Resources folder for debug
-src/resources
+**/src/resources

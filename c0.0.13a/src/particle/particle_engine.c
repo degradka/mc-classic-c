@@ -19,7 +19,7 @@ void ParticleEngine_init(ParticleEngine* pe, Level* level, GLuint terrainTex) {
     pe->texture = terrainTex;
     pe->items = NULL;
     pe->count = pe->capacity = 0;
-    Tessellator_init(&pe->tess);
+    Tessellator_begin(&pe->tess);
 }
 
 void ParticleEngine_add(ParticleEngine* pe, const Particle* p) {
@@ -63,7 +63,7 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
 
     glColor4f(0.8f, 0.8f, 0.8f, 1.0f);
 
-    Tessellator_init(&pe->tess);
+    Tessellator_begin(&pe->tess);
     for (int i = 0; i < pe->count; ++i) {
         Particle* p = &pe->items[i];
         int lit = Entity_isLit(&p->base) ? 1 : 0;
@@ -74,7 +74,7 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
                             cameraXWithY, cameraZWithY);
         }
     }
-    Tessellator_flush(&pe->tess);
+    Tessellator_end(&pe->tess);
 
     if (cullWasEnabled) glEnable(GL_CULL_FACE);
     glDisable(GL_TEXTURE_2D);

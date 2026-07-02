@@ -10,9 +10,15 @@ struct ParticleEngine; typedef struct ParticleEngine ParticleEngine;
 
 typedef struct Tile Tile;
 
+// tile.getLiquidType() constants
+#define LIQUID_NONE  0
+#define LIQUID_WATER 1
+#define LIQUID_LAVA  2
+
 struct Tile {
     int id;
     int textureId;
+    int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
 
     int  (*getTexture)(const Tile* self, int face);
     void (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);

@@ -113,6 +113,7 @@ const Tile* gTiles[256] = { 0 };
 
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
+    t->liquidType = LIQUID_NONE;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
     t->render = Tile_render_shared;
     t->onTick = NULL;

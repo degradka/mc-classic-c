@@ -117,6 +117,50 @@ bool Level_isSolidTile(const Level* level, int x, int y, int z) {
     return (t && t->isSolid(t)) ? true : false;
 }
 
+bool Level_containsAnyLiquid(const Level* level, const AABB* box) {
+    int x0 = (int)box->minX, x1 = (int)(box->maxX + 1.0);
+    int y0 = (int)box->minY, y1 = (int)(box->maxY + 1.0);
+    int z0 = (int)box->minZ, z1 = (int)(box->maxZ + 1.0);
+
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (z0 < 0) z0 = 0;
+    if (x1 > level->width)  x1 = level->width;
+    if (y1 > level->depth)  y1 = level->depth;
+    if (z1 > level->height) z1 = level->height;
+
+    for (int x = x0; x < x1; ++x)
+        for (int y = y0; y < y1; ++y)
+            for (int z = z0; z < z1; ++z) {
+                int id = Level_getTile(level, x, y, z);
+                const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+                if (t && t->liquidType > LIQUID_NONE) return true;
+            }
+    return false;
+}
+
+bool Level_containsLiquid(const Level* level, const AABB* box, int liquidId) {
+    int x0 = (int)box->minX, x1 = (int)(box->maxX + 1.0);
+    int y0 = (int)box->minY, y1 = (int)(box->maxY + 1.0);
+    int z0 = (int)box->minZ, z1 = (int)(box->maxZ + 1.0);
+
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (z0 < 0) z0 = 0;
+    if (x1 > level->width)  x1 = level->width;
+    if (y1 > level->depth)  y1 = level->depth;
+    if (z1 > level->height) z1 = level->height;
+
+    for (int x = x0; x < x1; ++x)
+        for (int y = y0; y < y1; ++y)
+            for (int z = z0; z < z1; ++z) {
+                int id = Level_getTile(level, x, y, z);
+                const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+                if (t && t->liquidType == liquidId) return true;
+            }
+    return false;
+}
+
 void Level_destroy(Level* level) {
     free(level->blocks);
     free(level->lightDepths);

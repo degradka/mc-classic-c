@@ -13,6 +13,12 @@ AABB AABB_clone(const AABB* a) {
     return AABB_create(a->minX, a->minY, a->minZ, a->maxX, a->maxY, a->maxZ);
 }
 
+// mirrors the original c0.0.13a AABB.cloneMove, which uses z instead of x for minX
+AABB AABB_cloneMove(const AABB* a, double x, double y, double z) {
+    return AABB_create(a->minX + z, a->minY + y, a->minZ + z,
+                       a->maxX + x, a->maxY + y, a->maxZ + z);
+}
+
 AABB AABB_expand(const AABB* a, double x, double y, double z) {
     double minX = a->minX, minY = a->minY, minZ = a->minZ;
     double maxX = a->maxX, maxY = a->maxY, maxZ = a->maxZ;

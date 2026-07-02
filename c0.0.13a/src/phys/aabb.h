@@ -10,6 +10,7 @@ typedef struct {
 
 AABB   AABB_create(double minX, double minY, double minZ, double maxX, double maxY, double maxZ);
 AABB   AABB_clone(const AABB* a);
+AABB   AABB_cloneMove(const AABB* a, double x, double y, double z);
 AABB   AABB_expand(const AABB* a, double x, double y, double z);
 AABB   AABB_grow(const AABB* a, double x, double y, double z);
 double AABB_clipXCollide(const AABB* a, const AABB* b, double x);

@@ -3,7 +3,7 @@
 #include <string.h>
 #include "tessellator.h"
 
-void Tessellator_init(Tessellator* t) {
+void Tessellator_begin(Tessellator* t) {
     Tessellator_clear(t);
 }
 
@@ -24,7 +24,7 @@ void Tessellator_vertex(Tessellator* t, float x, float y, float z) {
 
     t->vertices++;
     if (t->vertices == MAX_VERTICES) {
-        Tessellator_flush(t);
+        Tessellator_end(t);
     }
 }
 
@@ -48,7 +48,7 @@ void Tessellator_setIgnoreColor(Tessellator* t, int ignore) {
     t->ignoreColor = ignore ? 1 : 0;
 }
 
-void Tessellator_flush(Tessellator* t) {
+void Tessellator_end(Tessellator* t) {
     // reset client states so stale arrays (e.g., colors) don't affect us
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);

@@ -52,6 +52,9 @@ AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);
 
 bool  Level_isLit(const Level* level, int x, int y, int z);
 
+bool  Level_containsAnyLiquid(const Level* level, const AABB* box);
+bool  Level_containsLiquid(const Level* level, const AABB* box, int liquidId);
+
 void  Level_onTick(Level* level);
 
 #endif  // LEVEL_H

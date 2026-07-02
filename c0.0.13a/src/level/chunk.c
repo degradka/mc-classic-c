@@ -39,7 +39,7 @@ void Chunk_rebuild(Chunk* c, int layer) {
     glNewList(c->lists + layer, GL_COMPILE);
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, c->texture);
-    Tessellator_init(&TESSELLATOR);
+    Tessellator_begin(&TESSELLATOR);
 
     int tiles = 0;
     // (coarse timing)
@@ -58,7 +58,7 @@ void Chunk_rebuild(Chunk* c, int layer) {
         }
     }
 
-    Tessellator_flush(&TESSELLATOR);
+    Tessellator_end(&TESSELLATOR);
     glDisable(GL_TEXTURE_2D);
     glEndList();
 

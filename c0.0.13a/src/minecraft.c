@@ -117,9 +117,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.11a", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.13a", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.11a", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.13a", NULL, NULL);
     }
 
     if (!window) {
@@ -252,18 +252,18 @@ static void drawGui(float partialTicks) {
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     glEnable(GL_TEXTURE_2D);
 
-    Tessellator_init(&hudTess);
+    Tessellator_begin(&hudTess);
     const Tile* hand = gTiles[selectedTileId];
     if (hand && hand->render) {
         hand->render(hand, &hudTess, &level, 0, -2, 0, 0);
     }
-    Tessellator_flush(&hudTess);
+    Tessellator_end(&hudTess);
 
     glDisable(GL_TEXTURE_2D);
     glPopMatrix();
 
     // Top-left: version + stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.11a", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.13a", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -273,7 +273,7 @@ static void drawGui(float partialTicks) {
     int cy = screenHeight / 2;
 
     glColor4f(1, 1, 1, 1);
-    Tessellator_init(&hudTess);
+    Tessellator_begin(&hudTess);
     // vertical (height ~9)
     Tessellator_vertex(&hudTess, (float)(cx + 1), (float)(cy - 4), 0.0f);
     Tessellator_vertex(&hudTess, (float)(cx + 0), (float)(cy - 4), 0.0f);
@@ -284,7 +284,7 @@ static void drawGui(float partialTicks) {
     Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 0), 0.0f);
     Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 1), 0.0f);
     Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 1), 0.0f);
-    Tessellator_flush(&hudTess);
+    Tessellator_end(&hudTess);
 }
 
 /* --- picking ----------------------------------------------------------------- */

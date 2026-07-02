@@ -1,6 +1,7 @@
 // entity.c — parent entity with physics and movement
 
 #include "entity.h"
+#include "level/tile/tile.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -11,6 +12,7 @@ void Entity_init(Entity* e, Level* level) {
     e->xRotation = e->yRotation = 0.f;
     e->motionX = e->motionY = e->motionZ = 0.0;
     e->onGround = false;
+    e->horizontalCollision = false;
     e->heightOffset = 0.0f;
     e->boundingBoxWidth  = 0.6f;
     e->boundingBoxHeight = 1.8f;
@@ -32,9 +34,9 @@ void Entity_setPosition(Entity* e, double x, double y, double z) {
 }
 
 void Entity_resetPosition(Entity* e) {
-    const float x = (float)rand() / (float)RAND_MAX * e->level->width;
+    const float x = (float)rand() / (float)RAND_MAX * (e->level->width - 2) + 1.0f;
     const float y = (float)e->level->depth + 10.0f;
-    const float z = (float)rand() / (float)RAND_MAX * e->level->height;
+    const float z = (float)rand() / (float)RAND_MAX * (e->level->height - 2) + 1.0f;
     Entity_setPosition(e, x, y, z);
 }
 
@@ -66,6 +68,7 @@ void Entity_move(Entity* e, double dx, double dy, double dz) {
     for (int i = 0; i < hits.size; ++i) dz = AABB_clipZCollide(&hits.aabbs[i], &e->boundingBox, dz);
     AABB_move(&e->boundingBox, 0.0, 0.0, dz);
 
+    e->horizontalCollision = !(ox == dx && oz == dz);
     e->onGround = (oy != dy) && (oy < 0.0);
 
     if (ox != dx) e->motionX = 0.0;
@@ -95,6 +98,24 @@ void Entity_moveRelative(Entity* e, float x, float z, float speed) {
 
 bool Entity_isLit(const Entity* e) {
     return Level_isLit(e->level, (int)e->x, (int)e->y, (int)e->z);
+}
+
+bool Entity_isFree(const Entity* e, double dx, double dy, double dz) {
+    AABB box = AABB_cloneMove(&e->boundingBox, dx, dy, dz);
+    ArrayList_AABB hits = Level_getCubes(e->level, &box);
+    bool blocked = hits.size > 0;
+    if (hits.aabbs) free(hits.aabbs);
+    if (blocked) return false;
+    return !Level_containsAnyLiquid(e->level, &box);
+}
+
+bool Entity_isInWater(const Entity* e) {
+    AABB box = AABB_grow(&e->boundingBox, 0.0, -0.4, 0.0);
+    return Level_containsLiquid(e->level, &box, LIQUID_WATER);
+}
+
+bool Entity_isInLava(const Entity* e) {
+    return Level_containsLiquid(e->level, &e->boundingBox, LIQUID_LAVA);
 }
 
 void Entity_remove(Entity* e) {
