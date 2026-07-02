@@ -23,6 +23,7 @@ typedef struct Chunk {
     int  lists;
     bool dirty;
     long long dirtiedTime;
+    bool visible;
 
     double x, y, z;
 } Chunk;
