@@ -13,7 +13,12 @@ BUILD ?= debug
 SRC = minecraft.c player.c timer.c  hitresult.c \
       level/chunk.c level/level.c level/level_renderer.c \
       level/tile/tile.c phys/aabb.c entity.c character/zombie.c \
-      character/polygon.c character/cube.c level/perlin.c \
+      character/polygon.c character/cube.c \
+      level/levelgen/level_gen.c \
+      level/levelgen/synth/synth.c level/levelgen/synth/improved_noise.c \
+      level/levelgen/synth/perlin_noise.c level/levelgen/synth/distort.c \
+      level/levelgen/synth/emboss.c level/levelgen/synth/rotate.c \
+      level/levelgen/synth/scale.c \
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
       renderer/frustum.c gui/font.c #comm/socket_connection.c \

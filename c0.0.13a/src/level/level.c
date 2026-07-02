@@ -3,7 +3,7 @@
 #include "level.h"
 #include "level_renderer.h"
 #include "tile/tile.h"
-#include "perlin.h"
+#include "levelgen/level_gen.h"
 
 #include <zlib.h>
 #include <stdlib.h>
@@ -50,55 +50,9 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
 }
 
 void Level_generateMap(Level* level) {
-    int w = level->width, h = level->height, d = level->depth;
-
-    int* first  = (int*)malloc((size_t)w * h * sizeof(int));
-    int* second = (int*)malloc((size_t)w * h * sizeof(int));
-    int* cliff  = (int*)malloc((size_t)w * h * sizeof(int));
-    int* rock   = (int*)malloc((size_t)w * h * sizeof(int));
-    if (!first || !second || !cliff || !rock) {
-        fprintf(stderr, "Perlin temp alloc failed\n");
-        if (first)  free(first);
-        if (second) free(second);
-        if (cliff)  free(cliff);
-        if (rock)   free(rock);
-        return;
-    }
-
-    Perlin_read(w, h, 0, first);
-    Perlin_read(w, h, 0, second);
-    Perlin_read(w, h, 1, cliff);
-    Perlin_read(w, h, 1, rock);
-
-    for (int x = 0; x < w; ++x) {
-        for (int y = 0; y < d; ++y) {
-            for (int z = 0; z < h; ++z) {
-                int idx2D = x + z * w;
-                int f = first [idx2D];
-                int s = second[idx2D];
-
-                // If cliff noise < 128, force to first height
-                if (cliff[idx2D] < 128) s = f;
-
-                int maxLevelHeight = ( (s > f ? s : f) ) / 8 + d / 3;
-                int maxRockHeight  =  rock[idx2D] / 8 + d / 3;
-                if (maxRockHeight > maxLevelHeight - 2) {
-                    maxRockHeight = maxLevelHeight - 2;
-                }
-
-                int index = (y * h + z) * w + x;
-                int id = 0;
-
-                if (y == maxLevelHeight) id = 2; // grass
-                if (y <  maxLevelHeight) id = 3; // dirt
-                if (y <= maxRockHeight)  id = 1; // rock
-
-                level->blocks[index] = (unsigned char)id;
-            }
-        }
-    }
-
-    free(first); free(second); free(cliff); free(rock);
+    // c0.0.13a replaced the old Perlin-hills generator with flat terrain +
+    // carved caves + flood-filled lakes (see level_gen.h for why it's flat).
+    LevelGen_generateMap(level);
 }
 
 bool Level_isLightBlocker(const Level* level, int x, int y, int z) {

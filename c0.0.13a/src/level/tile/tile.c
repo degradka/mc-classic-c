@@ -130,6 +130,10 @@ Tile TILE_STONEBRICK;
 Tile TILE_WOOD;
 Tile TILE_GRASS;
 Tile TILE_BUSH;
+Tile TILE_WATER;
+Tile TILE_CALM_WATER;
+Tile TILE_LAVA;
+Tile TILE_CALM_LAVA;
 
 /* Grass (per-face textures) — face map: top=0, bottom=2, sides=3 */
 static int Grass_getTexture(const Tile* self, int face) {
@@ -160,6 +164,13 @@ static int Bush_blocksLight(const Tile* self) { (void)self; return 0; }
 static int Bush_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
     return 0; // no collision box
+}
+
+/* Liquids — placeholder registration; see tile.h comment above the externs */
+static int Liquid_isSolid(const Tile* self) { (void)self; return 0; }
+static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
+    (void)self; (void)x; (void)y; (void)z; (void)out;
+    return 0; // no collision box — matches LiquidTile.getAABB() returning null
 }
 
 static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
@@ -234,6 +245,27 @@ void Tile_registerAll(void) {
     TILE_BUSH.getAABB     = Bush_getAABB;
     TILE_BUSH.render      = Bush_render;
     TILE_BUSH.onTick      = Bush_onTick;
+
+    // tex 14 = water, tex 30 = lava (terrain.png atlas slots, matching LiquidTile.java)
+    registerTile(&TILE_WATER,      8, 14, NULL);
+    registerTile(&TILE_CALM_WATER, 9, 14, NULL);
+    registerTile(&TILE_LAVA,      10, 30, NULL);
+    registerTile(&TILE_CALM_LAVA, 11, 30, NULL);
+
+    TILE_WATER.liquidType      = LIQUID_WATER;
+    TILE_CALM_WATER.liquidType = LIQUID_WATER;
+    TILE_LAVA.liquidType       = LIQUID_LAVA;
+    TILE_CALM_LAVA.liquidType  = LIQUID_LAVA;
+
+    TILE_WATER.isSolid      = Liquid_isSolid;
+    TILE_CALM_WATER.isSolid = Liquid_isSolid;
+    TILE_LAVA.isSolid       = Liquid_isSolid;
+    TILE_CALM_LAVA.isSolid  = Liquid_isSolid;
+
+    TILE_WATER.getAABB      = Liquid_getAABB;
+    TILE_CALM_WATER.getAABB = Liquid_getAABB;
+    TILE_LAVA.getAABB       = Liquid_getAABB;
+    TILE_CALM_LAVA.getAABB  = Liquid_getAABB;
 }
 
 /* ---------- untextured single-face helper (for hit highlight) ---------- */

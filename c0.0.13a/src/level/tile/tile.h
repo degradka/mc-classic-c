@@ -41,6 +41,14 @@ extern Tile TILE_STONEBRICK;// id=4
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
 
+// Minimal placeholder registration: correct id/liquidType/isSolid/collision/light
+// so LevelGen's flood-fill can place them. Flow ticking and the true non-cubic
+// render shape are ported separately in the full liquids pass.
+extern Tile TILE_WATER;      // id=8
+extern Tile TILE_CALM_WATER; // id=9
+extern Tile TILE_LAVA;       // id=10
+extern Tile TILE_CALM_LAVA;  // id=11
+
 void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
