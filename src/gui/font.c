@@ -77,7 +77,7 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
     float r,g,b; rgb_from_int(color, &r,&g,&b);
 
     glEnable(GL_TEXTURE_2D);
-    bind((int)f->texture);
+    glBindTexture(GL_TEXTURE_2D, (int)f->texture);
 
     Tessellator_init(t);
     Tessellator_color(t, r, g, b);

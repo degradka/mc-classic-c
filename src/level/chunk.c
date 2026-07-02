@@ -7,6 +7,8 @@
 #include "../player.h"
 #include <math.h>
 
+static Tessellator TESSELLATOR;
+
 extern Tessellator TESSELLATOR;
 
 // (optional stats)

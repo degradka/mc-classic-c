@@ -1,20 +1,13 @@
-// level/frustum.h — extract frustum planes from GL matrices & AABB test
-
 #ifndef FRUSTUM_H
 #define FRUSTUM_H
 
 #include "../phys/aabb.h"
 
-typedef struct Frustum {
-    float m_Frustum[6][4];
-    float proj[16];
-    float modl[16];
-    float clip[16];
+typedef struct {
+    float planes[6][4];
 } Frustum;
 
-extern Frustum frustum;
+void frustum_calculate(Frustum* f);
+int  frustum_isVisible(const Frustum* f, const AABB* aabb);
 
-int  frustum_isVisible(const AABB* aabb);
-void frustum_calculate(void);
-
-#endif // FRUSTUM_H
+#endif

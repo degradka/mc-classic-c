@@ -16,7 +16,10 @@
 #include <math.h>
 #include <stdio.h>
 
+static Tessellator TESSELLATOR;
+
 extern Tessellator TESSELLATOR;  // use the global, like chunks do
+Frustum frustum;
 
 void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     r->chunkAmountX = level->width  / CHUNK_SIZE;
@@ -43,11 +46,11 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
 }
 
 void LevelRenderer_render(const LevelRenderer* r, int layer) {
-    frustum_calculate();
+    frustum_calculate(&frustum);
 
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     for (int i = 0; i < total; ++i) {
-        if (frustum_isVisible(&r->chunks[i].boundingBox)) {
+        if (frustum_isVisible(&frustum, &r->chunks[i].boundingBox)) {
             Chunk_render(&r->chunks[i], layer);
         }
     }
@@ -70,8 +73,8 @@ static int dirty_cmp(const void* a, const void* b) {
     if (c1 == c2) return 0;
 
     // visible chunks first
-    int v1 = frustum_isVisible(&c1->boundingBox);
-    int v2 = frustum_isVisible(&c2->boundingBox);
+    int v1 = frustum_isVisible(&frustum, &c1->boundingBox);
+    int v2 = frustum_isVisible(&frustum, &c2->boundingBox);
     if (v1 && !v2) return -1;
     if (v2 && !v1) return  1;
 
@@ -88,7 +91,7 @@ static int dirty_cmp(const void* a, const void* b) {
 }
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
-    frustum_calculate(); // ensure frustum up-to-date for visibility test
+    frustum_calculate(&frustum);
 
     // collect dirty chunk pointers
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;

@@ -128,6 +128,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
         return 0;
     }
     glfwMakeContextCurrent(window);
+    glEnable(GL_MULTISAMPLE);
+    glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
     glfwSwapInterval(0); // uncapped
 
     GLenum err = glewInit();
@@ -517,7 +519,16 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    glEnable(GL_MULTISAMPLE);
+
     setupCamera(p, t);
+
+    Frustum frustum;
+    frustum_calculate(&frustum);
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
 
     setupFog(0);
     LevelRenderer_render(lr, 0);    // lit layer
@@ -525,7 +536,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // Zombies in sunlight (lit)
     for (int i = 0; i < mobCount; ++i) {
         const Zombie* z = &mobs[i];
-        if (Entity_isLit(&z->base) && frustum_isVisible(&z->base.boundingBox)) {
+        if (Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
             Zombie_render(z, t);
         }
     }
@@ -538,7 +549,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // Zombies in shadow (not lit)
     for (int i = 0; i < mobCount; ++i) {
         const Zombie* z = &mobs[i];
-        if (!Entity_isLit(&z->base) && frustum_isVisible(&z->base.boundingBox)) {
+        if (!Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
             Zombie_render(z, t);
         }
     }
@@ -548,6 +559,9 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_FOG);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
 
     if (!isHitNull) {
         GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
