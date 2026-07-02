@@ -6,7 +6,7 @@
 #include <GL/glew.h>
 #include <stdbool.h>
 
-#define MAX_VERTICES 100000
+#define MAX_VERTICES 262144
 
 typedef struct {
     float vertexBuffer[MAX_VERTICES * 3];

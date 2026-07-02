@@ -3,8 +3,6 @@
 #include <string.h>
 #include "tessellator.h"
 
-Tessellator TESSELLATOR;
-
 void Tessellator_init(Tessellator* t) {
     Tessellator_clear(t);
 }

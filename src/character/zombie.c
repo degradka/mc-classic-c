@@ -56,7 +56,7 @@ void Zombie_onTick(Zombie* z) {
 void Zombie_render(const Zombie* z, float partialTicks) {
     glPushMatrix();
     glEnable(GL_TEXTURE_2D);
-    bind(texChar);
+    glBindTexture(GL_TEXTURE_2D, texChar);
 
     const double t  = (double)getCurrentTimeInNanoseconds() * 1e-9 * 10.0 * z->speed + z->timeOffset;
     const double ix = z->base.prevX + (z->base.x - z->base.prevX) * partialTicks;

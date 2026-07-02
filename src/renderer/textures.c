@@ -4,12 +4,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-int loadTexture(const char* path, int filterMode) {
+GLuint loadTexture(const char* path, int filterMode) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     if (!tex) { fprintf(stderr, "Failed to generate texture id\n"); return 0; }
 
-    bind((int)tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -30,8 +30,4 @@ int loadTexture(const char* path, int filterMode) {
 
     stbi_image_free(img);
     return (int)tex;
-}
-
-void bind(int id) {
-    glBindTexture(GL_TEXTURE_2D, (GLuint)id);
 }
