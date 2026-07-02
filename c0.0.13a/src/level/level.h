@@ -46,6 +46,7 @@ bool  Level_load(Level* level);
 void  Level_save(const Level* level);
 
 bool  level_setTile(Level* level, int x, int y, int z, int type);
+bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 int   Level_getTile(const Level* level, int x, int y, int z);
 
 AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);

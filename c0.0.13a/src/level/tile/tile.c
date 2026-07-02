@@ -111,15 +111,21 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
 
 const Tile* gTiles[256] = { 0 };
 
+static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    (void)self; (void)lvl; (void)x; (void)y; (void)z; (void)type;
+}
+
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
+    t->tileId = t->calmTileId = t->spreadSpeed = 0;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
     t->render = Tile_render_shared;
     t->onTick = NULL;
     t->isSolid     = Tile_default_isSolid;
     t->blocksLight = Tile_default_blocksLight;
     t->getAABB     = Tile_default_getAABB;
+    t->neighborChanged = Tile_default_neighborChanged;
 
     gTiles[id] = t;
 }
@@ -143,19 +149,21 @@ static int Grass_getTexture(const Tile* self, int face) {
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
-    if (Level_isLit(lvl, x, y, z)) {
+    if (rand() % 4 != 0) return; // c0.0.13a throttles grass ticks to 25%
+
+    if (!Level_isLit(lvl, x, y + 1, z)) {
+        // no sunlight reaching the block above: turn into dirt
+        level_setTile(lvl, x, y, z, TILE_DIRT.id);
+    } else {
         // try 4 random neighbors
         for (int i = 0; i < 4; ++i) {
             int tx = x + (rand() % 3) - 1;  // [-1..+1]
             int ty = y + (rand() % 5) - 3;  // [-3..+1] (matches Java’s skew)
             int tz = z + (rand() % 3) - 1;  // [-1..+1]
-            if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty, tz)) {
+            if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty + 1, tz)) {
                 level_setTile(lvl, tx, ty, tz, TILE_GRASS.id);
             }
         }
-    } else {
-        // no sunlight: turn into dirt
-        level_setTile(lvl, x, y, z, TILE_DIRT.id);
     }
 }
 
@@ -166,11 +174,83 @@ static int Bush_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     return 0; // no collision box
 }
 
-/* Liquids — placeholder registration; see tile.h comment above the externs */
+/* Liquids — see tile.h comment above the externs */
 static int Liquid_isSolid(const Tile* self) { (void)self; return 0; }
 static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
     return 0; // no collision box — matches LiquidTile.getAABB() returning null
+}
+
+static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth);
+
+// Falls straight down through air, then spreads to the 4 side neighbors.
+// Lava (LIQUID_LAVA) only ever falls one step per tick; water keeps falling
+// as long as it keeps succeeding — this asymmetry is in the original source.
+static int Liquid_updateWater(const Tile* self, Level* lvl, int x, int y, int z, int depth) {
+    int hasChanged = 0;
+
+    while (Level_getTile(lvl, x, --y, z) == 0) {
+        int change = level_setTile(lvl, x, y, z, self->tileId);
+        if (change) hasChanged = 1;
+        if (!change || self->liquidType == LIQUID_LAVA) break;
+    }
+    y++;
+
+    if (self->liquidType == LIQUID_WATER || !hasChanged) {
+        // deliberately not short-circuited: all 4 neighbors must always be checked
+        int c1 = Liquid_checkWater(self, lvl, x - 1, y, z, depth);
+        int c2 = Liquid_checkWater(self, lvl, x + 1, y, z, depth);
+        int c3 = Liquid_checkWater(self, lvl, x, y, z - 1, depth);
+        int c4 = Liquid_checkWater(self, lvl, x, y, z + 1, depth);
+        hasChanged = hasChanged || c1 || c2 || c3 || c4;
+    }
+
+    if (!hasChanged) {
+        Level_setTileNoUpdate(lvl, x, y, z, self->calmTileId);
+    }
+    return hasChanged;
+}
+
+static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth) {
+    if (Level_getTile(lvl, x, y, z) != 0) return 0;
+
+    int changed = level_setTile(lvl, x, y, z, self->tileId);
+    if (changed && depth < self->spreadSpeed) {
+        return Liquid_updateWater(self, lvl, x, y, z, depth + 1);
+    }
+    return 0;
+}
+
+static void Liquid_tick(const Tile* self, Level* lvl, int x, int y, int z) {
+    Liquid_updateWater(self, lvl, x, y, z, 0);
+}
+
+static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    if (self->liquidType == LIQUID_WATER && (type == TILE_LAVA.id || type == TILE_CALM_LAVA.id)) {
+        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    }
+    if (self->liquidType == LIQUID_LAVA && (type == TILE_WATER.id || type == TILE_CALM_WATER.id)) {
+        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    }
+}
+
+static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    int hasAirNeighbor = 0;
+    if (Level_getTile(lvl, x - 1, y, z) == 0) hasAirNeighbor = 1;
+    if (Level_getTile(lvl, x + 1, y, z) == 0) hasAirNeighbor = 1;
+    if (Level_getTile(lvl, x, y, z - 1) == 0) hasAirNeighbor = 1;
+    if (Level_getTile(lvl, x, y, z + 1) == 0) hasAirNeighbor = 1;
+    if (Level_getTile(lvl, x, y - 1, z) == 0) hasAirNeighbor = 1;
+
+    if (hasAirNeighbor) {
+        Level_setTileNoUpdate(lvl, x, y, z, self->tileId); // start flowing again
+    }
+    if (self->liquidType == LIQUID_WATER && type == TILE_LAVA.id) {
+        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    }
+    if (self->liquidType == LIQUID_LAVA && type == TILE_WATER.id) {
+        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    }
 }
 
 static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
@@ -266,6 +346,22 @@ void Tile_registerAll(void) {
     TILE_CALM_WATER.getAABB = Liquid_getAABB;
     TILE_LAVA.getAABB       = Liquid_getAABB;
     TILE_CALM_LAVA.getAABB  = Liquid_getAABB;
+
+    // flowing variants: tileId==own id, calmTileId==the paired calm id
+    TILE_WATER.tileId = TILE_WATER.id; TILE_WATER.calmTileId = TILE_CALM_WATER.id; TILE_WATER.spreadSpeed = 8;
+    TILE_LAVA.tileId  = TILE_LAVA.id;  TILE_LAVA.calmTileId  = TILE_CALM_LAVA.id;  TILE_LAVA.spreadSpeed  = 2;
+    // calm variants share the same flowing/calm id pair as their flowing counterpart
+    TILE_CALM_WATER.tileId = TILE_WATER.id; TILE_CALM_WATER.calmTileId = TILE_CALM_WATER.id; TILE_CALM_WATER.spreadSpeed = 8;
+    TILE_CALM_LAVA.tileId  = TILE_LAVA.id;  TILE_CALM_LAVA.calmTileId  = TILE_CALM_LAVA.id;  TILE_CALM_LAVA.spreadSpeed  = 2;
+
+    TILE_WATER.onTick = Liquid_tick;
+    TILE_LAVA.onTick  = Liquid_tick;
+    // calm variants don't tick (setTicking(false) in the original)
+
+    TILE_WATER.neighborChanged      = Liquid_neighborChanged;
+    TILE_LAVA.neighborChanged       = Liquid_neighborChanged;
+    TILE_CALM_WATER.neighborChanged = CalmLiquid_neighborChanged;
+    TILE_CALM_LAVA.neighborChanged  = CalmLiquid_neighborChanged;
 }
 
 /* ---------- untextured single-face helper (for hit highlight) ---------- */

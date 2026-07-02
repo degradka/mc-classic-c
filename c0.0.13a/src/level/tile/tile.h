@@ -20,6 +20,10 @@ struct Tile {
     int textureId;
     int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
 
+    // Liquid-only instance data (0 for regular tiles): flowing/calm variant
+    // ids and how many tiles a spread can travel before stopping.
+    int tileId, calmTileId, spreadSpeed;
+
     int  (*getTexture)(const Tile* self, int face);
     void (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);
     void (*onTick)(const Tile* self, Level* lvl, int x, int y, int z);
@@ -28,6 +32,9 @@ struct Tile {
     int  (*blocksLight)(const Tile* self);
     // return 1 and fill *out on success; return 0 if no collision box
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
+
+    // Reaction to a neighboring block changing to `type`. Default no-op.
+    void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
 };
 
 // Global registry, index by tile id (0..255)
@@ -41,9 +48,9 @@ extern Tile TILE_STONEBRICK;// id=4
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
 
-// Minimal placeholder registration: correct id/liquidType/isSolid/collision/light
-// so LevelGen's flood-fill can place them. Flow ticking and the true non-cubic
-// render shape are ported separately in the full liquids pass.
+// Flow-ticking, spreading, and water/lava->rock conversion are wired up.
+// Still rendered as plain full cubes — the true non-cubic, translucent water
+// surface needs LevelRenderer's chunk-system rewrite, deferred separately.
 extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
 extern Tile TILE_LAVA;       // id=10
