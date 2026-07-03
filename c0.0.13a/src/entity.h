@@ -1,4 +1,4 @@
-// entity.h — parent entity with physics and movement
+// entity.h: parent entity with physics and movement
 
 #ifndef ENTITY_H
 #define ENTITY_H

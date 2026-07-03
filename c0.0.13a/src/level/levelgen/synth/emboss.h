@@ -1,4 +1,4 @@
-// level/levelgen/synth/emboss.h — first-derivative-ish edge emphasis over a source Synth
+// emboss.h: edge emphasis over a source Synth
 
 #ifndef EMBOSS_H
 #define EMBOSS_H

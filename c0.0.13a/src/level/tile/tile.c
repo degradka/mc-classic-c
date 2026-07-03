@@ -1,4 +1,4 @@
-// level/tile/tile.c — registry, per-face textures, render helpers
+// tile.c: registry, per face textures, render helpers
 
 #include "tile.h"
 #include "../../particle/particle_engine.h"
@@ -66,7 +66,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
         Tessellator_vertexUV(t, minX, maxY, maxZ, u0, v1);
     }
 
-    // -Z (face 2)
+    // negative Z (face 2)
     if (shouldRenderFace(lvl, x, y, z - 1, layer)) {
         Tessellator_color(t, shadeZ, shadeZ, shadeZ);
         calcUV(self->getTexture(self, 2), &u0, &v0, &u1, &v1);
@@ -86,7 +86,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
         Tessellator_vertexUV(t, maxX, maxY, maxZ, u1, v0);
     }
 
-    // -X (face 4)
+    // negative X (face 4)
     if (shouldRenderFace(lvl, x - 1, y, z, layer)) {
         Tessellator_color(t, shadeX, shadeX, shadeX);
         calcUV(self->getTexture(self, 4), &u0, &v0, &u1, &v1);
@@ -107,7 +107,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
     }
 }
 
-/* ---------- tile instances & registry ---------- */
+/* tile instances and registry */
 
 const Tile* gTiles[256] = { 0 };
 
@@ -141,7 +141,7 @@ Tile TILE_CALM_WATER;
 Tile TILE_LAVA;
 Tile TILE_CALM_LAVA;
 
-/* Grass (per-face textures) — face map: top=0, bottom=2, sides=3 */
+/* Grass has per face textures: top is 0, bottom is 2, sides are 3 */
 static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
     return (face == 1) ? 0 : (face == 0) ? 2 : 3;
@@ -155,11 +155,11 @@ static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
         // no sunlight reaching the block above: turn into dirt
         level_setTile(lvl, x, y, z, TILE_DIRT.id);
     } else {
-        // try 4 random neighbors
+        // try 4 random neighbors, matching Java's skewed vertical range
         for (int i = 0; i < 4; ++i) {
-            int tx = x + (rand() % 3) - 1;  // [-1..+1]
-            int ty = y + (rand() % 5) - 3;  // [-3..+1] (matches Java’s skew)
-            int tz = z + (rand() % 3) - 1;  // [-1..+1]
+            int tx = x + (rand() % 3) - 1;
+            int ty = y + (rand() % 5) - 3;
+            int tz = z + (rand() % 3) - 1;
             if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty + 1, tz)) {
                 level_setTile(lvl, tx, ty, tz, TILE_GRASS.id);
             }
@@ -174,18 +174,18 @@ static int Bush_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     return 0; // no collision box
 }
 
-/* Liquids — see tile.h comment above the externs */
+/* Liquids, see the tile.h comment above the externs */
 static int Liquid_isSolid(const Tile* self) { (void)self; return 0; }
 static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
-    return 0; // no collision box — matches LiquidTile.getAABB() returning null
+    return 0; // no collision box, matches LiquidTile.getAABB() returning null
 }
 
 static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth);
 
 // Falls straight down through air, then spreads to the 4 side neighbors.
-// Lava (LIQUID_LAVA) only ever falls one step per tick; water keeps falling
-// as long as it keeps succeeding — this asymmetry is in the original source.
+// Lava only ever falls one step per tick. Water keeps falling as long as
+// it keeps succeeding. This asymmetry is in the original source.
 static int Liquid_updateWater(const Tile* self, Level* lvl, int x, int y, int z, int depth) {
     int hasChanged = 0;
 
@@ -197,7 +197,7 @@ static int Liquid_updateWater(const Tile* self, Level* lvl, int x, int y, int z,
     y++;
 
     if (self->liquidType == LIQUID_WATER || !hasChanged) {
-        // deliberately not short-circuited: all 4 neighbors must always be checked
+        // deliberately not short circuited, all 4 neighbors must always be checked
         int c1 = Liquid_checkWater(self, lvl, x - 1, y, z, depth);
         int c2 = Liquid_checkWater(self, lvl, x + 1, y, z, depth);
         int c3 = Liquid_checkWater(self, lvl, x, y, z - 1, depth);
@@ -364,7 +364,7 @@ void Tile_registerAll(void) {
     TILE_CALM_LAVA.neighborChanged  = CalmLiquid_neighborChanged;
 }
 
-/* ---------- untextured single-face helper (for hit highlight) ---------- */
+/* untextured single face helper for hit highlight */
 void Face_render(Tessellator* t, int x, int y, int z, int face) {
     const float minX = (float)x,     maxX = (float)x + 1.0f;
     const float minY = (float)y,     maxY = (float)y + 1.0f;
@@ -380,17 +380,17 @@ void Face_render(Tessellator* t, int x, int y, int z, int face) {
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, maxZ);
-    } else if (face == 2) { // -Z
+    } else if (face == 2) { // negative Z
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, maxX, minY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);
-    } else if (face == 3) { // +Z
+    } else if (face == 3) { // positive Z
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, minY, maxZ);
         Tessellator_vertex(t, maxX, minY, maxZ);
         Tessellator_vertex(t, maxX, maxY, maxZ);
-    } else if (face == 4) { // -X
+    } else if (face == 4) { // negative X
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);

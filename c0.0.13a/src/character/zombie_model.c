@@ -1,4 +1,4 @@
-// character/zombie_model.c — extracted zombie model (cubes + animation)
+// zombie_model.c: extracted zombie model, cubes plus animation
 
 #include "zombie_model.h"
 #include "../common.h"

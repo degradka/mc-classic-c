@@ -1,14 +1,14 @@
-// level/level_renderer.h — chunk grid, frustum culling, dirty-marking, and hit highlight
+// level_renderer.h: chunk grid, frustum culling, dirty marking, and hit highlight
 
 #ifndef LEVELRENDERER_H
 #define LEVELRENDERER_H
 
 #include "../hitresult.h"
+#include "../renderer/frustum.h"
 
 struct Level;     typedef struct Level Level;
 struct Chunk;     typedef struct Chunk Chunk;
 struct HitResult; // forward
-struct Frustum;   typedef struct Frustum Frustum;
 
 struct Level;   typedef struct Level Level;
 struct Chunk;   typedef struct Chunk Chunk;
@@ -18,14 +18,14 @@ struct Player;  typedef struct Player Player;
 
 typedef struct LevelRenderer {
     Chunk*      chunks;
-    Chunk**     sortedChunks; // pointers into chunks[], kept distance-sorted
+    Chunk**     sortedChunks; // pointers into chunks[], kept sorted by distance
     int         chunkAmountX, chunkAmountY, chunkAmountZ;
 
     Level*      level;
     int         terrainTex;
 
     int         drawDistance; // 0..3, 0 = unlimited
-    double      lastSortX, lastSortY, lastSortZ; // player pos at last re-sort
+    double      lastSortX, lastSortY, lastSortZ; // player pos at the last sort
 
     unsigned int surroundLists; // glGenLists(2) base: +0 ground, +1 water
 } LevelRenderer;

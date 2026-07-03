@@ -1,4 +1,4 @@
-// level/level_renderer.c — chunk grid, frustum culling, dirty-marking, and hit highlight
+// level_renderer.c: chunk grid, frustum culling, dirty marking, and hit highlight
 
 #include <GL/glew.h>
 #include <GL/glu.h>
@@ -21,9 +21,10 @@ static Tessellator TESSELLATOR;
 
 extern Tessellator TESSELLATOR;  // use the global, like chunks do
 
-// c0.0.13a addition: an "infinite horizon" illusion — tiles rock.png/water.png
-// far out past the map edges so the world doesn't look like it has a hard
-// boundary. Compiled once into display lists (surroundLists +0 ground, +1 water).
+// c0.0.13a addition: an infinite horizon illusion that tiles rock.png and
+// water.png far out past the map edges so the world doesn't look like it
+// has a hard boundary. Compiled once into display lists, surroundLists
+// slot 0 is ground and slot 1 is water.
 static void compileSurroundingGround(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
     GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
@@ -32,7 +33,7 @@ static void compileSurroundingGround(LevelRenderer* r) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-    const float y = 32.0f - 2.0f; // Level.getGroundLevel() - 2 (ground level is hardcoded 32)
+    const float y = 32.0f - 2.0f; // Level.getGroundLevel() minus 2, ground level is hardcoded 32
     int s = 128;
     if (s > r->level->width)  s = r->level->width;
     if (s > r->level->height) s = r->level->height;
@@ -51,7 +52,7 @@ static void compileSurroundingGround(LevelRenderer* r) {
     }
     Tessellator_end(&TESSELLATOR);
 
-    // map-edge "walls" down to the ground plane
+    // walls at the map edge down to the ground plane
     glBindTexture(GL_TEXTURE_2D, rockTex);
     glColor3f(0.8f, 0.8f, 0.8f);
     Tessellator_begin(&TESSELLATOR);
@@ -150,7 +151,7 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     }
 
     r->drawDistance = 0;
-    // force an immediate distance re-sort on the first render() call
+    // force an immediate distance sort on the first render() call
     r->lastSortX = r->lastSortY = r->lastSortZ = -900000.0;
 
     r->surroundLists = glGenLists(2);
@@ -217,14 +218,14 @@ void LevelRenderer_destroy(LevelRenderer* r) {
     free(r->sortedChunks);
 }
 
-/* --- dirty-chunk prioritization -------------------------------------------- */
+/* dirty chunk prioritization */
 
 // sort state for qsort comparator
 static const Player* gSortPlayer = NULL;
 
-// matches c0.0.13a's simplified DirtyChunkSorter: visible chunks first (using
-// the flag LevelRenderer_cull already set this frame), then nearest first.
-// The old dirtiedTime/staleness tiebreak was dropped in this version.
+// matches c0.0.13a's simplified DirtyChunkSorter: visible chunks first, using
+// the flag LevelRenderer_cull already set this frame, then nearest first.
+// The old dirtiedTime staleness tiebreak was dropped in this version.
 static int dirty_cmp(const void* a, const void* b) {
     const Chunk* c1 = *(const Chunk* const*)a;
     const Chunk* c2 = *(const Chunk* const*)b;
@@ -267,15 +268,15 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
 }
 
 /*
-    - mode 0: additive pulsing, untextured full-cube outline (all 6 faces)
-    - mode 1: alpha-blended, textured preview block on the adjacent cell,
-              rendered in both layers (0 & 1)
+   mode 0 is additive pulsing, an untextured full cube outline on all 6 faces
+   mode 1 is alpha blended, a textured preview block on the adjacent cell,
+   rendered in both layers (0 and 1)
 */
 void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileId) {
     if (!h) return;
 
     if (mode == 0) {
-        // --- Destroy highlight: additive, pulsing; draw all 6 faces untextured
+        // destroy highlight: additive, pulsing, draws all 6 faces untextured
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
@@ -291,7 +292,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         return;
     }
 
-    // --- Place preview: alpha blend, pulsing tint+alpha on adjacent cell
+    // place preview: alpha blend, pulsing tint and alpha on adjacent cell
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -303,10 +304,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     switch (h->f) {
         case 0: ny = -1; break; // bottom
         case 1: ny =  1; break; // top
-        case 2: nz = -1; break; // -Z
-        case 3: nz =  1; break; // +Z
-        case 4: nx = -1; break; // -X
-        case 5: nx =  1; break; // +X
+        case 2: nz = -1; break; // negative Z
+        case 3: nz =  1; break; // positive Z
+        case 4: nx = -1; break; // negative X
+        case 5: nx =  1; break; // positive X
     }
     const int x = h->x + nx, y = h->y + ny, z = h->z + nz;
 

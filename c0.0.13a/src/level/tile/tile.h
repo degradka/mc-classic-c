@@ -1,4 +1,4 @@
-// level/tile/tile.h — tile registry, per-face textures, render helpers
+// tile.h: tile registry, per face textures, render helpers
 
 #ifndef TILE_H
 #define TILE_H
@@ -20,8 +20,8 @@ struct Tile {
     int textureId;
     int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
 
-    // Liquid-only instance data (0 for regular tiles): flowing/calm variant
-    // ids and how many tiles a spread can travel before stopping.
+    // Liquid only instance data, zero for regular tiles. Flowing and calm
+    // variant ids, and how many tiles a spread can travel before stopping.
     int tileId, calmTileId, spreadSpeed;
 
     int  (*getTexture)(const Tile* self, int face);
@@ -33,7 +33,7 @@ struct Tile {
     // return 1 and fill *out on success; return 0 if no collision box
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
 
-    // Reaction to a neighboring block changing to `type`. Default no-op.
+    // Reaction to a neighboring block changing to `type`. Default is a no op.
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
 };
 
@@ -48,9 +48,9 @@ extern Tile TILE_STONEBRICK;// id=4
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
 
-// Flow-ticking, spreading, and water/lava->rock conversion are wired up.
-// Still rendered as plain full cubes — the true non-cubic, translucent water
-// surface needs LevelRenderer's chunk-system rewrite, deferred separately.
+// Flow ticking, spreading, and water and lava turning to rock are wired up.
+// Still rendered as plain full cubes. The true non cubic, translucent water
+// surface needs LevelRenderer's chunk system rewrite, deferred separately.
 extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
 extern Tile TILE_LAVA;       // id=10

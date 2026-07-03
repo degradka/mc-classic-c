@@ -1,4 +1,4 @@
-// level/chunk.h — chunk display lists, rebuild & render
+// chunk.h: chunk display lists, rebuild and render
 
 #ifndef CHUNK_H
 #define CHUNK_H

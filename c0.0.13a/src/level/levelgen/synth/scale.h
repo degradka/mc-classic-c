@@ -1,4 +1,4 @@
-// level/levelgen/synth/scale.h — scales the sampling coordinates of a source Synth
+// scale.h: scales the sampling coordinates of a source Synth
 
 #ifndef SCALE_H
 #define SCALE_H

@@ -1,4 +1,4 @@
-// hitresult.c — block raycast result
+// hitresult.c: block raycast result
 
 #include "hitresult.h"
 #include "player.h"

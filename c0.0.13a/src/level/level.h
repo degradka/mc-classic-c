@@ -1,4 +1,4 @@
-// level/level.h — world storage, lighting columns, IO, and solid-cube queries
+// level.h: world storage, lighting columns, IO, and solid cube queries
 
 #ifndef LEVEL_H
 #define LEVEL_H

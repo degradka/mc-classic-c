@@ -1,4 +1,4 @@
-// timer.h — fixed-timestep timer (ticks & partialTicks)
+// timer.h: fixed timestep timer, ticks and partialTicks
 
 #ifndef TIMER_H
 #define TIMER_H

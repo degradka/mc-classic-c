@@ -1,4 +1,4 @@
-// character/zombie_model.h — extracted zombie model (cubes + animation)
+// zombie_model.h: extracted zombie model, cubes plus animation
 
 #ifndef ZOMBIE_MODEL_H
 #define ZOMBIE_MODEL_H

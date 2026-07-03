@@ -1,4 +1,4 @@
-// level/level.c — world storage, lighting columns, IO, and solid-cube queries
+// level.c: world storage, lighting columns, IO, and solid cube queries
 
 #include "level.h"
 #include "level_renderer.h"
@@ -50,8 +50,8 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
 }
 
 void Level_generateMap(Level* level) {
-    // c0.0.13a replaced the old Perlin-hills generator with flat terrain +
-    // carved caves + flood-filled lakes (see level_gen.h for why it's flat).
+    // c0.0.13a replaced the old Perlin hills generator with flat terrain,
+    // carved caves and flood filled lakes (see level_gen.h for why it's flat).
     LevelGen_generateMap(level);
 }
 
@@ -145,7 +145,7 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
         int id = Level_getTile(level, x, y, z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (!t) continue;
-        // Classic tiles are axis-aligned unit cubes; keep the hook anyway:
+        // Classic tiles are axis aligned unit cubes but keep the hook anyway:
         AABB box = AABB_create(x, y, z, x+1, y+1, z+1);
         if (t->isSolid && t->isSolid(t)) {
             if (out.size == out.capacity) {
@@ -212,8 +212,8 @@ bool level_setTile(Level* level, int x, int y, int z, int type) {
     return true;
 }
 
-// No neighbor notification, no light recalc, no renderer refresh — used by
-// liquid tick reactions to avoid cascading recursion (matches Java exactly).
+// No neighbor notification, no light recalc, no renderer refresh. Used by
+// liquid tick reactions to avoid cascading recursion, matching Java exactly.
 bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
     int index = (y * level->height + z) * level->width + x;

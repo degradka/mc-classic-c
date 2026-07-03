@@ -1,4 +1,4 @@
-// level/levelgen/synth/synth.h — noise-generator base interface (not wired into terrain gen yet)
+// synth.h: noise generator base interface, not wired into terrain gen yet
 
 #ifndef SYNTH_H
 #define SYNTH_H

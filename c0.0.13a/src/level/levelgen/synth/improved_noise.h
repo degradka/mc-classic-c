@@ -1,4 +1,4 @@
-// level/levelgen/synth/improved_noise.h — Ken Perlin's "improved noise" (2002)
+// improved_noise.h: Ken Perlin's improved noise algorithm from 2002
 
 #ifndef IMPROVED_NOISE_H
 #define IMPROVED_NOISE_H

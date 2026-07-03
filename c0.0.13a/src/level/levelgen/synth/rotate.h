@@ -1,4 +1,4 @@
-// level/levelgen/synth/rotate.h — rotates the sampling coordinates of a source Synth
+// rotate.h: rotates the sampling coordinates of a source Synth
 
 #ifndef ROTATE_H
 #define ROTATE_H

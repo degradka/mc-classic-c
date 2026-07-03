@@ -1,4 +1,4 @@
-// hitresult.h — block raycast result
+// hitresult.h: block raycast result
 
 #ifndef HITRESULT_H
 #define HITRESULT_H

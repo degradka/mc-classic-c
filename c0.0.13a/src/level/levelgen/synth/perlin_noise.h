@@ -1,4 +1,4 @@
-// level/levelgen/synth/perlin_noise.h — sum of ImprovedNoise octaves
+// perlin_noise.h: sum of ImprovedNoise octaves
 
 #ifndef PERLIN_NOISE_H
 #define PERLIN_NOISE_H

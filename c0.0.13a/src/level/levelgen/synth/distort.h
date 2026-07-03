@@ -1,4 +1,4 @@
-// level/levelgen/synth/distort.h — offsets a source Synth's X coordinate by another Synth
+// distort.h: offsets a source Synth's X coordinate by another Synth
 
 #ifndef DISTORT_H
 #define DISTORT_H

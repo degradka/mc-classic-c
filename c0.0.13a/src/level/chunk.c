@@ -1,4 +1,4 @@
-// level/chunk.c — chunk display lists, rebuild & render
+// chunk.c: chunk display lists, rebuild and render
 
 #include "chunk.h"
 #include "tile/tile.h"
