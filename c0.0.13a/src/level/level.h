@@ -21,6 +21,11 @@ typedef struct Level {
     int*  lightDepths;
     LevelRenderer* renderer;  // backref used for dirty notifications
     int unprocessed;
+
+    // save metadata, round tripped through level.dat but not used elsewhere
+    char name[64];
+    char creator[64];
+    long long createTime;
 } Level;
 
 typedef struct {

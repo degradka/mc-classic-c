@@ -265,6 +265,7 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     for (int i = 0; i < limit; ++i) {
         Chunk_rebuild(list[i], 0);
         Chunk_rebuild(list[i], 1);
+        Chunk_rebuild(list[i], 2);
     }
 
     return limit;

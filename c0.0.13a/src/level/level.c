@@ -8,6 +8,7 @@
 #include <zlib.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 
 void Level_init(Level* level, int width, int height, int depth) {
@@ -24,12 +25,14 @@ void Level_init(Level* level, int width, int height, int depth) {
         exit(EXIT_FAILURE);
     }
 
+    // Level_load frees and reallocates blocks/lightDepths at the file's own
+    // dimensions if they differ from the boot size passed in above
     bool mapLoaded = Level_load(level);
     if (!mapLoaded) {
         Level_generateMap(level);
     }
 
-    calcLightDepths(level, 0, 0, width, height);
+    calcLightDepths(level, 0, 0, level->width, level->height);
 }
 
 // used by the pause menu's Generate new level, which regenerates at a
@@ -151,30 +154,32 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
     ArrayList_AABB out = { .size = 0, .capacity = 16 };
     out.aabbs = (AABB*)malloc((size_t)out.capacity * sizeof(AABB));
 
-    int x0 = (int)aabb->minX;
-    int x1 = (int)(aabb->maxX + 1.0);
-    int y0 = (int)aabb->minY;
-    int y1 = (int)(aabb->maxY + 1.0);
-    int z0 = (int)aabb->minZ;
-    int z1 = (int)(aabb->maxZ + 1.0);
-
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (z0 < 0) z0 = 0;
-
-    if (x1 > level->width)  x1 = level->width;
-    if (y1 > level->depth)  y1 = level->depth;
-    if (z1 > level->height) z1 = level->height;
+    int x0 = (int)floor(aabb->minX);
+    int x1 = (int)floor(aabb->maxX + 1.0);
+    int y0 = (int)floor(aabb->minY);
+    int y1 = (int)floor(aabb->maxY + 1.0);
+    int z0 = (int)floor(aabb->minZ);
+    int z1 = (int)floor(aabb->maxZ + 1.0);
 
     for (int x = x0; x < x1; ++x)
     for (int y = y0; y < y1; ++y)
     for (int z = z0; z < z1; ++z) {
-        int id = Level_getTile(level, x, y, z);
-        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-        if (!t) continue;
-        // Classic tiles are axis aligned unit cubes but keep the hook anyway:
-        AABB box = AABB_create(x, y, z, x+1, y+1, z+1);
-        if (t->isSolid && t->isSolid(t)) {
+        AABB box;
+        int haveBox = 0;
+
+        if (x >= 0 && y >= 0 && z >= 0 && x < level->width && y < level->depth && z < level->height) {
+            int id = Level_getTile(level, x, y, z);
+            const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+            if (t && t->getAABB && t->getAABB(t, x, y, z, &box)) haveBox = 1;
+        } else if (x < 0 || y < 0 || z < 0 || x >= level->width || z >= level->height) {
+            // outside the map horizontally: an invisible unbreakable wall.
+            // vertically out of bounds (below the floor or above the map) is
+            // deliberately left open, matching Java exactly
+            box = AABB_create(x, y, z, x+1, y+1, z+1);
+            haveBox = 1;
+        }
+
+        if (haveBox) {
             if (out.size == out.capacity) {
                 out.capacity *= 2;
                 out.aabbs = (AABB*)realloc(out.aabbs, (size_t)out.capacity * sizeof(AABB));
@@ -185,17 +190,110 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
     return out;
 }
 
+// level.dat is a gzipped stream of Java DataOutputStream primitives, all
+// big endian: magic, version, three UTF strings/longs of save metadata,
+// width/height/depth as shorts, then the raw block bytes
+
+#define LEVEL_MAGIC 656127880
+
+static int readU16(gzFile f, unsigned short* out) {
+    unsigned char b[2];
+    if (gzread(f, b, 2) != 2) return 0;
+    *out = (unsigned short)((b[0] << 8) | b[1]);
+    return 1;
+}
+
+static int readI64(gzFile f, long long* out) {
+    unsigned char b[8];
+    if (gzread(f, b, 8) != 8) return 0;
+    long long v = 0;
+    for (int i = 0; i < 8; ++i) v = (v << 8) | b[i];
+    *out = v;
+    return 1;
+}
+
+static int readUTF(gzFile f, char* out, size_t outSize) {
+    unsigned short len;
+    if (!readU16(f, &len)) return 0;
+
+    size_t toCopy = ((size_t)len < outSize - 1) ? (size_t)len : outSize - 1;
+    if (toCopy > 0 && gzread(f, out, (unsigned)toCopy) != (int)toCopy) return 0;
+    out[toCopy] = '\0';
+
+    size_t remaining = (size_t)len - toCopy;
+    char discard[64];
+    while (remaining > 0) {
+        size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
+        if (gzread(f, discard, (unsigned)chunk) != (int)chunk) return 0;
+        remaining -= chunk;
+    }
+    return 1;
+}
+
+static void writeU16(gzFile f, unsigned short v) {
+    unsigned char b[2] = { (unsigned char)(v >> 8), (unsigned char)v };
+    gzwrite(f, b, 2);
+}
+
+static void writeI64(gzFile f, long long v) {
+    unsigned char b[8];
+    for (int i = 0; i < 8; ++i) b[i] = (unsigned char)(v >> (56 - i * 8));
+    gzwrite(f, b, 8);
+}
+
+static void writeUTF(gzFile f, const char* s) {
+    size_t len = strlen(s);
+    writeU16(f, (unsigned short)len);
+    gzwrite(f, s, (unsigned)len);
+}
+
 bool Level_load(Level* level) {
     gzFile f = gzopen("level.dat", "rb");
     if (!f) return false;
 
-    size_t total = (size_t)level->width * level->height * level->depth;
-    int readBytes = gzread(f, level->blocks, (unsigned)total);
+    unsigned char header[5];
+    if (gzread(f, header, 5) != 5) { gzclose(f); return false; }
+    int magic = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
+    if (magic != LEVEL_MAGIC || header[4] > 1) { gzclose(f); return false; }
+
+    char name[64], creator[64];
+    long long createTime;
+    if (!readUTF(f, name, sizeof(name)) ||
+        !readUTF(f, creator, sizeof(creator)) ||
+        !readI64(f, &createTime)) {
+        gzclose(f);
+        return false;
+    }
+
+    unsigned short w, h, d;
+    if (!readU16(f, &w) || !readU16(f, &h) || !readU16(f, &d)) { gzclose(f); return false; }
+
+    size_t total = (size_t)w * h * d;
+    byte* blocks = (byte*)malloc(total);
+    if (!blocks) { gzclose(f); return false; }
+
+    if (gzread(f, blocks, (unsigned)total) != (int)total) {
+        free(blocks);
+        gzclose(f);
+        return false;
+    }
     gzclose(f);
 
-    if (readBytes != (int)total) {
-        // corrupted/short file
-        return false;
+    free(level->blocks);
+    free(level->lightDepths);
+
+    level->width  = w;
+    level->height = h;
+    level->depth  = d;
+    level->blocks = blocks;
+    memcpy(level->name, name, sizeof(name));
+    memcpy(level->creator, creator, sizeof(creator));
+    level->createTime = createTime;
+
+    level->lightDepths = (int*)malloc((size_t)w * h * sizeof(int));
+    if (!level->lightDepths) {
+        fprintf(stderr, "Failed to allocate level memory\n");
+        exit(EXIT_FAILURE);
     }
 
     // notify renderer for a full refresh
@@ -208,7 +306,23 @@ bool Level_load(Level* level) {
 void Level_save(const Level* level) {
     gzFile f = gzopen("level.dat", "wb");
     if (!f) return;
-    gzwrite(f, level->blocks, (unsigned)(level->width * level->height * level->depth));
+
+    unsigned char header[5] = {
+        (unsigned char)(LEVEL_MAGIC >> 24), (unsigned char)(LEVEL_MAGIC >> 16),
+        (unsigned char)(LEVEL_MAGIC >> 8),  (unsigned char)LEVEL_MAGIC,
+        1
+    };
+    gzwrite(f, header, 5);
+
+    writeUTF(f, level->name);
+    writeUTF(f, level->creator);
+    writeI64(f, level->createTime);
+
+    writeU16(f, (unsigned short)level->width);
+    writeU16(f, (unsigned short)level->height);
+    writeU16(f, (unsigned short)level->depth);
+
+    gzwrite(f, level->blocks, (unsigned)((size_t)level->width * level->height * level->depth));
     gzclose(f);
 }
 

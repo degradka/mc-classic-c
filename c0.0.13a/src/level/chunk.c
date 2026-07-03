@@ -30,11 +30,11 @@ void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int 
     c->z = (minZ + maxZ) * 0.5;
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
-    c->lists = glGenLists(2);
+    c->lists = glGenLists(3);
 }
 
 void Chunk_destroy(Chunk* c) {
-    glDeleteLists(c->lists, 2);
+    glDeleteLists(c->lists, 3);
 }
 
 void Chunk_rebuild(Chunk* c, int layer) {

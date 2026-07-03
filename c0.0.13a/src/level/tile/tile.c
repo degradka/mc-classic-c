@@ -7,6 +7,7 @@
 
 static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
+static int Tile_default_mayPick(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_getAABB(const Tile* self, int x,int y,int z, AABB* out) {
     (void)self;
     if (out) *out = AABB_create(x, y, z, x+1, y+1, z+1);
@@ -18,93 +19,149 @@ static int Tile_default_getTexture(const Tile* self, int face) {
     return self->textureId;
 }
 
-static inline int shouldRenderFace(const Level* lvl, int x, int y, int z, int layer) {
-    // match Java logic: face visible if not solid AND (isLit XOR (layer==1))
-    const int lit = (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
-                  ? 1
-                  : (y >= lvl->lightDepths[x + z * lvl->width]);
-    return (!Level_isSolidTile(lvl, x, y, z)) && ((lit ^ (layer == 1)) != 0);
+// Base per face visibility. layer==2 is the liquid only layer, so a plain
+// tile never shows there. layer<0 is a sentinel liquids pass in to skip the
+// lit check entirely and fall back to a plain solidity test.
+static int Tile_default_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+    (void)self; (void)face;
+    if (layer == 2) return 0;
+    int lit = 1;
+    if (layer >= 0) lit = Level_isLit(lvl, x, y, z) ^ (layer == 1);
+    return (!Level_isSolidTile(lvl, x, y, z)) && (lit != 0);
 }
 
-// helper to compute UVs from atlas slot (16x16 tiles on 256x256)
+static void Tile_default_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
+    int tex = self->getTexture(self, face);
+    int xt = (tex % 16) * 16;
+    int yt = (tex / 16) * 16;
+    float u0 = xt / 256.0f;
+    float u1 = (xt + 15.99f) / 256.0f;
+    float v0 = yt / 256.0f;
+    float v1 = (yt + 15.99f) / 256.0f;
+
+    float x0 = x + self->xx0, x1 = x + self->xx1;
+    float y0 = y + self->yy0, y1 = y + self->yy1;
+    float z0 = z + self->zz0, z1 = z + self->zz1;
+
+    if (face == 0) {
+        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v0);
+        Tessellator_vertexUV(t, x1, y0, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+    } else if (face == 1) {
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v1);
+        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y1, z1, u0, v1);
+    } else if (face == 2) {
+        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x1, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
+    } else if (face == 3) {
+        Tessellator_vertexUV(t, x0, y1, z1, u0, v0);
+        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
+    } else if (face == 4) {
+        Tessellator_vertexUV(t, x0, y1, z1, u1, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z1, u1, v1);
+    } else if (face == 5) {
+        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x1, y0, z0, u1, v1);
+        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
+    }
+}
+
+// Reversed winding, older fractional UV padding. Used by liquids to draw a
+// back face for the surface so it's visible from both sides, matches the
+// original source keeping this formula while renderFace moved to the
+// integer pixel one.
+static void Tile_renderBackFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
+    int tex = self->getTexture(self, face);
+    float u0 = (tex % 16) / 16.0f;
+    float u1 = u0 + 0.0624375f;
+    float v0 = (tex / 16) / 16.0f;
+    float v1 = v0 + 0.0624375f;
+
+    float x0 = x + self->xx0, x1 = x + self->xx1;
+    float y0 = y + self->yy0, y1 = y + self->yy1;
+    float z0 = z + self->zz0, z1 = z + self->zz1;
+
+    if (face == 0) {
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+        Tessellator_vertexUV(t, x1, y0, z0, u1, v0);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
+    } else if (face == 1) {
+        Tessellator_vertexUV(t, x0, y1, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v1);
+    } else if (face == 2) {
+        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
+        Tessellator_vertexUV(t, x1, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x1, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
+    } else if (face == 3) {
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y1, z1, u0, v0);
+    } else if (face == 4) {
+        Tessellator_vertexUV(t, x0, y0, z1, u1, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y1, z1, u1, v0);
+    } else if (face == 5) {
+        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
+        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y0, z0, u1, v1);
+        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
+    }
+}
+
+static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
+    const float c1 = 1.0f, c2 = 0.8f, c3 = 0.6f;
+
+    if (self->shouldRenderFace(self, lvl, x, y - 1, z, layer, 0)) {
+        Tessellator_color(t, c1, c1, c1);
+        self->renderFace(self, t, x, y, z, 0);
+    }
+    if (self->shouldRenderFace(self, lvl, x, y + 1, z, layer, 1)) {
+        Tessellator_color(t, c1, c1, c1);
+        self->renderFace(self, t, x, y, z, 1);
+    }
+    if (self->shouldRenderFace(self, lvl, x, y, z - 1, layer, 2)) {
+        Tessellator_color(t, c2, c2, c2);
+        self->renderFace(self, t, x, y, z, 2);
+    }
+    if (self->shouldRenderFace(self, lvl, x, y, z + 1, layer, 3)) {
+        Tessellator_color(t, c2, c2, c2);
+        self->renderFace(self, t, x, y, z, 3);
+    }
+    if (self->shouldRenderFace(self, lvl, x - 1, y, z, layer, 4)) {
+        Tessellator_color(t, c3, c3, c3);
+        self->renderFace(self, t, x, y, z, 4);
+    }
+    if (self->shouldRenderFace(self, lvl, x + 1, y, z, layer, 5)) {
+        Tessellator_color(t, c3, c3, c3);
+        self->renderFace(self, t, x, y, z, 5);
+    }
+}
+
+// helper to compute UVs from atlas slot (16x16 tiles on 256x256), used by
+// tiles with fully custom render() like Bush that bypass shouldRenderFace/renderFace
 static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
-    // 16x16 tiles in a 256x256 atlas
     float minU = (slot % 16) / 16.0f;
     float minV = (slot / 16) / 16.0f;
     *u0 = minU;
     *v0 = minV;
     *u1 = minU + 16.0f / 256.0f;
     *v1 = minV + 16.0f / 256.0f;
-}
-
-static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
-    const float shadeX = 0.6f, shadeY = 1.0f, shadeZ = 0.8f;
-
-    const float minX = (float)x, maxX = (float)x + 1.0f;
-    const float minY = (float)y, maxY = (float)y + 1.0f;
-    const float minZ = (float)z, maxZ = (float)z + 1.0f;
-
-    float u0, v0, u1, v1;
-
-    // bottom (face 0)
-    if (shouldRenderFace(lvl, x, y - 1, z, layer)) {
-        Tessellator_color(t, 1.0f, 1.0f, 1.0f);
-        calcUV(self->getTexture(self, 0), &u0,&v0,&u1,&v1);
-        Tessellator_vertexUV(t, minX, minY, maxZ, u0, v1);
-        Tessellator_vertexUV(t, minX, minY, minZ, u0, v0);
-        Tessellator_vertexUV(t, maxX, minY, minZ, u1, v0);
-        Tessellator_vertexUV(t, maxX, minY, maxZ, u1, v1);
-    }
-
-    // top (face 1)
-    if (shouldRenderFace(lvl, x, y + 1, z, layer)) {
-        Tessellator_color(t, shadeY, shadeY, shadeY);
-        calcUV(self->getTexture(self, 1), &u0, &v0, &u1, &v1);
-        Tessellator_vertexUV(t, maxX, maxY, maxZ, u1, v1);
-        Tessellator_vertexUV(t, maxX, maxY, minZ, u1, v0);
-        Tessellator_vertexUV(t, minX, maxY, minZ, u0, v0);
-        Tessellator_vertexUV(t, minX, maxY, maxZ, u0, v1);
-    }
-
-    // negative Z (face 2)
-    if (shouldRenderFace(lvl, x, y, z - 1, layer)) {
-        Tessellator_color(t, shadeZ, shadeZ, shadeZ);
-        calcUV(self->getTexture(self, 2), &u0, &v0, &u1, &v1);
-        Tessellator_vertexUV(t, minX, maxY, minZ, u1, v0);
-        Tessellator_vertexUV(t, maxX, maxY, minZ, u0, v0);
-        Tessellator_vertexUV(t, maxX, minY, minZ, u0, v1);
-        Tessellator_vertexUV(t, minX, minY, minZ, u1, v1);
-    }
-
-    // +Z (face 3)
-    if (shouldRenderFace(lvl, x, y, z + 1, layer)) {
-        Tessellator_color(t, shadeZ, shadeZ, shadeZ);
-        calcUV(self->getTexture(self, 3), &u0, &v0, &u1, &v1);
-        Tessellator_vertexUV(t, minX, maxY, maxZ, u0, v0);
-        Tessellator_vertexUV(t, minX, minY, maxZ, u0, v1);
-        Tessellator_vertexUV(t, maxX, minY, maxZ, u1, v1);
-        Tessellator_vertexUV(t, maxX, maxY, maxZ, u1, v0);
-    }
-
-    // negative X (face 4)
-    if (shouldRenderFace(lvl, x - 1, y, z, layer)) {
-        Tessellator_color(t, shadeX, shadeX, shadeX);
-        calcUV(self->getTexture(self, 4), &u0, &v0, &u1, &v1);
-        Tessellator_vertexUV(t, minX, maxY, maxZ, u1, v0);
-        Tessellator_vertexUV(t, minX, maxY, minZ, u0, v0);
-        Tessellator_vertexUV(t, minX, minY, minZ, u0, v1);
-        Tessellator_vertexUV(t, minX, minY, maxZ, u1, v1);
-    }
-
-    // +X (face 5)
-    if (shouldRenderFace(lvl, x + 1, y, z, layer)) {
-        Tessellator_color(t, shadeX, shadeX, shadeX);
-        calcUV(self->getTexture(self, 5), &u0, &v0, &u1, &v1);
-        Tessellator_vertexUV(t, maxX, minY, maxZ, u0, v1);
-        Tessellator_vertexUV(t, maxX, minY, minZ, u1, v1);
-        Tessellator_vertexUV(t, maxX, maxY, minZ, u1, v0);
-        Tessellator_vertexUV(t, maxX, maxY, maxZ, u0, v0);
-    }
 }
 
 /* tile instances and registry */
@@ -119,13 +176,18 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
+    t->xx0 = t->yy0 = t->zz0 = 0.0f;
+    t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
     t->render = Tile_render_shared;
     t->onTick = NULL;
     t->isSolid     = Tile_default_isSolid;
     t->blocksLight = Tile_default_blocksLight;
     t->getAABB     = Tile_default_getAABB;
+    t->mayPick     = Tile_default_mayPick;
     t->neighborChanged = Tile_default_neighborChanged;
+    t->shouldRenderFace = Tile_default_shouldRenderFace;
+    t->renderFace = Tile_default_renderFace;
 
     gTiles[id] = t;
 }
@@ -180,6 +242,7 @@ static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
     return 0; // no collision box, matches LiquidTile.getAABB() returning null
 }
+static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
 
 static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth);
 
@@ -232,6 +295,25 @@ static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, i
     if (self->liquidType == LIQUID_LAVA && (type == TILE_WATER.id || type == TILE_CALM_WATER.id)) {
         Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
     }
+}
+
+// Water only shows in the dedicated liquid layer, lava shows in every layer
+// via the -1 sentinel it passes to the base check. Skips the same liquid
+// type on the neighboring tile so touching water or lava tiles don't draw
+// an internal face between them.
+static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+    if (x < 0 || y < 0 || z < 0 || x >= lvl->width || z >= lvl->height) return 0;
+    if (layer != 2 && self->liquidType == LIQUID_WATER) return 0;
+
+    int id = Level_getTile(lvl, x, y, z);
+    if (id == self->tileId || id == self->calmTileId) return 0;
+
+    return Tile_default_shouldRenderFace(self, lvl, x, y, z, -1, face);
+}
+
+static void Liquid_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
+    Tile_default_renderFace(self, t, x, y, z, face);
+    Tile_renderBackFace(self, t, x, y, z, face);
 }
 
 static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
@@ -346,6 +428,26 @@ void Tile_registerAll(void) {
     TILE_CALM_WATER.getAABB = Liquid_getAABB;
     TILE_LAVA.getAABB       = Liquid_getAABB;
     TILE_CALM_LAVA.getAABB  = Liquid_getAABB;
+
+    TILE_WATER.mayPick      = Liquid_mayPick;
+    TILE_CALM_WATER.mayPick = Liquid_mayPick;
+    TILE_LAVA.mayPick       = Liquid_mayPick;
+    TILE_CALM_LAVA.mayPick  = Liquid_mayPick;
+
+    // shape is a full block minus a thin sliver off the top, so the surface
+    // sits slightly below a full block
+    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.1f;
+    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.9f;
+
+    TILE_WATER.shouldRenderFace      = Liquid_shouldRenderFace;
+    TILE_CALM_WATER.shouldRenderFace = Liquid_shouldRenderFace;
+    TILE_LAVA.shouldRenderFace       = Liquid_shouldRenderFace;
+    TILE_CALM_LAVA.shouldRenderFace  = Liquid_shouldRenderFace;
+
+    TILE_WATER.renderFace      = Liquid_renderFace;
+    TILE_CALM_WATER.renderFace = Liquid_renderFace;
+    TILE_LAVA.renderFace       = Liquid_renderFace;
+    TILE_CALM_LAVA.renderFace  = Liquid_renderFace;
 
     // flowing variants: tileId==own id, calmTileId==the paired calm id
     TILE_WATER.tileId = TILE_WATER.id; TILE_WATER.calmTileId = TILE_CALM_WATER.id; TILE_WATER.spreadSpeed = 8;

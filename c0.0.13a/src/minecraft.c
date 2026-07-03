@@ -67,7 +67,7 @@ static int gWinWidth  = 854;
 static int gWinHeight = 480;
 static int gIsFullscreen = 0;
 
-static GLfloat fogColorDaylight[4] = { 254.0f/255.0f, 251.0f/255.0f, 250.0f/255.0f, 1.0f };
+static GLfloat fogColorDaylight[4] = { 0.5f, 0.8f, 1.0f, 1.0f };
 static GLfloat fogColorShadow  [4] = {  14.0f/255.0f,  11.0f/255.0f,  10.0f/255.0f, 1.0f };
 
 static int      isHitNull = 1;
@@ -184,20 +184,41 @@ static void setupFog(int type) {
     glEnable(GL_FOG);
     glFogi(GL_FOG_MODE, GL_EXP);
 
-    if (type == 0) { // daylight
+    int px = (int)floor(player.e.x);
+    int py = (int)floor(player.e.y + 0.12);
+    int pz = (int)floor(player.e.z);
+    const Tile* currentTile = gTiles[Level_getTile(&level, px, py, pz)];
+
+    GLfloat ambient[4];
+
+    // whichever liquid the player's head is inside overrides the daylight
+    // and shadow fog entirely, regardless of which layer is being drawn
+    if (currentTile && currentTile->liquidType == LIQUID_WATER) {
+        GLfloat waterFog[4] = { 0.02f, 0.02f, 0.2f, 1.0f };
+        glFogf(GL_FOG_DENSITY, 0.1f);
+        glFogfv(GL_FOG_COLOR, waterFog);
+        ambient[0] = 0.3f; ambient[1] = 0.3f; ambient[2] = 0.7f; ambient[3] = 1.0f;
+    } else if (currentTile && currentTile->liquidType == LIQUID_LAVA) {
+        GLfloat lavaFog[4] = { 0.6f, 0.1f, 0.0f, 1.0f };
+        glFogf(GL_FOG_DENSITY, 2.0f);
+        glFogfv(GL_FOG_COLOR, lavaFog);
+        ambient[0] = 0.4f; ambient[1] = 0.3f; ambient[2] = 0.3f; ambient[3] = 1.0f;
+    } else if (type == 0) { // daylight
         glFogf(GL_FOG_DENSITY, 0.001f);
         glFogfv(GL_FOG_COLOR, fogColorDaylight);
-        glDisable(GL_LIGHTING);
-        glDisable(GL_COLOR_MATERIAL);
-    } else {         // shadow
+        ambient[0] = 1.0f; ambient[1] = 1.0f; ambient[2] = 1.0f; ambient[3] = 1.0f;
+    } else {                 // shadow
         glFogf(GL_FOG_DENSITY, 0.01f);
         glFogfv(GL_FOG_COLOR, fogColorShadow);
-        glEnable(GL_LIGHTING);
-        glEnable(GL_COLOR_MATERIAL);
-
-        GLfloat ambient[4] = { 0.6f, 0.6f, 0.6f, 1.0f };
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+        ambient[0] = 0.6f; ambient[1] = 0.6f; ambient[2] = 0.6f; ambient[3] = 1.0f;
     }
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+
+    glEnable(GL_NORMALIZE);
+    glColorMaterial(GL_FRONT, GL_AMBIENT);
+    glEnable(GL_COLOR_MATERIAL);
+    glEnable(GL_LIGHTING);
 }
 
 /* boot and shutdown */
@@ -324,9 +345,8 @@ static void drawGui(float partialTicks) {
     // Clear depth so HUD draws on top
     glClear(GL_DEPTH_BUFFER_BIT);
 
-    // setupFog(0) right before this call, matching Java's literal call order,
-    // leaves GL_FOG enabled, which bleeds fog color into 2D HUD and menu
-    // elements. 2D orthographic rendering shouldn't have fog applied.
+    // fog is already disabled by render() before this call, kept here too
+    // since drawGui is also reachable from the boot loading screen
     glDisable(GL_FOG);
 
     // set up the HUD camera at a fixed 240px logical height
@@ -437,11 +457,15 @@ static int raycast_block(const Level* lvl,
         if (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
             return 0;
 
-        // any non air tile is pickable, including bushes, even if not solid
+        // any non air tile is pickable, including bushes, even if not solid,
+        // except liquids, which the ray passes straight through
         int id = Level_getTile(lvl, x, y, z);
         if (id != 0) {
-            if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
-            return 1;
+            const Tile* tile = gTiles[id];
+            if (!tile || tile->mayPick(tile)) {
+                if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
+                return 1;
+            }
         }
 
         if (tMaxX < tMaxY) {
@@ -715,25 +739,42 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     ParticleEngine_render(&particleEngine, p, t, 1);
 
-    glDisable(GL_LIGHTING);
-    glDisable(GL_TEXTURE_2D);
-    glDisable(GL_FOG);
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    glDisableClientState(GL_COLOR_ARRAY);
-
     LevelRenderer_renderSurroundingGround(lr);
 
     if (!isHitNull) {
-        GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
-        if (wasAlpha) glDisable(GL_ALPHA_TEST);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_ALPHA_TEST);
         LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
-        if (wasAlpha) glEnable(GL_ALPHA_TEST);
+        glEnable(GL_ALPHA_TEST);
+        glEnable(GL_LIGHTING);
     }
 
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     setupFog(0);
     LevelRenderer_renderSurroundingWater(lr);
+
+    // liquid layer, drawn twice: once depth only so the translucent surface
+    // does not overdraw itself, then for real with color writes back on
+    glEnable(GL_BLEND);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    LevelRenderer_render(lr, p, 2);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    LevelRenderer_render(lr, p, 2);
+    glDisable(GL_BLEND);
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_FOG);
+
+    if (!isHitNull) {
+        glDepthFunc(GL_LESS);
+        glDisable(GL_ALPHA_TEST);
+        LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHitOutline(&hitResult, gEditMode);
+        glEnable(GL_ALPHA_TEST);
+        glDepthFunc(GL_LEQUAL);
+    }
 
     drawGui(t);
 

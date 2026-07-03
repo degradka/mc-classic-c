@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 // implemented in minecraft.c, matching Minecraft implementing LevelLoaderListener
 extern void Minecraft_beginLevelLoading(const char* title);
@@ -219,4 +220,8 @@ void LevelGen_generateMap(Level* level) {
 
     Minecraft_levelLoadUpdate("Melting..");
     addLava(level);
+
+    level->createTime = (long long)time(NULL) * 1000;
+    snprintf(level->creator, sizeof(level->creator), "player");
+    snprintf(level->name, sizeof(level->name), "A Nice World");
 }
