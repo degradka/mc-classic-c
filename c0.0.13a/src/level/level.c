@@ -65,7 +65,7 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
             int prev = level->lightDepths[x + z * level->width];
             int d = level->depth - 1;
             while (d > 0 && !Level_isLightBlocker(level, x, d, z)) d--;
-            level->lightDepths[x + z * level->width] = d;
+            level->lightDepths[x + z * level->width] = d + 1;
 
             if (prev != d && level->renderer) {
                 int ylMin = prev < d ? prev : d;
