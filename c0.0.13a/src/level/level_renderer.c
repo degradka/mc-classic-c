@@ -27,10 +27,8 @@ extern Tessellator TESSELLATOR;  // use the global, like chunks do
 // slot 0 is ground and slot 1 is water.
 static void compileSurroundingGround(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
-    GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
+    GLuint rockTex = loadTextureTiled("resources/rock.png", GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, rockTex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
     const float y = 32.0f - 2.0f; // Level.getGroundLevel() minus 2, ground level is hardcoded 32
@@ -88,10 +86,8 @@ static void compileSurroundingGround(LevelRenderer* r) {
 static void compileSurroundingWater(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
     glColor3f(1.0f, 1.0f, 1.0f);
-    GLuint waterTex = loadTexture("resources/water.png", GL_NEAREST);
+    GLuint waterTex = loadTextureTiled("resources/water.png", GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, waterTex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     const float y = 32.0f; // Level.getGroundLevel()
     glEnable(GL_BLEND);
