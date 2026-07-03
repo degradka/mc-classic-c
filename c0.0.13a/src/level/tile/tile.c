@@ -4,6 +4,11 @@
 #include "../../particle/particle_engine.h"
 #include "../../particle/particle.h"
 #include <string.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
@@ -151,17 +156,6 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
         Tessellator_color(t, c3, c3, c3);
         self->renderFace(self, t, x, y, z, 5);
     }
-}
-
-// helper to compute UVs from atlas slot (16x16 tiles on 256x256), used by
-// tiles with fully custom render() like Bush that bypass shouldRenderFace/renderFace
-static void calcUV(int slot, float* u0, float* v0, float* u1, float* v1) {
-    float minU = (slot % 16) / 16.0f;
-    float minV = (slot / 16) / 16.0f;
-    *u0 = minU;
-    *v0 = minV;
-    *u1 = minU + 16.0f / 256.0f;
-    *v1 = minV + 16.0f / 256.0f;
 }
 
 /* tile instances and registry */
@@ -345,42 +339,32 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
                     : (y >= lvl->lightDepths[x + z * lvl->width]);
     if ( ((lit ^ (layer == 1)) == 0) ) return;
 
-    // Bush uses atlas slot 15 in this commit
-    float u0, v0, u1, v1;
-    calcUV(self->textureId, &u0,&v0,&u1,&v1);
+    float tex = (float)self->textureId;
+    float u0 = ((int)tex % 16) / 16.0f;
+    float u1 = u0 + 0.0624375f;
+    float v0 = ((int)tex / 16) / 16.0f;
+    float v1 = v0 + 0.0624375f;
 
-    // Slight shading like leaves; you can also just use 1,1,1
-    const float shade = 0.8f;
-    Tessellator_color(t, shade, shade, shade);
+    Tessellator_color(t, 1.0f, 1.0f, 1.0f);
 
-    const float X0 = (float)x, X1 = (float)x + 1.0f;
-    const float Y0 = (float)y, Y1 = (float)y + 1.0f;
-    const float Z0 = (float)z, Z1 = (float)z + 1.0f;
+    const int rots = 2;
+    for (int r = 0; r < rots; ++r) {
+        float xa = (float)(sin(r * M_PI / rots + M_PI / 4.0) * 0.5);
+        float za = (float)(cos(r * M_PI / rots + M_PI / 4.0) * 0.5);
+        float x0 = x + 0.5f - xa, x1 = x + 0.5f + xa;
+        float y0 = (float)y, y1 = (float)y + 1.0f;
+        float z0 = z + 0.5f - za, z1 = z + 0.5f + za;
 
-    // We draw both sides of each diagonal plane (so it's visible with culling on).
-    // Plane A: from (x,*,z) to (x+1,*,z+1)  (diagonal ↘)
-    //   front
-    Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X1, Y1, Z1, u1, v0);
-    Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X0, Y0, Z0, u0, v1);
-    //   back
-    Tessellator_vertexUV(t, X0, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X0, Y0, Z0, u0, v1);
-    Tessellator_vertexUV(t, X1, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X1, Y1, Z1, u1, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
+        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
 
-    // Plane B: from (x+1,*,z) to (x,*,z+1)   (diagonal ↙)
-    //   front
-    Tessellator_vertexUV(t, X1, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X0, Y1, Z1, u1, v0);
-    Tessellator_vertexUV(t, X0, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X1, Y0, Z0, u0, v1);
-    //   back
-    Tessellator_vertexUV(t, X1, Y1, Z0, u0, v0);
-    Tessellator_vertexUV(t, X1, Y0, Z0, u0, v1);
-    Tessellator_vertexUV(t, X0, Y0, Z1, u1, v1);
-    Tessellator_vertexUV(t, X0, Y1, Z1, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
+        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
+        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
+        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
+    }
 }
 
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {

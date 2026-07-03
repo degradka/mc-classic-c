@@ -24,11 +24,14 @@ void Client_init(Client *c, struct MinecraftServer *server, SocketConnection *co
     c->listener.command        = on_cmd;
     c->listener.handleException= on_exc;
 
-    SocketConnection_setListener(conn, &c->listener, c);
+    SocketConnection_setListener(conn, c->listener, c);
 }
 
 void Client_disconnect(Client *c) {
     if (!c) return;
-    if (c->server) MinecraftServer_disconnect(c->server, c);
-    if (c->conn)   SocketConnection_disconnect(c->conn);
+    SocketConnection *conn = c->conn;
+    struct MinecraftServer *server = c->server;
+    // MinecraftServer_disconnect frees c, so nothing below may touch it
+    if (server) MinecraftServer_disconnect(server, c);
+    if (conn)   SocketConnection_disconnect(conn);
 }

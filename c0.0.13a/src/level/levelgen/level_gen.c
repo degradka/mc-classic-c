@@ -10,6 +10,7 @@
 // implemented in minecraft.c, matching Minecraft implementing LevelLoaderListener
 extern void Minecraft_beginLevelLoading(const char* title);
 extern void Minecraft_levelLoadUpdate(const char* status);
+extern const char* Minecraft_getUserName(void);
 
 static inline float randf(void) {
     return (float)rand() / ((float)RAND_MAX + 1.0f);
@@ -222,6 +223,6 @@ void LevelGen_generateMap(Level* level) {
     addLava(level);
 
     level->createTime = (long long)time(NULL) * 1000;
-    snprintf(level->creator, sizeof(level->creator), "player");
+    snprintf(level->creator, sizeof(level->creator), "%s", Minecraft_getUserName());
     snprintf(level->name, sizeof(level->name), "A Nice World");
 }

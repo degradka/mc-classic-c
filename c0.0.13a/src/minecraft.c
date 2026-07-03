@@ -19,6 +19,7 @@
 #include "renderer/textures.h"
 #include "particle/particle_engine.h"
 #include "player.h"
+#include "user.h"
 #include "character/zombie.h"
 #include "timer.h"
 #include "hitresult.h"
@@ -35,6 +36,7 @@ static Player         player;
 static Timer          timer;
 static Zombie         mobs[MAX_MOBS];
 static ParticleEngine particleEngine;
+static User           user;
 
 static int mobCount = 0;
 
@@ -173,6 +175,10 @@ void Minecraft_levelLoadUpdate(const char* status) {
     sleepMillis(200);
 }
 
+const char* Minecraft_getUserName(void) {
+    return user.name;
+}
+
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)w; (void)scancode; (void)mods;
     if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
@@ -282,6 +288,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetKeyCallback(window, keyCallback);
 
     Tile_registerAll();
+
+    User_init(&user, "noname");
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
