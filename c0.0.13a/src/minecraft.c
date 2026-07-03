@@ -105,9 +105,11 @@ void Minecraft_closeScreenAndGrabMouse(void) {
 }
 
 void Minecraft_generateNewLevel(void) {
-    Level_generateMap(&level);
-    calcLightDepths(&level, 0, 0, level.width, level.height);
-    levelRenderer_allChanged(&level, &levelRenderer);
+    // matches Minecraft.generateNewLevel(), which regenerates at a
+    // different size than the boot map, not just a fresh copy of it
+    LevelRenderer_destroy(&levelRenderer);
+    Level_resize(&level, 32, 512, 64);
+    LevelRenderer_init(&levelRenderer, &level, texTerrain);
 }
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {

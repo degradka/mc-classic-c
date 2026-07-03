@@ -2,7 +2,6 @@
 
 #include "chunk.h"
 #include "tile/tile.h"
-#include "../renderer/textures.h"
 #include "../timer.h"
 #include "../player.h"
 #include <math.h>
@@ -15,9 +14,9 @@ extern Tessellator TESSELLATOR;
 static long long CHUNK_TotalTimeNS  = 0;
 static int       CHUNK_TotalUpdates = 0;
 
-void Chunk_init(Chunk* c, Level* level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     c->level   = level;
-    c->texture = loadTexture("resources/terrain.png", GL_NEAREST);
+    c->texture = texture;
 
     c->minX = minX; c->minY = minY; c->minZ = minZ;
     c->maxX = maxX; c->maxY = maxY; c->maxZ = maxZ;
@@ -32,6 +31,10 @@ void Chunk_init(Chunk* c, Level* level, int minX, int minY, int minZ, int maxX, 
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
     c->lists = glGenLists(2);
+}
+
+void Chunk_destroy(Chunk* c) {
+    glDeleteLists(c->lists, 2);
 }
 
 void Chunk_rebuild(Chunk* c, int layer) {

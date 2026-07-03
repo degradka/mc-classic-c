@@ -147,7 +147,7 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
         int minChunkY = y * CHUNK_SIZE, maxChunkY = MIN(level->depth,  (y + 1) * CHUNK_SIZE);
         int minChunkZ = z * CHUNK_SIZE, maxChunkZ = MIN(level->height, (z + 1) * CHUNK_SIZE);
         int idx = (x + y * r->chunkAmountX) * r->chunkAmountZ + z;
-        Chunk_init(&r->chunks[idx], level, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
+        Chunk_init(&r->chunks[idx], level, terrainTex, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
         r->sortedChunks[idx] = &r->chunks[idx];
     }
 
@@ -215,6 +215,12 @@ void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
 }
 
 void LevelRenderer_destroy(LevelRenderer* r) {
+    int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
+    for (int i = 0; i < total; ++i) {
+        Chunk_destroy(&r->chunks[i]);
+    }
+    glDeleteLists(r->surroundLists, 2);
+
     free(r->chunks);
     free(r->sortedChunks);
     free(r->dirtyScratch);

@@ -28,7 +28,8 @@ typedef struct Chunk {
     double x, y, z;
 } Chunk;
 
-void Chunk_init(Chunk* chunk, Level* level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
+void Chunk_init(Chunk* chunk, Level* level, GLuint texture, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
+void Chunk_destroy(Chunk* chunk);
 void Chunk_rebuild(Chunk* chunk, int layer);
 void Chunk_render(Chunk* chunk, int layer);
 void Chunk_setDirty(Chunk* chunk);

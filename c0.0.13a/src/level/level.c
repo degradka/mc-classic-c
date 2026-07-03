@@ -32,6 +32,33 @@ void Level_init(Level* level, int width, int height, int depth) {
     calcLightDepths(level, 0, 0, width, height);
 }
 
+// used by the pause menu's Generate new level, which regenerates at a
+// different size than the boot map, matching Minecraft.generateNewLevel()
+void Level_resize(Level* level, int width, int height, int depth) {
+    LevelRenderer* renderer = level->renderer;
+    level->renderer = NULL; // detach so calcLightDepths below does not touch the stale renderer
+
+    free(level->blocks);
+    free(level->lightDepths);
+
+    level->width = width;
+    level->height = height;
+    level->depth = depth;
+    level->unprocessed = 0;
+
+    level->blocks = (byte*)malloc((size_t)width * height * depth);
+    level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
+    if (!level->blocks || !level->lightDepths) {
+        fprintf(stderr, "Failed to allocate level memory\n");
+        exit(EXIT_FAILURE);
+    }
+
+    Level_generateMap(level);
+    calcLightDepths(level, 0, 0, width, height);
+
+    level->renderer = renderer;
+}
+
 void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
     for (int x = minX; x < minX + maxX; x++) {
         for (int z = minZ; z < minZ + maxZ; z++) {

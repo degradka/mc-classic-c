@@ -33,6 +33,10 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* boundingBox);
 
 void  Level_init(Level* level, int width, int height, int depth);
 void  Level_destroy(Level* level);
+// frees the existing blocks and lightDepths, allocates at the new size, and
+// regenerates. Caller must rebuild the LevelRenderer afterward since its
+// chunk grid is sized for the old dimensions.
+void  Level_resize(Level* level, int width, int height, int depth);
 
 bool  Level_isTile(const Level* level, int x, int y, int z);
 bool  Level_isSolidTile(const Level* level, int x, int y, int z);
