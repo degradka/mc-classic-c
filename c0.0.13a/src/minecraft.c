@@ -110,6 +110,9 @@ void Minecraft_generateNewLevel(void) {
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, 32, 512, 64);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
+
+    Entity_resetPosition(&player.e);
+    mobCount = 0;
 }
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
