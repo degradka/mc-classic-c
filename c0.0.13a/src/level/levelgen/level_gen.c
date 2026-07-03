@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+extern void Minecraft_beginLevelLoading(const char* title);
+extern void Minecraft_levelLoadUpdate(const char* status);
+
 static inline float randf(void) {
     return (float)rand() / ((float)RAND_MAX + 1.0f);
 }
@@ -196,8 +199,19 @@ static void addLava(Level* level) {
 }
 
 void LevelGen_generateMap(Level* level) {
+    Minecraft_beginLevelLoading("Generating level");
+
+    Minecraft_levelLoadUpdate("Raising..");
+
+    Minecraft_levelLoadUpdate("Eroding..");
     buildBlocks(level);
+
+    Minecraft_levelLoadUpdate("Carving..");
     carveTunnels(level);
+
+    Minecraft_levelLoadUpdate("Watering..");
     addWater(level);
+
+    Minecraft_levelLoadUpdate("Melting..");
     addLava(level);
 }
