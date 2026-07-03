@@ -53,6 +53,8 @@ static int gEditMode = 0;              // 0=destroy, 1=place
 static int gYMouseAxis = 1;            // toggled by Y key, 1 or negative 1
 
 static int texTerrain = 0;
+static int texDirt = 0;
+static char gLoadTitle[64];
 
 static Tessellator hudTess;
 static Font gFont;                     // HUD font
@@ -113,6 +115,62 @@ void Minecraft_generateNewLevel(void) {
 
     Entity_resetPosition(&player.e);
     mobCount = 0;
+}
+
+// matches Minecraft.beginLevelLoading(): sets up the 2D ortho projection
+// once and remembers the title, which levelLoadUpdate keeps redrawing
+void Minecraft_beginLevelLoading(const char* title) {
+    int i = 0;
+    for (; title[i] != '\0' && i < 63; ++i) gLoadTitle[i] = title[i];
+    gLoadTitle[i] = '\0';
+
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    int screenWidth  = fbw * 240 / fbh;
+    int screenHeight = 240;
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, screenWidth, screenHeight, 0.0, 100.0, 300.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(0.0f, 0.0f, -200.0f);
+}
+
+// matches Minecraft.levelLoadUpdate(): draws a checkered dirt background
+// with the title and status text, shows it, and blocks briefly so the
+// player can actually read it between world generation phases
+void Minecraft_levelLoadUpdate(const char* status) {
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    int screenWidth  = fbw * 240 / fbh;
+    int screenHeight = 240;
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texDirt);
+
+    Tessellator_begin(&hudTess);
+    Tessellator_color(&hudTess, 0.5019608f, 0.5019608f, 0.5019608f); // 0x808080
+    float s = 32.0f;
+    Tessellator_vertexUV(&hudTess, 0.0f, (float)screenHeight, 0.0f, 0.0f, screenHeight / s);
+    Tessellator_vertexUV(&hudTess, (float)screenWidth, (float)screenHeight, 0.0f, screenWidth / s, screenHeight / s);
+    Tessellator_vertexUV(&hudTess, (float)screenWidth, 0.0f, 0.0f, screenWidth / s, 0.0f);
+    Tessellator_vertexUV(&hudTess, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    Tessellator_end(&hudTess);
+
+    int titleWidth  = Font_width(&gFont, gLoadTitle);
+    int statusWidth = Font_width(&gFont, status);
+    Font_drawShadow(&gFont, &hudTess, gLoadTitle, (screenWidth - titleWidth) / 2, screenHeight / 2 - 4 - 8, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, status, (screenWidth - statusWidth) / 2, screenHeight / 2 - 4 + 4, 0xFFFFFF);
+
+    glfwSwapBuffers(window);
+    // Java relies on AWT's own message pump staying alive during the sleep;
+    // GLFW has none, so poll here to avoid the OS flagging the window as hung
+    glfwPollEvents();
+    sleepMillis(200);
 }
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
@@ -205,6 +263,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Tile_registerAll();
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
+    texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.gif");
 
     Level_init(lvl, 256, 256, 64);

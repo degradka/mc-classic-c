@@ -17,5 +17,6 @@ void       Timer_init(Timer* timer, float ticksPerSecond);
 void       Timer_advanceTime(Timer* timer);
 long long  currentTimeMillis(void);
 long long  getCurrentTimeInNanoseconds(void);
+void       sleepMillis(int ms);
 
 #endif /* TIMER_H */

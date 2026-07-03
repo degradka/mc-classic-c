@@ -71,6 +71,17 @@ long long currentTimeMillis(void) {
 #endif
 }
 
+void sleepMillis(int ms) {
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
+
 void Timer_advanceTime(Timer* timer) {
     long long now      = getCurrentTimeInNanoseconds();
     long long passedNs = now - timer->lastTime;
