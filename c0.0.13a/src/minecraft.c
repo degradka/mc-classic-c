@@ -46,7 +46,7 @@ static int prevNum3 = GLFW_RELEASE, prevNum4 = GLFW_RELEASE;
 static int prevNum6 = GLFW_RELEASE;
 static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
-static int prevI    = GLFW_RELEASE;
+static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
@@ -474,12 +474,12 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevY = kY;
 
-    // I = cycle draw distance (Java key 33 = 'I')
-    int kI = glfwGetKey(w, GLFW_KEY_I);
-    if (kI == GLFW_PRESS && prevI == GLFW_RELEASE) {
+    // F = cycle draw distance, Java key 33 is F, not I as I first assumed
+    int kF = glfwGetKey(w, GLFW_KEY_F);
+    if (kF == GLFW_PRESS && prevF == GLFW_RELEASE) {
         LevelRenderer_toggleDrawDistance(&levelRenderer);
     }
-    prevI = kI;
+    prevF = kF;
 }
 
 static void handleBlockClicks(GLFWwindow* w) {
