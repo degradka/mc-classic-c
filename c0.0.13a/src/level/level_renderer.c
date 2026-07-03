@@ -135,7 +135,8 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     r->chunks = (Chunk*)malloc((size_t)total * sizeof(Chunk));
     r->sortedChunks = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
-    if (!r->chunks || !r->sortedChunks) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
+    r->dirtyScratch = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
+    if (!r->chunks || !r->sortedChunks || !r->dirtyScratch) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
 
     for (int x = 0; x < r->chunkAmountX; x++)
     for (int y = 0; y < r->chunkAmountY; y++)
@@ -214,6 +215,7 @@ void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
 void LevelRenderer_destroy(LevelRenderer* r) {
     free(r->chunks);
     free(r->sortedChunks);
+    free(r->dirtyScratch);
 }
 
 /* dirty chunk prioritization */
@@ -237,16 +239,15 @@ static int dirty_cmp(const void* a, const void* b) {
 }
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
-    // collect dirty chunk pointers
+    // dirty chunks go into a reused buffer, no malloc every frame
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-    Chunk** list = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
-    if (!list) return 0;
+    Chunk** list = r->dirtyScratch;
 
     int n = 0;
     for (int i = 0; i < total; ++i) {
         if (Chunk_isDirty(&r->chunks[i])) list[n++] = &r->chunks[i];
     }
-    if (n == 0) { free(list); return 0; }
+    if (n == 0) return 0;
 
     // sort with priorities
     gSortPlayer = player;
@@ -259,7 +260,6 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
         Chunk_rebuild(list[i], 1);
     }
 
-    free(list);
     return limit;
 }
 

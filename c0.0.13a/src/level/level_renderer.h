@@ -19,6 +19,7 @@ struct Player;  typedef struct Player Player;
 typedef struct LevelRenderer {
     Chunk*      chunks;
     Chunk**     sortedChunks;
+    Chunk**     dirtyScratch; // reused each frame instead of malloc per frame
     int         chunkAmountX, chunkAmountY, chunkAmountZ;
 
     Level*      level;
