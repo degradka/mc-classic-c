@@ -9,12 +9,12 @@
 struct MinecraftServer;
 
 typedef struct Client {
-    struct MinecraftServer *server;
-    SocketConnection *conn;
+    struct MinecraftServer* server;
+    SocketConnection* conn;
     ConnectionListener listener;
 } Client;
 
-void Client_init(Client *c, struct MinecraftServer *server, SocketConnection *conn);
-void Client_disconnect(Client *c);
+void Client_init(Client* c, struct MinecraftServer* server, SocketConnection* conn);
+void Client_disconnect(Client* c);
 
 #endif /* SERVER_CLIENT_H */

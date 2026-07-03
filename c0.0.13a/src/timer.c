@@ -34,7 +34,10 @@ long long getCurrentTimeInNanoseconds(void) {
     LARGE_INTEGER now;
     if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&now);
-    return (long long)((now.QuadPart * 1000000000LL) / freq.QuadPart);
+    // split so the multiply can't overflow after a few hours of uptime
+    long long whole     = now.QuadPart / freq.QuadPart;
+    long long remainder = now.QuadPart % freq.QuadPart;
+    return whole * 1000000000LL + (remainder * 1000000000LL) / freq.QuadPart;
 
 #elif defined(__APPLE__)
     static mach_timebase_info_data_t tb = {0};

@@ -25,11 +25,13 @@ void Zombie_init(Zombie* z, Level* level, double x, double y, double zpos) {
 void Zombie_onTick(Zombie* z) {
     Entity_onTick(&z->base);
 
+    if (z->base.y < -100.0f) Entity_remove(&z->base);
+
     z->rotation += z->rotationMotionFactor;
     z->rotationMotionFactor *= 0.99;
     z->rotationMotionFactor += ((double)rand() / RAND_MAX - (double)rand() / RAND_MAX)
                              *  (double)rand() / RAND_MAX * (double)rand() / RAND_MAX
-                             *  0.009999999776482582;
+                             *  0.07999999821186066;
 
     const float v = (float)sin(z->rotation);
     const float f = (float)cos(z->rotation);
@@ -44,8 +46,6 @@ void Zombie_onTick(Zombie* z) {
     z->base.motionX *= 0.91f;
     z->base.motionY *= 0.98f;
     z->base.motionZ *= 0.91f;
-
-    if (z->base.y < -100.0f) Entity_remove(&z->base);
 
     if (z->base.onGround) {
         z->base.motionX *= 0.7f;
@@ -69,7 +69,7 @@ void Zombie_render(const Zombie* z, float partialTicks) {
     const float size = 7.0f / 120.0f;
     glScalef(size, size, size);
 
-    const double offY = fabs(sin(t * 2.0 / 3.0)) * 5.0 + 23.0;
+    const double offY = fabs(sin(t * 0.6662)) * 5.0 + 23.0;
     glTranslated(0.0, -offY, 0.0);
     glRotated(z->rotation * 180.0 / M_PI + 180.0, 0, 1, 0);
 
