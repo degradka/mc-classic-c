@@ -80,12 +80,22 @@ static void carveTunnels(Level* level) {
     }
 }
 
+static int growStack(int** stack, int* capacity) {
+    int newCap = *capacity * 2;
+    int* p = (int*)realloc(*stack, (size_t)newCap * sizeof(int));
+    if (!p) return 0;
+    *stack = p;
+    *capacity = newCap;
+    return 1;
+}
+
 static long long floodFillLiquid(Level* level, int x, int y, int z, int source, int target) {
     const int w = level->width, h = level->height;
     const int upStep = w * h;
 
     int capacity = 65536;
     int* stack = (int*)malloc((size_t)capacity * sizeof(int));
+    if (!stack) return 0;
     int sp = 0;
     stack[sp++] = (y * h + z) * w + x;
 
@@ -111,7 +121,7 @@ static long long floodFillLiquid(Level* level, int x, int y, int z, int source, 
             if (z0 > 0) {
                 int north = (level->blocks[cl - w] == source);
                 if (north && !lastNorth) {
-                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
                     stack[sp++] = cl - w;
                 }
                 lastNorth = north;
@@ -119,7 +129,7 @@ static long long floodFillLiquid(Level* level, int x, int y, int z, int source, 
             if (z0 < h - 1) {
                 int south = (level->blocks[cl + w] == source);
                 if (south && !lastSouth) {
-                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
                     stack[sp++] = cl + w;
                 }
                 lastSouth = south;
@@ -133,7 +143,7 @@ static long long floodFillLiquid(Level* level, int x, int y, int z, int source, 
                 }
                 int below = (belowId == source);
                 if (below && !lastBelow) {
-                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
                     stack[sp++] = cl - upStep;
                 }
                 lastBelow = below;

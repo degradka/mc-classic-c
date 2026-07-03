@@ -21,6 +21,8 @@ static Tessellator TESSELLATOR;
 
 extern Tessellator TESSELLATOR;
 
+// the ground and water around the map
+// list 0 is ground and list 1 is water
 static void compileSurroundingGround(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
     GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
@@ -29,7 +31,7 @@ static void compileSurroundingGround(LevelRenderer* r) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-    const float y = 32.0f - 2.0f; // Level.getGroundLevel() - 2 (ground level is hardcoded 32)
+    const float y = 32.0f - 2.0f; // Level.getGroundLevel() minus 2, ground level is hardcoded 32
     int s = 128;
     if (s > r->level->width)  s = r->level->width;
     if (s > r->level->height) s = r->level->height;
@@ -147,7 +149,7 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     }
 
     r->drawDistance = 0;
-    // force an immediate distance re-sort on the first render() call
+    // sorts on the first render
     r->lastSortX = r->lastSortY = r->lastSortZ = -900000.0;
 
     r->surroundLists = glGenLists(2);
@@ -219,6 +221,7 @@ void LevelRenderer_destroy(LevelRenderer* r) {
 /* dirty chunk prioritization */
 static const Player* gSortPlayer = NULL;
 
+// DirtyChunkSorter, visible chunks first, then the nearest
 static int dirty_cmp(const void* a, const void* b) {
     const Chunk* c1 = *(const Chunk* const*)a;
     const Chunk* c2 = *(const Chunk* const*)b;
@@ -266,7 +269,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     if (!h) return;
 
     if (mode == 0) {
-        // --- Destroy highlight: additive, pulsing; draw all 6 faces untextured
+        // destroy highlight: additive, pulsing, draws all 6 faces untextured
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
@@ -282,7 +285,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         return;
     }
 
-    // --- Place preview: alpha blend, pulsing tint+alpha on adjacent cell
+    // place preview: alpha blend, pulsing tint and alpha on adjacent cell
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 

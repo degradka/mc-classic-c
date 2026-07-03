@@ -4,11 +4,11 @@
 #define LEVELRENDERER_H
 
 #include "../hitresult.h"
+#include "../renderer/frustum.h"
 
 struct Level;     typedef struct Level Level;
 struct Chunk;     typedef struct Chunk Chunk;
 struct HitResult; // forward
-struct Frustum;   typedef struct Frustum Frustum;
 
 struct Level;   typedef struct Level Level;
 struct Chunk;   typedef struct Chunk Chunk;
@@ -25,7 +25,7 @@ typedef struct LevelRenderer {
     int         terrainTex;
 
     int         drawDistance;
-    double      lastSortX, lastSortY, lastSortZ; // player pos at last re-sort
+    double      lastSortX, lastSortY, lastSortZ; // player pos at the last sort
 
     unsigned int surroundLists;
 } LevelRenderer;

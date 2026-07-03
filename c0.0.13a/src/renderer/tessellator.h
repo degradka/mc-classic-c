@@ -1,4 +1,3 @@
-// renderer/tessellator.h: batched quads
 
 #ifndef TESSELLATOR_H
 #define TESSELLATOR_H

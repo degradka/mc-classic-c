@@ -210,6 +210,7 @@ bool level_setTile(Level* level, int x, int y, int z, int type) {
     return true;
 }
 
+// no neighbor update, no light, no renderer update
 bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
     int index = (y * level->height + z) * level->width + x;
