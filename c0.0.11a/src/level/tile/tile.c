@@ -1,4 +1,4 @@
-// level/tile/tile.c — registry, per-face textures, render helpers
+// tile.c: registry, per face textures, render helpers
 
 #include "tile.h"
 #include "../../particle/particle_engine.h"
@@ -66,7 +66,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
         Tessellator_vertexUV(t, minX, maxY, maxZ, u0, v1);
     }
 
-    // -Z (face 2)
+    // negative Z (face 2)
     if (shouldRenderFace(lvl, x, y, z - 1, layer)) {
         Tessellator_color(t, shadeZ, shadeZ, shadeZ);
         calcUV(self->getTexture(self, 2), &u0, &v0, &u1, &v1);
@@ -86,7 +86,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
         Tessellator_vertexUV(t, maxX, maxY, maxZ, u1, v0);
     }
 
-    // -X (face 4)
+    // negative X (face 4)
     if (shouldRenderFace(lvl, x - 1, y, z, layer)) {
         Tessellator_color(t, shadeX, shadeX, shadeX);
         calcUV(self->getTexture(self, 4), &u0, &v0, &u1, &v1);
@@ -107,7 +107,7 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
     }
 }
 
-/* ---------- tile instances & registry ---------- */
+/* tile instances and registry */
 
 const Tile* gTiles[256] = { 0 };
 
@@ -130,7 +130,7 @@ Tile TILE_WOOD;
 Tile TILE_GRASS;
 Tile TILE_BUSH;
 
-/* Grass (per-face textures) — face map: top=0, bottom=2, sides=3 */
+/* Grass has per face textures: top is 0, bottom is 2, sides are 3 */
 static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
     return (face == 1) ? 0 : (face == 0) ? 2 : 3;
@@ -139,11 +139,11 @@ static int Grass_getTexture(const Tile* self, int face) {
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
     if (Level_isLit(lvl, x, y, z)) {
-        // try 4 random neighbors
+        // try 4 random neighbors, matching Java's skewed vertical range
         for (int i = 0; i < 4; ++i) {
-            int tx = x + (rand() % 3) - 1;  // [-1..+1]
-            int ty = y + (rand() % 5) - 3;  // [-3..+1] (matches Java’s skew)
-            int tz = z + (rand() % 3) - 1;  // [-1..+1]
+            int tx = x + (rand() % 3) - 1;
+            int ty = y + (rand() % 5) - 3;
+            int tz = z + (rand() % 3) - 1;
             if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty, tz)) {
                 level_setTile(lvl, tx, ty, tz, TILE_GRASS.id);
             }
@@ -235,7 +235,7 @@ void Tile_registerAll(void) {
     TILE_BUSH.onTick      = Bush_onTick;
 }
 
-/* ---------- untextured single-face helper (for hit highlight) ---------- */
+/* untextured single face helper for hit highlight */
 void Face_render(Tessellator* t, int x, int y, int z, int face) {
     const float minX = (float)x,     maxX = (float)x + 1.0f;
     const float minY = (float)y,     maxY = (float)y + 1.0f;
@@ -251,17 +251,17 @@ void Face_render(Tessellator* t, int x, int y, int z, int face) {
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, maxZ);
-    } else if (face == 2) { // -Z
+    } else if (face == 2) { // negative Z
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, maxX, minY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);
-    } else if (face == 3) { // +Z
+    } else if (face == 3) { // positive Z
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, minY, maxZ);
         Tessellator_vertex(t, maxX, minY, maxZ);
         Tessellator_vertex(t, maxX, maxY, maxZ);
-    } else if (face == 4) { // -X
+    } else if (face == 4) { // negative X
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);

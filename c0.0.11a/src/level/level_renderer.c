@@ -1,4 +1,4 @@
-// level/level_renderer.c — chunk grid, frustum culling, dirty-marking, and hit highlight
+// level_renderer.c: chunk grid, frustum culling, dirty marking, and hit highlight
 
 #include <GL/glew.h>
 #include <GL/glu.h>
@@ -60,7 +60,7 @@ void LevelRenderer_destroy(LevelRenderer* r) {
     free(r->chunks);
 }
 
-/* --- dirty-chunk prioritization -------------------------------------------- */
+/* dirty chunk prioritization */
 
 // sort state for qsort comparator
 static const Player* gSortPlayer = NULL;
@@ -121,15 +121,15 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
 }
 
 /*
-    - mode 0: additive pulsing, untextured full-cube outline (all 6 faces)
-    - mode 1: alpha-blended, textured preview block on the adjacent cell,
-              rendered in both layers (0 & 1)
+   mode 0 is additive pulsing, an untextured full cube outline on all 6 faces
+   mode 1 is alpha blended, a textured preview block on the adjacent cell,
+   rendered in both layers (0 and 1)
 */
 void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileId) {
     if (!h) return;
 
     if (mode == 0) {
-        // --- Destroy highlight: additive, pulsing; draw all 6 faces untextured
+        // destroy highlight: additive, pulsing, draws all 6 faces untextured
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
@@ -145,7 +145,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         return;
     }
 
-    // --- Place preview: alpha blend, pulsing tint+alpha on adjacent cell
+    // place preview: alpha blend, pulsing tint and alpha on adjacent cell
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -157,10 +157,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     switch (h->f) {
         case 0: ny = -1; break; // bottom
         case 1: ny =  1; break; // top
-        case 2: nz = -1; break; // -Z
-        case 3: nz =  1; break; // +Z
-        case 4: nx = -1; break; // -X
-        case 5: nx =  1; break; // +X
+        case 2: nz = -1; break; // negative Z
+        case 3: nz =  1; break; // positive Z
+        case 4: nx = -1; break; // negative X
+        case 5: nx =  1; break; // positive X
     }
     const int x = h->x + nx, y = h->y + ny, z = h->z + nz;
 

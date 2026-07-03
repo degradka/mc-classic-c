@@ -1,4 +1,4 @@
-// player.h — player base
+// player.h: player base
 
 #ifndef PLAYER_H
 #define PLAYER_H

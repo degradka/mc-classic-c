@@ -1,4 +1,4 @@
-// level/perlin.h — simple Perlin-like height field
+// perlin.h: simple Perlin like height field
 
 #ifndef PERLIN_H
 #define PERLIN_H

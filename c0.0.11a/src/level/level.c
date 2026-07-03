@@ -1,4 +1,4 @@
-// level/level.c — world storage, lighting columns, IO, and solid-cube queries
+// level.c: world storage, lighting columns, IO, and solid cube queries
 
 #include "level.h"
 #include "level_renderer.h"
@@ -147,7 +147,7 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
         int id = Level_getTile(level, x, y, z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (!t) continue;
-        // Classic tiles are axis-aligned unit cubes; keep the hook anyway:
+        // Classic tiles are axis aligned unit cubes but keep the hook anyway:
         AABB box = AABB_create(x, y, z, x+1, y+1, z+1);
         if (t->isSolid && t->isSolid(t)) {
             if (out.size == out.capacity) {

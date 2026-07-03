@@ -1,4 +1,4 @@
-// timer.c — fixed-timestep timer (ticks & partialTicks)
+// timer.c: fixed timestep timer, ticks and partialTicks
 
 #define _POSIX_C_SOURCE 200809L
 

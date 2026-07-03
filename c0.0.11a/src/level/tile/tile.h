@@ -1,4 +1,4 @@
-// level/tile/tile.h — tile registry, per-face textures, render helpers
+// tile.h: tile registry, per face textures, render helpers
 
 #ifndef TILE_H
 #define TILE_H

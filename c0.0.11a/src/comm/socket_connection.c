@@ -54,7 +54,7 @@ unsigned char *SocketConnection_getWriteBuffer(SocketConnection *c, int *capacit
 int SocketConnection_tick(SocketConnection *c) {
     if (!c || !c->connected) return 0;
 
-    // "send" -> move write data into read side, clipped to capacity
+    // move write data into read side, clipped to capacity
     int can = SOCKETCONN_BUFFER_SIZE - c->readLen;
     int n   = (c->writeLen < can) ? c->writeLen : can;
     if (n > 0) {

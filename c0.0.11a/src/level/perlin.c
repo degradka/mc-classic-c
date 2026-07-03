@@ -1,4 +1,4 @@
-// level/perlin.h — simple Perlin-like height field
+// perlin.c: simple Perlin like height field
 
 #include "perlin.h"
 #include <stdlib.h>
@@ -12,7 +12,7 @@ void Perlin_read(int width, int height, int octave, int* out) {
     int* table = (int*)malloc((size_t)wh * sizeof(int));
     if (!table) return;
 
-    // seed coarse grid with random values in [-128..+128] * FUZZINESS
+    // seed coarse grid with random values scaled by FUZZINESS
     int step_init = width >> octave;
     for (int y = 0; y < height; y += step_init) {
         for (int x = 0; x < width; x += step_init) {
@@ -45,7 +45,7 @@ void Perlin_read(int width, int height, int octave, int* out) {
                 int vx = table[((x + step) % width) + y * width];
                 int vy = table[x + ((y + step) % height) * width];
 
-                // Java used bitwise wrap with (width-1)/(height-1) — sizes are powers of two
+                // Java used bitwise wrap since width and height are powers of two
                 int hxpos = table[((x + half) & (width  - 1)) + ((y + half - step) & (height - 1)) * width];
                 int hypos = table[((x + half - step) & (width - 1)) + ((y + half) & (height - 1)) * width];
 

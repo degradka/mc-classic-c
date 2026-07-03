@@ -1,4 +1,4 @@
-// phys/aabb.h — axis-aligned bounding boxes & collision helpers
+// aabb.h: axis aligned bounding boxes and collision helpers
 
 #ifndef AABB_H
 #define AABB_H

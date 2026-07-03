@@ -1,4 +1,4 @@
-// player.c — player base
+// player.c: player base
 
 #include "player.h"
 #include <math.h>

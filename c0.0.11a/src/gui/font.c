@@ -42,7 +42,7 @@ void Font_init(Font* f, const char* path) {
         return;
     }
 
-    // compute per-char widths for first 128 chars
+    // compute character widths for the first 128 characters
     // each cell is 8x8, laid out in a 16x16 grid on a 128x128 image
     for (int i = 0; i < 128; ++i) {
         int xt = i % 16;

@@ -1,4 +1,4 @@
-// minecraft.c — entry point, window+gl init, camera, picking, main loop
+// minecraft.c: entry point, window and GL init, camera, picking, main loop
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,7 +46,7 @@ static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
-static int gYMouseAxis = 1;            // toggled by Y key (1 or -1)
+static int gYMouseAxis = 1;            // toggled by Y key, 1 or negative 1
 
 static int texTerrain = 0;
 
@@ -69,7 +69,7 @@ static HitResult hitResult;
 
 static void tick(Player* player, GLFWwindow* window);
 
-/* --- input & GL state helpers ------------------------------------------------ */
+/* input and GL state helpers */
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)scancode; (void)mods;
@@ -102,7 +102,7 @@ static void setupFog(int type) {
     }
 }
 
-/* --- boot/shutdown ----------------------------------------------------------- */
+/* boot and shutdown */
 
 static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     if (!glfwInit()) {
@@ -194,7 +194,7 @@ static void destroy(Level* lvl) {
     glfwTerminate();
 }
 
-/* --- camera ------------------------------------------------------------------ */
+/* camera */
 
 static void moveCameraToPlayer(Player* p, float t) {
     glTranslatef(0.0f, 0.0f, -0.3f); // eye offset
@@ -225,7 +225,7 @@ static void drawGui(float partialTicks) {
     // Clear depth so HUD draws on top
     glClear(GL_DEPTH_BUFFER_BIT);
 
-    // --- setup HUD camera to a fixed 240px logical height ---
+    // set up the HUD camera at a fixed 240px logical height
     int fbw, fbh; 
     glfwGetFramebufferSize(window, &fbw, &fbh);
 
@@ -240,7 +240,7 @@ static void drawGui(float partialTicks) {
     glLoadIdentity();
     glTranslatef(0.0f, 0.0f, -200.0f);
 
-    // --- held block preview (top-right), 16x16 logical size ---
+    // held block preview in the top right corner, 16x16 logical size
     glPushMatrix();
     glTranslated((double)screenWidth - 16.0, 16.0, 0.0);
     glScalef(16.0f, 16.0f, 16.0f);
@@ -262,7 +262,7 @@ static void drawGui(float partialTicks) {
     glDisable(GL_TEXTURE_2D);
     glPopMatrix();
 
-    // Top-left: version + stats
+    // top left corner: version and stats
     Font_drawShadow(&gFont, &hudTess, "0.0.11a", 2, 2, 0xFFFFFF);
 
     char stats[64];
@@ -287,16 +287,16 @@ static void drawGui(float partialTicks) {
     Tessellator_flush(&hudTess);
 }
 
-/* --- picking ----------------------------------------------------------------- */
+/* picking */
 
 static void get_look_dir(const Player* p, double* dx, double* dy, double* dz) {
     const double yaw   = p->e.yRotation * M_PI / 180.0;
     const double pitch = p->e.xRotation * M_PI / 180.0;
     const double cp = cos(pitch), sp = sin(pitch);
     const double cy = cos(yaw),   sy = sin(yaw);
-    *dx =  sy * cp;   // +X right
-    *dy = -sp;        // +Y up
-    *dz = -cy * cp;   // -Z forward
+    *dx =  sy * cp;   // positive X is right
+    *dy = -sp;        // positive Y is up
+    *dz = -cy * cp;   // negative Z is forward
 }
 
 static int raycast_block(const Level* lvl,
@@ -327,7 +327,7 @@ static int raycast_block(const Level* lvl,
         if (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
             return 0;
 
-        // Any non-air tile is pickable (bushes, etc.), even if not solid.
+        // any non air tile is pickable, including bushes, even if not solid
         int id = Level_getTile(lvl, x, y, z);
         if (id != 0) {
             if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
@@ -363,10 +363,10 @@ static void pick(float t) {
     double dx, dy, dz;
     get_look_dir(&player, &dx, &dy, &dz);
 
-    // nudge origin to match the 0.3 view-space translate
+    // nudge origin to match the 0.3 view space translate
     x += dx * 0.3; y += dy * 0.3; z += dz * 0.3;
 
-    const int reachBlocks = 3; // axis-aligned reach cube
+    const int reachBlocks = 3; // axis aligned reach cube
 
     HitResult hr;
     if (raycast_block(&level, x, y, z, dx, dy, dz, 100.0, &hr)) {
@@ -384,7 +384,7 @@ static void pick(float t) {
     isHitNull = 1;
 }
 
-/* --- input actions ----------------------------------------------------------- */
+/* input actions */
 
 static void handleGameplayKeys(GLFWwindow* w) {
     // Enter = save level
@@ -443,10 +443,10 @@ static void handleBlockClicks(GLFWwindow* w) {
     }
     prevRight = right;
 
-    // Left-click performs the current mode
+    // left click performs the current mode
     if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
         if (gEditMode == 0) {
-            // --- DESTROY
+            // destroy
             int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
             const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
             bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
@@ -454,15 +454,15 @@ static void handleBlockClicks(GLFWwindow* w) {
                 Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
             }
         } else {
-            // --- PLACE on adjacent face
+            // place on adjacent face
             int nx=0, ny=0, nz=0;
             switch (hitResult.f) {
                 case 0: ny = -1; break; // bottom
                 case 1: ny =  1; break; // top
-                case 2: nz = -1; break; // -Z
-                case 3: nz =  1; break; // +Z
-                case 4: nx = -1; break; // -X
-                case 5: nx =  1; break; // +X
+                case 2: nz = -1; break; // negative Z
+                case 3: nz =  1; break; // positive Z
+                case 4: nx = -1; break; // negative X
+                case 5: nx =  1; break; // positive X
             }
             int x = hitResult.x + nx;
             int y = hitResult.y + ny;
@@ -484,7 +484,7 @@ static void handleBlockClicks(GLFWwindow* w) {
     prevLeft = left;
 }
 
-/* --- frame ------------------------------------------------------------------- */
+/* frame */
 
 static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, float t) {
     (void)w;
@@ -575,7 +575,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glfwSwapBuffers(window);
 }
 
-/* --- main loop --------------------------------------------------------------- */
+/* main loop */
 
 static void run(Level* lvl, LevelRenderer* lr, Player* p) {
     if (!init(lvl, lr, p)) {

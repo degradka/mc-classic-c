@@ -49,7 +49,7 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     if (cullWasEnabled) glDisable(GL_CULL_FACE);
 
-    // --- NEW camera vectors (match Java commit) ---
+    // camera facing vectors so each particle billboards toward the player
     float yawRad   = player->e.yRotation * (float)M_PI / 180.0f;
     float pitchRad = player->e.xRotation * (float)M_PI / 180.0f;
 
@@ -59,7 +59,6 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
 
     float cameraXWithY = -cameraZ * sinf(pitchRad);
     float cameraZWithY =  cameraX * sinf(pitchRad);
-    // ----------------------------------------------
 
     glColor4f(0.8f, 0.8f, 0.8f, 1.0f);
 

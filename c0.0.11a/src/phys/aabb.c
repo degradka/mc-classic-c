@@ -1,4 +1,4 @@
-// phys/aabb.c — axis-aligned bounding boxes & collision helpers
+// aabb.c: axis aligned bounding boxes and collision helpers
 
 #include "aabb.h"
 

@@ -1,4 +1,4 @@
-// entity.c — parent entity with physics and movement
+// entity.c: parent entity with physics and movement
 
 #include "entity.h"
 #include <math.h>
