@@ -21,6 +21,11 @@ typedef struct Level {
     int*  lightDepths;
     LevelRenderer* renderer;
     int unprocessed;
+
+    // only saved and loaded with level.dat
+    char name[64];
+    char creator[64];
+    long long createTime;
 } Level;
 
 typedef struct {

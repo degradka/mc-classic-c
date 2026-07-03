@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 extern void Minecraft_beginLevelLoading(const char* title);
 extern void Minecraft_levelLoadUpdate(const char* status);
@@ -214,4 +215,8 @@ void LevelGen_generateMap(Level* level) {
 
     Minecraft_levelLoadUpdate("Melting..");
     addLava(level);
+
+    level->createTime = (long long)time(NULL) * 1000;
+    snprintf(level->creator, sizeof(level->creator), "player");
+    snprintf(level->name, sizeof(level->name), "A Nice World");
 }
