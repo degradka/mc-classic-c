@@ -1,92 +1,73 @@
 // particle/particle.c
 
 #include "particle.h"
+#include "../jrandom.h"
 #include <math.h>
-#include <stdlib.h>
-
-static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
 
 void Particle_init(Particle* p, Level* level,
-                   double x, double y, double z,
-                   double mx, double my, double mz, int textureId)
+                   float x, float y, float z,
+                   float mx, float my, float mz, int textureId)
 {
     Entity_init(&p->base, level);
     p->textureId = textureId;
 
-    // size & bbox
-    p->base.boundingBoxWidth  = 0.2f;
-    p->base.boundingBoxHeight = 0.2f;
-    p->base.heightOffset = p->base.boundingBoxHeight * 0.5f;
-
+    Entity_setSize(&p->base, 0.2f, 0.2f);
+    p->base.heightOffset = p->base.boundingBoxHeight / 2.0f;
     Entity_setPosition(&p->base, x, y, z);
 
-    // initial motion + random jitter
-    p->base.motionX = mx + (frand01() * 2.0f - 1.0f) * 0.4f;
-    p->base.motionY = my + (frand01() * 2.0f - 1.0f) * 0.4f;
-    p->base.motionZ = mz + (frand01() * 2.0f - 1.0f) * 0.4f;
+    p->xd = mx + (float)(JRandom_mathRandom() * 2.0 - 1.0) * 0.4f;
+    p->yd = my + (float)(JRandom_mathRandom() * 2.0 - 1.0) * 0.4f;
+    p->zd = mz + (float)(JRandom_mathRandom() * 2.0 - 1.0) * 0.4f;
 
-    double speed = (frand01() + frand01() + 1.0) * 0.15;
-    double d = sqrt(p->base.motionX*p->base.motionX +
-                    p->base.motionY*p->base.motionY +
-                    p->base.motionZ*p->base.motionZ);
-    if (d > 0.0) {
-        p->base.motionX = p->base.motionX / d * speed * 0.4;
-        p->base.motionY = p->base.motionY / d * speed * 0.4 + 0.1;
-        p->base.motionZ = p->base.motionZ / d * speed * 0.4;
-    }
+    float speed = (float)(JRandom_mathRandom() + JRandom_mathRandom() + 1.0) * 0.15f;
+    float dd = (float)sqrt((double)(p->xd * p->xd + p->yd * p->yd + p->zd * p->zd));
+    p->xd = p->xd / dd * speed * 0.4f;
+    p->yd = p->yd / dd * speed * 0.4f + 0.1f;
+    p->zd = p->zd / dd * speed * 0.4f;
 
-    p->textureUOffset = frand01() * 3.0f;
-    p->textureVOffset = frand01() * 3.0f;
+    p->textureUOffset = (float)JRandom_mathRandom() * 3.0f;
+    p->textureVOffset = (float)JRandom_mathRandom() * 3.0f;
 
-    p->size     = frand01() * 0.5f + 0.5f;
-    p->lifetime = (int)(4.0 / (frand01() * 0.9 + 0.1));
+    p->size     = (float)(JRandom_mathRandom() * 0.5 + 0.5);
+    p->lifetime = (int)(4.0 / (JRandom_mathRandom() * 0.9 + 0.1));
     p->age      = 0;
 }
 
 void Particle_onTick(Particle* p) {
     Entity_onTick(&p->base);
 
-    if (p->age++ >= p->lifetime) {
-        Entity_remove(&p->base);
-        return;
-    }
+    // a removed particle still moves this tick
+    if (p->age++ >= p->lifetime) Entity_remove(&p->base);
 
-    // gravity
-    p->base.motionY -= 0.04;
+    p->yd = (float)(p->yd - 0.04);
+    Entity_move(&p->base, p->xd, p->yd, p->zd);
 
-    // move
-    Entity_move(&p->base, p->base.motionX, p->base.motionY, p->base.motionZ);
-
-    // damping
-    p->base.motionX *= 0.98;
-    p->base.motionY *= 0.98;
-    p->base.motionZ *= 0.98;
+    p->xd *= 0.98f;
+    p->yd *= 0.98f;
+    p->zd *= 0.98f;
 
     if (p->base.onGround) {
-        p->base.motionX *= 0.7;
-        p->base.motionZ *= 0.7;
+        p->xd *= 0.7f;
+        p->zd *= 0.7f;
     }
 }
 
 void Particle_render(Particle* p, Tessellator* tess, float partialTicks,
-                     float cameraX, float cameraY, float cameraZ,
-                     float cameraXWithY, float cameraZWithY)
+                     float xa, float ya, float za,
+                     float xa2, float za2)
 {
-    // UVs
-    float minU = ( (p->textureId % 16) + p->textureUOffset * 0.25f ) / 16.0f;
-    float maxU = minU + 999.0f / 64000.0f;
-    float minV = ( (float)(p->textureId / 16) + p->textureVOffset * 0.25f ) / 16.0f;
-    float maxV = minV + 999.0f / 64000.0f;
+    float u0 = ((float)(p->textureId % 16) + p->textureUOffset / 4.0f) / 16.0f;
+    float u1 = u0 + 0.015609375f;
+    float v0 = ((float)(p->textureId / 16) + p->textureVOffset / 4.0f) / 16.0f;
+    float v1 = v0 + 0.015609375f;
 
-    // lerped position
-    float x = (float)(p->base.prevX + (p->base.x - p->base.prevX) * partialTicks);
-    float y = (float)(p->base.prevY + (p->base.y - p->base.prevY) * partialTicks);
-    float z = (float)(p->base.prevZ + (p->base.z - p->base.prevZ) * partialTicks);
+    float r = 0.1f * p->size;
+    float x = p->base.prevX + (p->base.x - p->base.prevX) * partialTicks;
+    float y = p->base.prevY + (p->base.y - p->base.prevY) * partialTicks;
+    float z = p->base.prevZ + (p->base.z - p->base.prevZ) * partialTicks;
 
-    float s = p->size * 0.1f;
-
-    Tessellator_vertexUV(tess, x - cameraX * s - cameraXWithY * s, y - cameraY * s, z - cameraZ * s - cameraZWithY * s, minU, maxV);
-    Tessellator_vertexUV(tess, x - cameraX * s + cameraXWithY * s, y + cameraY * s, z - cameraZ * s + cameraZWithY * s, minU, minV);
-    Tessellator_vertexUV(tess, x + cameraX * s + cameraXWithY * s, y + cameraY * s, z + cameraZ * s + cameraZWithY * s, maxU, minV);
-    Tessellator_vertexUV(tess, x + cameraX * s - cameraXWithY * s, y - cameraY * s, z + cameraZ * s - cameraZWithY * s, maxU, maxV);
+    Tessellator_vertexUV(tess, x - xa * r - xa2 * r, y - ya * r, z - za * r - za2 * r, u0, v1);
+    Tessellator_vertexUV(tess, x - xa * r + xa2 * r, y + ya * r, z - za * r + za2 * r, u0, v0);
+    Tessellator_vertexUV(tess, x + xa * r + xa2 * r, y + ya * r, z + za * r + za2 * r, u1, v0);
+    Tessellator_vertexUV(tess, x + xa * r - xa2 * r, y - ya * r, z + za * r - za2 * r, u1, v1);
 }

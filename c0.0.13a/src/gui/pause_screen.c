@@ -3,7 +3,8 @@
 #include "pause_screen.h"
 
 extern void Minecraft_generateNewLevel(void);
-extern void Minecraft_closeScreenAndGrabMouse(void);
+extern void Minecraft_setScreen(Screen* screen);
+extern void Minecraft_grabMouse(void);
 
 static void PauseScreen_render(Screen* self, int xm, int ym) {
     PauseScreen* ps = (PauseScreen*)self;
@@ -29,10 +30,12 @@ static void PauseScreen_render(Screen* self, int xm, int ym) {
 static void buttonClicked(const Button* b) {
     if (b->id == 0) {
         Minecraft_generateNewLevel();
-        Minecraft_closeScreenAndGrabMouse();
+        Minecraft_setScreen(NULL);
+        Minecraft_grabMouse();
     }
     if (b->id == 3) {
-        Minecraft_closeScreenAndGrabMouse();
+        Minecraft_setScreen(NULL);
+        Minecraft_grabMouse();
     }
 }
 

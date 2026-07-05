@@ -16,17 +16,16 @@
 
 typedef struct Player {
     Entity e;
-    bool keys[5];
+    bool keys[10];
 } Player;
 
 void Player_init(Player* player, Level* level);
 
 void Player_onTick(Player* player);
-void Player_turn(Player* player, GLFWwindow* window, float dx, float dy);
+void Player_turn(Player* player, float dx, float dy);
 
-void Player_setKey(Player* player, int id, bool state);
+// takes a glfw key
+void Player_setKey(Player* player, int key, bool state);
 void Player_releaseAllKeys(Player* player);
-// syncs the 5 movement/jump keys from live GLFW state into player->keys[]
-void Player_pollKeys(Player* player, GLFWwindow* window);
 
 #endif  // PLAYER_H

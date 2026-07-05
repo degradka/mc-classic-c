@@ -1,3 +1,4 @@
+// renderer/tessellator.h: batched quads
 
 #ifndef TESSELLATOR_H
 #define TESSELLATOR_H
@@ -27,5 +28,6 @@ void Tessellator_color         (Tessellator* t, float r, float g, float b);
 void Tessellator_setIgnoreColor(Tessellator* t, int ignore);
 void Tessellator_end           (Tessellator* t);
 void Tessellator_clear         (Tessellator* t);
+
 
 #endif  // TESSELLATOR_H

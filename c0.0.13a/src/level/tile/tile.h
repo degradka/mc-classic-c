@@ -52,6 +52,7 @@ extern Tile TILE_DIRT;      // id=3
 extern Tile TILE_STONEBRICK;// id=4
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
+extern Tile TILE_UNBREAKABLE; // id=7
 
 extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
@@ -61,7 +62,7 @@ extern Tile TILE_CALM_LAVA;  // id=11
 void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
-void Face_render(Tessellator* t, int x, int y, int z, int face);
+void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 

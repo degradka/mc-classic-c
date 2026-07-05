@@ -8,7 +8,7 @@ INCLUDE := -I.
 # debug (default) or release
 BUILD ?= debug
 
-SRC = minecraft.c player.c timer.c  hitresult.c \
+SRC = minecraft.c player.c timer.c  hitresult.c user.c jrandom.c java_sort.c \
       level/chunk.c level/level.c level/level_renderer.c \
       level/tile/tile.c phys/aabb.c entity.c character/zombie.c \
       character/polygon.c character/cube.c \
@@ -19,8 +19,7 @@ SRC = minecraft.c player.c timer.c  hitresult.c \
       level/levelgen/synth/scale.c \
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
-      renderer/frustum.c gui/font.c #comm/socket_connection.c \
-      #comm/socket_server.c server/client.c server/minecraft_server.c
+      renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c
 
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)

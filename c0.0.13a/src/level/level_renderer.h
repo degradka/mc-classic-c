@@ -1,14 +1,10 @@
-// level/level_renderer.h: chunk grid, culling, dirty chunks, and the hit highlight
+// level/level_renderer.h: chunk grid, culling, dirty chunks, picking and the hit highlight
 
 #ifndef LEVELRENDERER_H
 #define LEVELRENDERER_H
 
 #include "../hitresult.h"
 #include "../renderer/frustum.h"
-
-struct Level;     typedef struct Level Level;
-struct Chunk;     typedef struct Chunk Chunk;
-struct HitResult; // forward
 
 struct Level;   typedef struct Level Level;
 struct Chunk;   typedef struct Chunk Chunk;
@@ -19,19 +15,21 @@ struct Player;  typedef struct Player Player;
 typedef struct LevelRenderer {
     Chunk*      chunks;
     Chunk**     sortedChunks;
-    Chunk**     dirtyScratch; // reused each frame instead of malloc per frame
     int         chunkAmountX, chunkAmountY, chunkAmountZ;
 
     Level*      level;
     int         terrainTex;
+    int         rockTex;
+    int         waterTex;
 
     int         drawDistance;
-    double      lastSortX, lastSortY, lastSortZ; // player pos at the last sort
+    float       lX, lY, lZ;
 
     unsigned int surroundLists;
 } LevelRenderer;
 
 void LevelRenderer_init(LevelRenderer* renderer, Level* level, int terrainTex);
+void LevelRenderer_allChanged(LevelRenderer* renderer);
 void LevelRenderer_render(LevelRenderer* renderer, const Player* player, int layer);
 void LevelRenderer_destroy(LevelRenderer* renderer);
 
@@ -43,11 +41,10 @@ void LevelRenderer_renderSurroundingWater(const LevelRenderer* renderer);
 void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
 void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
-void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
-void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, int mode, int tileId);
-void LevelRenderer_renderHitOutline(struct HitResult* h, int mode);
-
-int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+void LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+void LevelRenderer_pick(LevelRenderer* r, const Player* player, const Frustum* frustum);
+void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, const HitResult* h, int mode, int tileType);
+void LevelRenderer_renderHitOutline(const HitResult* h, int mode);
 
 #endif  // LEVELRENDERER_H

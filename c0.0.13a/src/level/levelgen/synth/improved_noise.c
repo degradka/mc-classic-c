@@ -47,13 +47,13 @@ static double ImprovedNoise_getValue(const Synth* self, double x, double y) {
     return ImprovedNoise_noise(n, x, y, 0.0);
 }
 
-void ImprovedNoise_init(ImprovedNoise* n) {
+void ImprovedNoise_init(ImprovedNoise* n, JRandom* random) {
     n->synth.getValue = ImprovedNoise_getValue;
 
     for (int i = 0; i < 256; ++i) n->p[i] = i;
 
     for (int i = 0; i < 256; ++i) {
-        int j = i + rand() % (256 - i);
+        int j = JRandom_nextIntN(random, 256 - i) + i;
         int tmp = n->p[i];
         n->p[i] = n->p[j];
         n->p[j] = tmp;

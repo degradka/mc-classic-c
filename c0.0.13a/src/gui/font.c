@@ -14,20 +14,19 @@ static inline void rgb_from_int(int c, float* r, float* g, float* b) {
     *b = ( c        & 0xFF) / 255.0f;
 }
 
-static inline int color_from_code(int code) {
-    int br = (code & 0x8) ? 0x80 : 0x00;
-    int b = ((code & 0x1) ? 191 : 0) + br;
-    int g = ((code & 0x2) ? 191 : 0) + br;
-    int r = ((code & 0x4) ? 191 : 0) + br;
-    if (r > 255) r = 255;
-    if (g > 255) g = 255;
-    if (b > 255) b = 255;
-    return (r << 16) | (g << 8) | b;
+// -1 for an unknown code, like indexOf
+static int code_index(unsigned char c) {
+    const char* hex = "0123456789abcdef";
+    const char* p = c ? strchr(hex, c) : NULL;
+    return p ? (int)(p - hex) : -1;
 }
 
-static int is_color_code_char(char c) {
-    const char* hex = "0123456789abcdef";
-    return (strchr(hex, c) != NULL);
+static inline int color_from_code(int cc) {
+    int br = (cc & 0x8) * 8;
+    int b = (cc & 0x1) * 191 + br;
+    int g = ((cc & 0x2) >> 1) * 191 + br;
+    int r = ((cc & 0x4) >> 2) * 191 + br;
+    return r << 16 | g << 8 | b;
 }
 
 void Font_init(Font* f, const char* path) {
@@ -41,7 +40,6 @@ void Font_init(Font* f, const char* path) {
         return;
     }
 
-    // character widths for the first 128, 8x8 cells in a 16x16 grid on the 128x128 image
     for (int i = 0; i < 128; ++i) {
         int xt = i % 16;
         int yt = i / 16;
@@ -54,9 +52,9 @@ void Font_init(Font* f, const char* path) {
             for (int y = 0; y < 8 && emptyColumn; ++y) {
                 int yPixel = yt * 8 + y;
                 int idx = (yPixel * w + xPixel) * 4; // RGBA
-                // treat as “ink” if alpha > 128
-                unsigned char a = img[idx + 3];
-                if (a > 128) emptyColumn = 0;
+                // ink is the blue channel over 128, not alpha
+                unsigned char blue = img[idx + 2];
+                if (blue > 128) emptyColumn = 0;
             }
         }
         if (i == 32) x = 4; // space = half width
@@ -69,7 +67,7 @@ void Font_init(Font* f, const char* path) {
 }
 
 static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, int y, int color, int darken) {
-    if (!s || !*s || f->texture == 0) return;
+    if (!s) return;
 
     if (darken) color = (color & 0xFCFCFC) >> 2;
     float r,g,b; rgb_from_int(color, &r,&g,&b);
@@ -85,18 +83,15 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
     size_t n = strlen(s);
 
     for (size_t i = 0; i < n; ++i) {
-        unsigned char c = str[i];
-
-        if (c == '&' && i + 1 < n && is_color_code_char((char)str[i+1])) {
-            // handle color code
-            int code = (int)(strchr("0123456789abcdef", (char)str[i+1]) - "0123456789abcdef");
-            color = color_from_code(code);
+        if (str[i] == '&') {
+            color = color_from_code(code_index(str[i + 1]));
+            i += 2;
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);
             Tessellator_color(t, r,g,b);
-            i++; // skip code char
-            continue;
+            if (i >= n) break;
         }
+        unsigned char c = str[i];
 
         int ix = (c % 16) * 8;
         int iy = (c / 16) * 8;
@@ -133,8 +128,8 @@ int Font_width(Font* f, const char* s) {
 
     for (size_t i = 0; i < n; ++i) {
         unsigned char c = str[i];
-        if (c == '&' && i + 1 < n && is_color_code_char((char)str[i+1])) { i++; continue; }
-        len += f->charWidth[c];
+        if (c == '&') i++;
+        else len += f->charWidth[c];
     }
     return len;
 }

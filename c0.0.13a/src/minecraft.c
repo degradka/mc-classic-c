@@ -1,10 +1,10 @@
-// minecraft.c: window, main loop, input, camera and picking
+// minecraft.c: window, main loop, input, camera, picking and the level loading screen
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include <math.h>
-#include <float.h>
 
 #include <GL/glew.h>
 #include <GL/glu.h>
@@ -14,6 +14,8 @@
 
 #include "level/level.h"
 #include "level/level_renderer.h"
+#include "level/chunk.h"
+#include "level/levelgen/level_gen.h"
 #include "renderer/frustum.h"
 #include "level/tile/tile.h"
 #include "renderer/textures.h"
@@ -24,6 +26,8 @@
 #include "timer.h"
 #include "hitresult.h"
 #include "gui/font.h"
+#include "gui/screen.h"
+#include "gui/pause_screen.h"
 
 #define MAX_MOBS 100
 
@@ -38,53 +42,109 @@ static User           user;
 
 static int mobCount = 0;
 
-static int prevLeft  = GLFW_RELEASE;
-static int prevRight = GLFW_RELEASE;
-static int prevEnter = GLFW_RELEASE;
-static int prevNum1 = GLFW_RELEASE, prevNum2 = GLFW_RELEASE;
-static int prevNum3 = GLFW_RELEASE, prevNum4 = GLFW_RELEASE;
-static int prevNum6 = GLFW_RELEASE;
-static int prevG    = GLFW_RELEASE;
-static int prevY    = GLFW_RELEASE;
-static int prevI    = GLFW_RELEASE;
-
-static int gEditMode = 0;              // 0=destroy, 1=place
-static int gYMouseAxis = 1;            // toggled by Y key (1 or -1)
+static int editMode = 0;
+static int yMouseAxis = 1;
+static int paintTexture = 1;
 
 static int texTerrain = 0;
 static int texDirt = 0;
-static char gLoadTitle[64];
 
 static Tessellator hudTess;
 static Font gFont;
-static int selectedTileId = 1;         // 1=rock, 3=dirt, 4=stoneBrick, 5=wood
-static int gFPS = 0;                   // last computed fps per second
-static int gChunkUpdatesPerSec = 0;    // last computed chunk updates per second
-static int gChunkUpdatesAccum = 0;
+static char fpsString[64] = "";
+static char title[64] = "";
 
 static int gWinWidth  = 854;
 static int gWinHeight = 480;
 static int gIsFullscreen = 0;
 
-static GLfloat fogColorDaylight[4] = { 254.0f/255.0f, 251.0f/255.0f, 250.0f/255.0f, 1.0f };
-static GLfloat fogColorShadow  [4] = {  14.0f/255.0f,  11.0f/255.0f,  10.0f/255.0f, 1.0f };
+static GLfloat fogColor0[4] = { 0.5f, 0.8f, 1.0f, 1.0f };
+static GLfloat fogColor1[4] = { 14.0f/255.0f, 11.0f/255.0f, 10.0f/255.0f, 1.0f };
 
-static int      isHitNull = 1;
+static int       isHitNull = 1;
 static HitResult hitResult;
 
-static void tick(Player* player, GLFWwindow* window);
+static GLuint selectBuffer[2000];
 
-void Minecraft_beginLevelLoading(const char* title) {
-    int i = 0;
-    for (; title[i] != '\0' && i < 63; ++i) gLoadTitle[i] = title[i];
-    gLoadTitle[i] = '\0';
+static bool mouseGrabbed = false;
 
-    int fbw, fbh;
-    glfwGetFramebufferSize(window, &fbw, &fbh);
-    int screenWidth  = fbw * 240 / fbh;
-    int screenHeight = 240;
+static PauseScreen pauseScreen;
+static Screen*     screen = NULL;
 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+// glfw callbacks queue the events and the tick drains them
+#define MAX_EVENTS 256
+typedef struct { int key; bool state; double x, y; } InputEvent;
+static InputEvent mouseEvents[MAX_EVENTS];
+static int        mouseEventCount = 0;
+static InputEvent keyEvents[MAX_EVENTS];
+static int        keyEventCount = 0;
+
+static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
+    (void)w; (void)scancode; (void)mods;
+    if (action == GLFW_REPEAT || keyEventCount >= MAX_EVENTS) return;
+    keyEvents[keyEventCount].key = key;
+    keyEvents[keyEventCount].state = action == GLFW_PRESS;
+    keyEventCount++;
+}
+
+static void mouseButtonCallback(GLFWwindow* w, int button, int action, int mods) {
+    (void)mods;
+    if (mouseEventCount >= MAX_EVENTS) return;
+    mouseEvents[mouseEventCount].key = button;
+    mouseEvents[mouseEventCount].state = action == GLFW_PRESS;
+    glfwGetCursorPos(w, &mouseEvents[mouseEventCount].x, &mouseEvents[mouseEventCount].y);
+    mouseEventCount++;
+}
+
+static void getSize(int* width, int* height) {
+    glfwGetFramebufferSize(window, width, height);
+}
+
+// mouse y counts up from the bottom
+static void lwjglMouse(double cx, double cy, int* x, int* y) {
+    int width, height;
+    getSize(&width, &height);
+    *x = (int)cx;
+    *y = height - 1 - (int)cy;
+}
+
+void Minecraft_setScreen(Screen* s) {
+    screen = s;
+}
+
+static void openPauseScreen(void) {
+    int width, height;
+    getSize(&width, &height);
+    int screenWidth  = width * 240 / height;
+    int screenHeight = height * 240 / height;
+    PauseScreen_init(&pauseScreen, &gFont, screenWidth, screenHeight);
+    screen = (Screen*)&pauseScreen;
+}
+
+void Minecraft_grabMouse(void) {
+    if (mouseGrabbed) return;
+    mouseGrabbed = true;
+    int ww, wh; glfwGetWindowSize(window, &ww, &wh);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
+    Minecraft_setScreen(NULL);
+}
+
+static void releaseMouse(void) {
+    if (!mouseGrabbed) return;
+    Player_releaseAllKeys(&player);
+    mouseGrabbed = false;
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    openPauseScreen();
+}
+
+void Minecraft_beginLevelLoading(const char* t) {
+    snprintf(title, sizeof title, "%s", t);
+    int width, height;
+    getSize(&width, &height);
+    int screenWidth  = width * 240 / height;
+    int screenHeight = height * 240 / height;
+    glClear(GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0.0, screenWidth, screenHeight, 0.0, 100.0, 300.0);
@@ -93,75 +153,86 @@ void Minecraft_beginLevelLoading(const char* title) {
     glTranslatef(0.0f, 0.0f, -200.0f);
 }
 
-// Minecraft.levelLoadUpdate, the dirt background with the title and status
 void Minecraft_levelLoadUpdate(const char* status) {
-    int fbw, fbh;
-    glfwGetFramebufferSize(window, &fbw, &fbh);
-    int screenWidth  = fbw * 240 / fbh;
-    int screenHeight = 240;
-
+    int width, height;
+    getSize(&width, &height);
+    int screenWidth  = width * 240 / height;
+    int screenHeight = height * 240 / height;
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texDirt);
-
     Tessellator_begin(&hudTess);
-    Tessellator_color(&hudTess, 0.5019608f, 0.5019608f, 0.5019608f); // 0x808080
+    Tessellator_color(&hudTess, 128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f);
     float s = 32.0f;
-    Tessellator_vertexUV(&hudTess, 0.0f, (float)screenHeight, 0.0f, 0.0f, screenHeight / s);
-    Tessellator_vertexUV(&hudTess, (float)screenWidth, (float)screenHeight, 0.0f, screenWidth / s, screenHeight / s);
-    Tessellator_vertexUV(&hudTess, (float)screenWidth, 0.0f, 0.0f, screenWidth / s, 0.0f);
+    Tessellator_vertexUV(&hudTess, 0.0f, (float)screenHeight, 0.0f, 0.0f, (float)screenHeight / s);
+    Tessellator_vertexUV(&hudTess, (float)screenWidth, (float)screenHeight, 0.0f, (float)screenWidth / s, (float)screenHeight / s);
+    Tessellator_vertexUV(&hudTess, (float)screenWidth, 0.0f, 0.0f, (float)screenWidth / s, 0.0f);
     Tessellator_vertexUV(&hudTess, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Tessellator_end(&hudTess);
-
-    int titleWidth  = Font_width(&gFont, gLoadTitle);
-    int statusWidth = Font_width(&gFont, status);
-    Font_drawShadow(&gFont, &hudTess, gLoadTitle, (screenWidth - titleWidth) / 2, screenHeight / 2 - 4 - 8, 0xFFFFFF);
-    Font_drawShadow(&gFont, &hudTess, status, (screenWidth - statusWidth) / 2, screenHeight / 2 - 4 + 4, 0xFFFFFF);
-
+    glEnable(GL_TEXTURE_2D);
+    Font_drawShadow(&gFont, &hudTess, title, (screenWidth - Font_width(&gFont, title)) / 2, screenHeight / 2 - 4 - 8, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, status, (screenWidth - Font_width(&gFont, status)) / 2, screenHeight / 2 - 4 + 4, 0xFFFFFF);
     glfwSwapBuffers(window);
+    // pumps the window messages
     glfwPollEvents();
     sleepMillis(200);
 }
 
-const char* Minecraft_getUserName(void) {
-    return user.name;
+void Minecraft_generateNewLevel(void) {
+    LevelGen_generateLevel(&level, user.name, 32, 512, 64);
+    Entity_resetPosition(&player.e);
+    mobCount = 0;
 }
 
-static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
-    (void)scancode; (void)mods;
-    if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
-        if (glfwGetInputMode(w, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
-            int ww, wh; glfwGetWindowSize(w, &ww, &wh);
-            glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            glfwSetCursorPos(w, ww * 0.5, wh * 0.5);
-        }
-    }
+static void attemptSaveLevel(void) {
+    Level_save(&level, "level.dat");
 }
 
-static void setupFog(int type) {
-    glEnable(GL_FOG);
-    glFogi(GL_FOG_MODE, GL_EXP);
+static bool fileExists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
 
-    if (type == 0) { // daylight
+static void setupFog(int i) {
+    const Tile* currentTile = gTiles[Level_getTile(&level, (int)player.e.x, (int)(player.e.y + 0.12f), (int)player.e.z)];
+    if (currentTile && currentTile->liquidType == LIQUID_WATER) {
+        GLfloat c[4] = { 0.02f, 0.02f, 0.2f, 1.0f };
+        GLfloat a[4] = { 0.3f, 0.3f, 0.7f, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
+        glFogf(GL_FOG_DENSITY, 0.1f);
+        glFogfv(GL_FOG_COLOR, c);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
+    } else if (currentTile && currentTile->liquidType == LIQUID_LAVA) {
+        GLfloat c[4] = { 0.6f, 0.1f, 0.0f, 1.0f };
+        GLfloat a[4] = { 0.4f, 0.3f, 0.3f, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
+        glFogf(GL_FOG_DENSITY, 2.0f);
+        glFogfv(GL_FOG_COLOR, c);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
+    } else if (i == 0) {
+        GLfloat a[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
         glFogf(GL_FOG_DENSITY, 0.001f);
-        glFogfv(GL_FOG_COLOR, fogColorDaylight);
-        glDisable(GL_LIGHTING);
-        glDisable(GL_COLOR_MATERIAL);
-    } else {         // shadow
+        glFogfv(GL_FOG_COLOR, fogColor0);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
+    } else if (i == 1) {
+        float br = 0.6f;
+        GLfloat a[4] = { br, br, br, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
         glFogf(GL_FOG_DENSITY, 0.01f);
-        glFogfv(GL_FOG_COLOR, fogColorShadow);
-        glEnable(GL_LIGHTING);
-        glEnable(GL_COLOR_MATERIAL);
-
-        GLfloat ambient[4] = { 0.6f, 0.6f, 0.6f, 1.0f };
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+        glFogfv(GL_FOG_COLOR, fogColor1);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
     }
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT, GL_AMBIENT);
+    glEnable(GL_LIGHTING);
 }
 
-/* --- boot/shutdown ----------------------------------------------------------- */
+/* boot and shutdown */
 
-static int init(Level* lvl, LevelRenderer* lr, Player* p) {
+static int init(void) {
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
         return 0;
@@ -172,11 +243,11 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-    
+
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.11a", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.13a", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.11a", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.13a", NULL, NULL);
     }
 
     if (!window) {
@@ -185,8 +256,6 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
         return 0;
     }
     glfwMakeContextCurrent(window);
-    glEnable(GL_MULTISAMPLE);
-    glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
     glfwSwapInterval(0);
 
     GLenum err = glewInit();
@@ -195,49 +264,49 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
         return 0;
     }
 
+    glfwSetKeyCallback(window, keyCallback);
+    glfwSetMouseButtonCallback(window, mouseButtonCallback);
+
     glEnable(GL_TEXTURE_2D);
     glShadeModel(GL_SMOOTH);
-    glDisable(GL_LIGHTING);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     glClearColor(0.5f, 0.8f, 1.0f, 0.0f);
-
+    glClearDepth(1.0);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
-
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
-
     glEnable(GL_ALPHA_TEST);
-    glAlphaFunc(GL_GREATER, 0.5f);
-
-    int ww, wh; glfwGetWindowSize(window, &ww, &wh);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
-    glfwSetKeyCallback(window, keyCallback);
+    glAlphaFunc(GL_GREATER, 0.0f);
+    glCullFace(GL_BACK);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
 
     Tile_registerAll();
-
     User_init(&user, "noname");
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.gif");
 
-    Level_init(lvl, 256, 256, 64);
-    LevelRenderer_init(lr, lvl, texTerrain);
-    calcLightDepths(lvl, 0, 0, lvl->width, lvl->height);
+    int width, height;
+    getSize(&width, &height);
+    glViewport(0, 0, width, height);
 
-    Player_init(p, lvl);
+    Level_init(&level);
+    bool success = false;
+    // a missing file shows no loading screen
+    if (fileExists("level.dat")) {
+        success = Level_load(&level, "level.dat");
+        if (!success && fileExists("level.dat")) success = Level_loadLegacy(&level, "level.dat");
+    }
+    if (!success) LevelGen_generateLevel(&level, user.name, 256, 256, 64);
 
-    ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain);
+    LevelRenderer_init(&levelRenderer, &level, texTerrain);
+    Player_init(&player, &level);
+    ParticleEngine_init(&particleEngine, &level, (GLuint)texTerrain);
 
     mobCount = 0;
-    for (int i = 0; i < 10 && i < MAX_MOBS; ++i) {
-        Zombie_init(&mobs[mobCount], lvl, 128.0, 0.0, 129.0);
+    for (int i = 0; i < 10; ++i) {
+        Zombie_init(&mobs[mobCount], &level, 128.0f, 0.0f, 128.0f);
         Entity_resetPosition(&mobs[mobCount].base);
         mobCount++;
     }
@@ -247,465 +316,358 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     return 1;
 }
 
-static void destroy(Level* lvl) {
-    Level_save(lvl);
-    Level_destroy(lvl);
+static void destroy(void) {
+    attemptSaveLevel();
+    LevelRenderer_destroy(&levelRenderer);
+    Level_destroy(&level);
     glfwDestroyWindow(window);
     glfwTerminate();
 }
 
-/* --- camera ------------------------------------------------------------------ */
+/* camera */
 
-static void moveCameraToPlayer(Player* p, float t) {
+static void moveCameraToPlayer(float a) {
     glTranslatef(0.0f, 0.0f, -0.3f);
-
-    glRotatef(p->e.xRotation, 1.0f, 0.0f, 0.0f);
-    glRotatef(p->e.yRotation, 0.0f, 1.0f, 0.0f);
-
-    double x = p->e.prevX + (p->e.x - p->e.prevX) * t;
-    double y = p->e.prevY + (p->e.y - p->e.prevY) * t;
-    double z = p->e.prevZ + (p->e.z - p->e.prevZ) * t;
-
-    glTranslated(-x, -y, -z);
+    glRotatef(player.e.xRotation, 1.0f, 0.0f, 0.0f);
+    glRotatef(player.e.yRotation, 0.0f, 1.0f, 0.0f);
+    float x = player.e.prevX + (player.e.x - player.e.prevX) * a;
+    float y = player.e.prevY + (player.e.y - player.e.prevY) * a;
+    float z = player.e.prevZ + (player.e.z - player.e.prevZ) * a;
+    glTranslatef(-x, -y, -z);
 }
 
-static void setupCamera(Player* p, float t) {
-    int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
+static void setupCamera(float a, int width, int height) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(70.0, (double)fbw / (double)fbh, 0.05, 1000.0);
+    gluPerspective(70.0f, (float)width / (float)height, 0.05f, 1024.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    moveCameraToPlayer(p, t);
+    moveCameraToPlayer(a);
 }
 
-static void drawGui(float partialTicks) {
-    (void)partialTicks;
+static void setupPickCamera(float a, int x, int y, int width, int height) {
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    gluPickMatrix((float)x, (float)y, 5.0f, 5.0f, viewport);
+    gluPerspective(70.0f, (float)width / (float)height, 0.05f, 1024.0f);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    moveCameraToPlayer(a);
+}
+
+/* picking */
+
+static void pick(float a, int width, int height) {
+    glSelectBuffer(2000, selectBuffer);
+    glRenderMode(GL_SELECT);
+    setupPickCamera(a, width / 2, height / 2, width, height);
+    Frustum frustum;
+    frustum_calculate(&frustum);
+    LevelRenderer_pick(&levelRenderer, &player, &frustum);
+    int hits = glRenderMode(GL_RENDER);
+
+    int p = 0;
+    int names[10];
+    HitResult current;
+    HitResult best;
+    bool haveBest = false;
+    for (int i = 0; i < hits; i++) {
+        int nameCount = (int)selectBuffer[p++];
+        p += 2;
+        for (int j = 0; j < nameCount; j++) names[j] = (int)selectBuffer[p++];
+        hitresult_create(&current, names[1], names[2], names[3], names[0], names[4]);
+        if (!haveBest || HitResult_isCloserThan(&current, &player, &best, editMode)) {
+            best = current;
+            haveBest = true;
+        }
+    }
+
+    if (haveBest) {
+        hitResult = best;
+        isHitNull = 0;
+    } else {
+        isHitNull = 1;
+    }
+}
+
+/* input actions */
+
+static bool isFree(const AABB* aabb) {
+    if (AABB_intersects(&player.e.boundingBox, aabb)) return false;
+    for (int i = 0; i < mobCount; i++) {
+        if (AABB_intersects(&mobs[i].base.boundingBox, aabb)) return false;
+    }
+    return true;
+}
+
+static void handleMouseClick(void) {
+    if (editMode == 0) {
+        if (!isHitNull) {
+            const Tile* oldTile = gTiles[Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z)];
+            bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
+            if (oldTile && changed) Tile_onDestroy(oldTile, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
+        }
+    } else if (!isHitNull) {
+        int x = hitResult.x;
+        int y = hitResult.y;
+        int z = hitResult.z;
+        if (hitResult.f == 0) y--;
+        if (hitResult.f == 1) y++;
+        if (hitResult.f == 2) z--;
+        if (hitResult.f == 3) z++;
+        if (hitResult.f == 4) x--;
+        if (hitResult.f == 5) x++;
+        const Tile* tile = gTiles[paintTexture];
+        AABB aabb;
+        if (!tile->getAABB(tile, x, y, z, &aabb) || isFree(&aabb)) level_setTile(&level, x, y, z, paintTexture);
+    }
+}
+
+// Screen.updateEvents, the screen keeps draining even if a click closes it
+static void screenUpdateEvents(Screen* s) {
+    int width, height;
+    getSize(&width, &height);
+    for (int e = 0; e < mouseEventCount; e++) {
+        if (mouseEvents[e].state) {
+            int ex, ey;
+            lwjglMouse(mouseEvents[e].x, mouseEvents[e].y, &ex, &ey);
+            int xm = ex * s->width / width;
+            int ym = s->height - ey * s->height / height - 1;
+            if (s->mouseClicked) s->mouseClicked(s, xm, ym, mouseEvents[e].key);
+        }
+    }
+    mouseEventCount = 0;
+    for (int e = 0; e < keyEventCount; e++) {
+        if (keyEvents[e].state && s->keyPressed) s->keyPressed(s, 0, keyEvents[e].key);
+    }
+    keyEventCount = 0;
+}
+
+static void tick(void) {
+    if (!screen) {
+        for (int e = 0; e < mouseEventCount; e++) {
+            if (!mouseGrabbed && mouseEvents[e].state) {
+                Minecraft_grabMouse();
+                continue;
+            }
+            if (mouseEvents[e].key == GLFW_MOUSE_BUTTON_LEFT && mouseEvents[e].state) handleMouseClick();
+            if (mouseEvents[e].key == GLFW_MOUSE_BUTTON_RIGHT && mouseEvents[e].state) editMode = (editMode + 1) % 2;
+        }
+        mouseEventCount = 0;
+
+        // a key can open the pause screen, the rest of the queue still goes here
+        for (int e = 0; e < keyEventCount; e++) {
+            int key = keyEvents[e].key;
+            Player_setKey(&player, key, keyEvents[e].state);
+            if (keyEvents[e].state) {
+                if (key == GLFW_KEY_ESCAPE) releaseMouse();
+                if (key == GLFW_KEY_ENTER) attemptSaveLevel();
+                if (key == GLFW_KEY_R) Entity_resetPosition(&player.e);
+                if (key == GLFW_KEY_1) paintTexture = 1;
+                if (key == GLFW_KEY_2) paintTexture = 3;
+                if (key == GLFW_KEY_3) paintTexture = 4;
+                if (key == GLFW_KEY_4) paintTexture = 5;
+                if (key == GLFW_KEY_6) paintTexture = 6;
+                if (key == GLFW_KEY_Y) yMouseAxis *= -1;
+                if (key == GLFW_KEY_G && mobCount < MAX_MOBS) {
+                    Zombie_init(&mobs[mobCount++], &level, player.e.x, player.e.y, player.e.z);
+                }
+                if (key == GLFW_KEY_F) LevelRenderer_toggleDrawDistance(&levelRenderer);
+            }
+        }
+        keyEventCount = 0;
+    }
+
+    if (screen) {
+        screenUpdateEvents(screen);
+        if (screen && screen->tick) screen->tick(screen);
+    }
+
+    Level_onTick(&level);
+    ParticleEngine_onTick(&particleEngine);
+
+    for (int i = 0; i < mobCount; i++) {
+        Zombie_onTick(&mobs[i]);
+        if (mobs[i].base.removed) {
+            memmove(&mobs[i], &mobs[i + 1], (size_t)(mobCount - i - 1) * sizeof(Zombie));
+            mobCount--;
+            i--;
+        }
+    }
+
+    Player_onTick(&player);
+}
+
+/* frame */
+
+static void drawGui(int width, int height) {
+    int screenWidth  = width * 240 / height;
+    int screenHeight = height * 240 / height;
+    double cx, cy;
+    glfwGetCursorPos(window, &cx, &cy);
+    int mx, my;
+    lwjglMouse(cx, cy, &mx, &my);
+    int xMouse = mx * screenWidth / width;
+    int yMouse = screenHeight - my * screenHeight / height - 1;
 
     glClear(GL_DEPTH_BUFFER_BIT);
-
-    // --- setup HUD camera to a fixed 240px logical height ---
-    int fbw, fbh; 
-    glfwGetFramebufferSize(window, &fbw, &fbh);
-
-    int screenWidth  = fbw * 240 / fbh;
-    int screenHeight = 240;
-
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0.0, screenWidth, screenHeight, 0.0, 100.0, 300.0);
-
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glTranslatef(0.0f, 0.0f, -200.0f);
 
     glPushMatrix();
-    glTranslated((double)screenWidth - 16.0, 16.0, 0.0);
+    glTranslatef((float)(screenWidth - 16), 16.0f, -50.0f);
     glScalef(16.0f, 16.0f, 16.0f);
-    glRotatef(30.0f, 1, 0, 0);
-    glRotatef(45.0f, 0, 1, 0);
-    glTranslatef(-1.5f, 0.5f, -0.5f);
-    glScalef(-1.0f, -1.0f, 1.0f);
-
+    glRotatef(-30.0f, 1.0f, 0.0f, 0.0f);
+    glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+    glTranslatef(-1.5f, 0.5f, 0.5f);
+    glScalef(-1.0f, -1.0f, -1.0f);
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     glEnable(GL_TEXTURE_2D);
-
-    Tessellator_init(&hudTess);
-    const Tile* hand = gTiles[selectedTileId];
-    if (hand && hand->render) {
-        hand->render(hand, &hudTess, &level, 0, -2, 0, 0);
-    }
-    Tessellator_flush(&hudTess);
-
+    Tessellator_begin(&hudTess);
+    gTiles[paintTexture]->render(gTiles[paintTexture], &hudTess, &level, 0, -2, 0, 0);
+    Tessellator_end(&hudTess);
     glDisable(GL_TEXTURE_2D);
     glPopMatrix();
 
-    Font_drawShadow(&gFont, &hudTess, "0.0.11a", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.13a", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, fpsString, 2, 12, 0xFFFFFF);
 
-    char stats[64];
-    snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
-    Font_drawShadow(&gFont, &hudTess, stats, 2, 12, 0xFFFFFF);
+    int wc = screenWidth / 2;
+    int hc = screenHeight / 2;
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    Tessellator_begin(&hudTess);
+    Tessellator_vertex(&hudTess, (float)(wc + 1), (float)(hc - 4), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc - 0), (float)(hc - 4), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc - 0), (float)(hc + 5), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc + 1), (float)(hc + 5), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc + 5), (float)(hc - 0), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc - 4), (float)(hc - 0), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc - 4), (float)(hc + 1), 0.0f);
+    Tessellator_vertex(&hudTess, (float)(wc + 5), (float)(hc + 1), 0.0f);
+    Tessellator_end(&hudTess);
 
-    int cx = screenWidth / 2;
-    int cy = screenHeight / 2;
-
-    glColor4f(1, 1, 1, 1);
-    Tessellator_init(&hudTess);
-    // vertical (height ~9)
-    Tessellator_vertex(&hudTess, (float)(cx + 1), (float)(cy - 4), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 0), (float)(cy - 4), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 0), (float)(cy + 5), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 1), (float)(cy + 5), 0.0f);
-    // horizontal (width ~9)
-    Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 0), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 0), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 1), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 1), 0.0f);
-    Tessellator_flush(&hudTess);
+    if (screen) screen->render(screen, xMouse, yMouse);
 }
 
-/* --- picking ----------------------------------------------------------------- */
+static void render(float a) {
+    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) releaseMouse();
 
-static void get_look_dir(const Player* p, double* dx, double* dy, double* dz) {
-    const double yaw   = p->e.yRotation * M_PI / 180.0;
-    const double pitch = p->e.xRotation * M_PI / 180.0;
-    const double cp = cos(pitch), sp = sin(pitch);
-    const double cy = cos(yaw),   sy = sin(yaw);
-    *dx =  sy * cp;   // +X right
-    *dy = -sp;        // +Y up
-    *dz = -cy * cp;   // -Z forward
-}
+    int width, height;
+    getSize(&width, &height);
+    glViewport(0, 0, width, height);
 
-static int raycast_block(const Level* lvl,
-                         double ox, double oy, double oz,
-                         double dx, double dy, double dz,
-                         double maxDist,
-                         HitResult* out) {
-    int x = (int)floor(ox);
-    int y = (int)floor(oy);
-    int z = (int)floor(oz);
-
-    const int stepX = (dx > 0) - (dx < 0);
-    const int stepY = (dy > 0) - (dy < 0);
-    const int stepZ = (dz > 0) - (dz < 0);
-
-    double tMaxX = (dx != 0.0) ? (((stepX > 0 ? (x + 1) : x) - ox) / dx) : DBL_MAX;
-    double tMaxY = (dy != 0.0) ? (((stepY > 0 ? (y + 1) : y) - oy) / dy) : DBL_MAX;
-    double tMaxZ = (dz != 0.0) ? (((stepZ > 0 ? (z + 1) : z) - oz) / dz) : DBL_MAX;
-
-    double tDeltaX = (dx != 0.0) ? fabs(1.0 / dx) : DBL_MAX;
-    double tDeltaY = (dy != 0.0) ? fabs(1.0 / dy) : DBL_MAX;
-    double tDeltaZ = (dz != 0.0) ? fabs(1.0 / dz) : DBL_MAX;
-
-    int face = -1;
-    double t = 0.0;
-
-    while (t <= maxDist) {
-        if (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
-            return 0;
-
-        int id = Level_getTile(lvl, x, y, z);
-        if (id != 0) {
-            if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
-            return 1;
-        }
-
-        if (tMaxX < tMaxY) {
-            if (tMaxX < tMaxZ) {
-                x += stepX; t = tMaxX; tMaxX += tDeltaX;
-                face = (stepX > 0) ? 4 : 5;
-            } else {
-                z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ;
-                face = (stepZ > 0) ? 2 : 3;
-            }
-        } else {
-            if (tMaxY < tMaxZ) {
-                y += stepY; t = tMaxY; tMaxY += tDeltaY;
-                face = (stepY > 0) ? 0 : 1;
-            } else {
-                z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ;
-                face = (stepZ > 0) ? 2 : 3;
-            }
-        }
-    }
-    return 0;
-}
-
-static void pick(float t) {
-    double x = player.e.prevX + (player.e.x - player.e.prevX) * t;
-    double y = player.e.prevY + (player.e.y - player.e.prevY) * t;
-    double z = player.e.prevZ + (player.e.z - player.e.prevZ) * t;
-
-    double dx, dy, dz;
-    get_look_dir(&player, &dx, &dy, &dz);
-
-    // nudge origin to match the 0.3 view-space translate
-    x += dx * 0.3; y += dy * 0.3; z += dz * 0.3;
-
-    const int reachBlocks = 3; // axis-aligned reach cube
-
-    HitResult hr;
-    if (raycast_block(&level, x, y, z, dx, dy, dz, 100.0, &hr)) {
-        int px = (int)floor(player.e.x);
-        int py = (int)floor(player.e.y);
-        int pz = (int)floor(player.e.z);
-        if (abs(hr.x - px) <= reachBlocks &&
-            abs(hr.y - py) <= reachBlocks &&
-            abs(hr.z - pz) <= reachBlocks) {
-            hitResult = hr;
-            isHitNull = 0;
-            return;
-        }
-    }
-    isHitNull = 1;
-}
-
-/* --- input actions ----------------------------------------------------------- */
-
-static void handleGameplayKeys(GLFWwindow* w) {
-    // Enter = save level
-    int enter = glfwGetKey(w, GLFW_KEY_ENTER);
-    if (enter == GLFW_PRESS && prevEnter == GLFW_RELEASE) {
-        Level_save(&level);
-    }
-    prevEnter = enter;
-
-    // 1..4 = select tile
-    int n1 = glfwGetKey(w, GLFW_KEY_1);
-    int n2 = glfwGetKey(w, GLFW_KEY_2);
-    int n3 = glfwGetKey(w, GLFW_KEY_3);
-    int n4 = glfwGetKey(w, GLFW_KEY_4);
-    int n6 = glfwGetKey(w, GLFW_KEY_6);
-    if (n1 == GLFW_PRESS && prevNum1 == GLFW_RELEASE) selectedTileId = 1;  // rock
-    if (n2 == GLFW_PRESS && prevNum2 == GLFW_RELEASE) selectedTileId = 3;  // dirt
-    if (n3 == GLFW_PRESS && prevNum3 == GLFW_RELEASE) selectedTileId = 4;  // stone brick
-    if (n4 == GLFW_PRESS && prevNum4 == GLFW_RELEASE) selectedTileId = 5;  // wood
-    if (n6 == GLFW_PRESS && prevNum6 == GLFW_RELEASE) selectedTileId = 6;  // bush
-    prevNum1 = n1; prevNum2 = n2; prevNum3 = n3; prevNum4 = n4; prevNum6 = n6;
-
-    // G = spawn zombie at player
-    int g = glfwGetKey(w, GLFW_KEY_G);
-    if (g == GLFW_PRESS && prevG == GLFW_RELEASE && mobCount < MAX_MOBS) {
-        Zombie_init(&mobs[mobCount++], &level, player.e.x, player.e.y, player.e.z);
-    }
-    prevG = g;
-
-    // Y = invert mouse Y axis
-    int kY = glfwGetKey(w, GLFW_KEY_Y);
-    if (kY == GLFW_PRESS && prevY == GLFW_RELEASE) {
-        gYMouseAxis *= -1;
-    }
-    prevY = kY;
-
-    int kI = glfwGetKey(w, GLFW_KEY_I);
-    if (kI == GLFW_PRESS && prevI == GLFW_RELEASE) {
-        LevelRenderer_toggleDrawDistance(&levelRenderer);
-    }
-    prevI = kI;
-}
-
-static void handleBlockClicks(GLFWwindow* w) {
-    int left  = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
-    int right = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT);
-
-    if (glfwGetInputMode(w, GLFW_CURSOR) != GLFW_CURSOR_DISABLED &&
-        (left == GLFW_PRESS || right == GLFW_PRESS)) {
-        int ww, wh; glfwGetWindowSize(w, &ww, &wh);
-        glfwSetInputMode(w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        glfwSetCursorPos(w, ww * 0.5, wh * 0.5);
-
-        // consume this edge so it doesn't also act this frame
-        prevLeft = left;
-        prevRight = right;
-        return;
-    }
-
-    if (right == GLFW_PRESS && prevRight == GLFW_RELEASE) {
-        gEditMode = (gEditMode + 1) % 2;
-    }
-    prevRight = right;
-
-    // Left-click performs the current mode
-    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
-        if (gEditMode == 0) {
-            // --- DESTROY
-            int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
-            const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-            bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
-            if (t && changed) {
-                Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
-            }
-        } else {
-            // --- PLACE on adjacent face
-            int nx=0, ny=0, nz=0;
-            switch (hitResult.f) {
-                case 0: ny = -1; break; // bottom
-                case 1: ny =  1; break; // top
-                case 2: nz = -1; break; // -Z
-                case 3: nz =  1; break; // +Z
-                case 4: nx = -1; break; // -X
-                case 5: nx =  1; break; // +X
-            }
-            int x = hitResult.x + nx;
-            int y = hitResult.y + ny;
-            int z = hitResult.z + nz;
-
-            // AABB collision check: disallow placing inside player or mobs
-            AABB aabb = Level_getTilePickAABB(&level, x, y, z);
-            if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
-                bool blocked = false;
-                for (int i = 0; i < mobCount; ++i) {
-                    if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
-                }
-                if (!blocked) {
-                    level_setTile(&level, x, y, z, selectedTileId);
-                }
-            }
-        }
-    }
-    prevLeft = left;
-}
-
-/* --- frame ------------------------------------------------------------------- */
-
-static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, float t) {
-    (void)w;
-    (void)lvl;
-
-    int fbw, fbh;
-    glfwGetFramebufferSize(window, &fbw, &fbh);
-    glViewport(0, 0, fbw, fbh);
-
-    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
-
-    int grabbed = (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED);
-    if (grabbed) {
+    if (mouseGrabbed) {
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
-
         int ww, wh; glfwGetWindowSize(window, &ww, &wh);
         double cx = ww * 0.5, cy = wh * 0.5;
 
-        float dx = (float)(mx - cx);
-        float dy = (float)(my - cy);
-
-        dy = -dy * (float)gYMouseAxis;
-
-        Player_turn(p, window, dx, dy);
-
+        // mouse y counts up from the bottom
+        float xo = (float)(mx - cx);
+        float yo = (float)(cy - my);
+        Player_turn(&player, xo, yo * (float)yMouseAxis);
         glfwSetCursorPos(window, cx, cy);
     }
 
+    pick(a, width, height);
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glEnable(GL_MULTISAMPLE);
-
-    setupCamera(p, t);
-
+    setupCamera(a, width, height);
+    glEnable(GL_CULL_FACE);
     Frustum frustum;
     frustum_calculate(&frustum);
-    LevelRenderer_cull(lr, &frustum);
-
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
+    LevelRenderer_cull(&levelRenderer, &frustum);
+    LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
 
     setupFog(0);
-    LevelRenderer_render(lr, p, 0);    // lit layer
-
-    // Zombies in sunlight (lit)
-    for (int i = 0; i < mobCount; ++i) {
+    glEnable(GL_FOG);
+    LevelRenderer_render(&levelRenderer, &player, 0);
+    for (int i = 0; i < mobCount; i++) {
         const Zombie* z = &mobs[i];
-        if (Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
-            Zombie_render(z, t);
-        }
+        if (Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) Zombie_render(z, a);
     }
-
-    ParticleEngine_render(&particleEngine, p, t, 0);
+    ParticleEngine_render(&particleEngine, &player, a, 0);
 
     setupFog(1);
-    LevelRenderer_render(lr, p, 1);    // shadow layer
-
-    // zombies in shadow
-    for (int i = 0; i < mobCount; ++i) {
+    LevelRenderer_render(&levelRenderer, &player, 1);
+    for (int i = 0; i < mobCount; i++) {
         const Zombie* z = &mobs[i];
-        if (!Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
-            Zombie_render(z, t);
-        }
+        if (!Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) Zombie_render(z, a);
+    }
+    ParticleEngine_render(&particleEngine, &player, a, 1);
+
+    LevelRenderer_renderSurroundingGround(&levelRenderer);
+
+    if (!isHitNull) {
+        glDisable(GL_LIGHTING);
+        glDisable(GL_ALPHA_TEST);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, paintTexture);
+        LevelRenderer_renderHitOutline(&hitResult, editMode);
+        glEnable(GL_ALPHA_TEST);
+        glEnable(GL_LIGHTING);
     }
 
-    ParticleEngine_render(&particleEngine, p, t, 1);
-
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    setupFog(0);
+    LevelRenderer_renderSurroundingWater(&levelRenderer);
+    glEnable(GL_BLEND);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    LevelRenderer_render(&levelRenderer, &player, 2);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    LevelRenderer_render(&levelRenderer, &player, 2);
+    glDisable(GL_BLEND);
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_FOG);
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    glDisableClientState(GL_COLOR_ARRAY);
-
-    LevelRenderer_renderSurroundingGround(lr);
 
     if (!isHitNull) {
-        GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
-        if (wasAlpha) glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
-        LevelRenderer_renderHitOutline(&hitResult, gEditMode);
-        if (wasAlpha) glEnable(GL_ALPHA_TEST);
+        glDepthFunc(GL_LESS);
+        glDisable(GL_ALPHA_TEST);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, paintTexture);
+        LevelRenderer_renderHitOutline(&hitResult, editMode);
+        glEnable(GL_ALPHA_TEST);
+        glDepthFunc(GL_LEQUAL);
     }
 
-    setupFog(0);
-    LevelRenderer_renderSurroundingWater(lr);
-
-    drawGui(t);
+    drawGui(width, height);
 
     glfwSwapBuffers(window);
 }
 
-/* --- main loop --------------------------------------------------------------- */
+/* main loop */
 
-static void run(Level* lvl, LevelRenderer* lr, Player* p) {
-    if (!init(lvl, lr, p)) {
+int main(void) {
+    if (!init()) {
         fprintf(stderr, "Failed to initialize game\n");
-        destroy(lvl);
         exit(EXIT_FAILURE);
     }
 
+    long long lastTime = currentTimeMillis();
     int frames = 0;
-    long long last = currentTimeMillis();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         Timer_advanceTime(&timer);
-        for (int i = 0; i < timer.ticks; ++i) tick(p, window);
+        for (int i = 0; i < timer.ticks; ++i) tick();
 
-        pick(timer.partialTicks);
-        handleBlockClicks(window);
-        handleGameplayKeys(window);
-
-        int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
-        gChunkUpdatesAccum += built;
-
-        render(lvl, lr, p, window, timer.partialTicks);
-
+        render(timer.partialTicks);
         frames++;
-        while (currentTimeMillis() >= last + 1000LL) {
-            gFPS = frames;
-            gChunkUpdatesPerSec = gChunkUpdatesAccum;
-        #ifndef NDEBUG
-            printf("%d fps, %d chunk updates\n", gFPS, gChunkUpdatesPerSec);
-        #endif
-            last += 1000LL;
+
+        while (currentTimeMillis() >= lastTime + 1000LL) {
+            snprintf(fpsString, sizeof fpsString, "%d fps, %d chunk updates", frames, Chunk_updates);
+            Chunk_updates = 0;
+            lastTime += 1000LL;
             frames = 0;
-            gChunkUpdatesAccum = 0;
         }
     }
 
-    destroy(lvl);
-}
-
-int main(void) {
-    run(&level, &levelRenderer, &player);
+    destroy();
     return EXIT_SUCCESS;
-}
-
-static void tick(Player* p, GLFWwindow* w) {
-    (void)w;
-
-    Level_onTick(&level);
-
-    ParticleEngine_onTick(&particleEngine);
-
-    Player_onTick(p, window);
-    for (int i = 0; i < mobCount; ) {
-        Zombie_onTick(&mobs[i]);
-        if (mobs[i].base.removed) {
-            mobs[i] = mobs[mobCount - 1];
-            mobCount--;
-            continue;
-        }
-        i++;
-    }
 }

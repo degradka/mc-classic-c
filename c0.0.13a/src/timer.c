@@ -90,12 +90,13 @@ void Timer_advanceTime(Timer* timer) {
     long long passedNs = now - timer->lastTime;
     timer->lastTime    = now;
 
-    if (passedNs <= 0)                 passedNs = 1;
+    if (passedNs < 0)                  passedNs = 0;
     if (passedNs > MAX_NS_PER_UPDATE)  passedNs = MAX_NS_PER_UPDATE;
 
-    timer->fps = (float)((double)NS_PER_SECOND / (double)passedNs);
+    // no time passed would divide by zero, it never happens
+    if (passedNs > 0) timer->fps = (float)(NS_PER_SECOND / passedNs);
 
-    timer->passedTime += (float)((double)passedNs * timer->timeScale * timer->ticksPerSecond / (double)NS_PER_SECOND);
+    timer->passedTime += (float)passedNs * timer->timeScale * timer->ticksPerSecond / 1.0E9f;
     timer->ticks = (int)timer->passedTime;
     if (timer->ticks > MAX_TICKS_PER_UPDATE) timer->ticks = MAX_TICKS_PER_UPDATE;
 

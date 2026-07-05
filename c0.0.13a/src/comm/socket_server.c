@@ -83,6 +83,7 @@ void SocketServer_tick(SocketServer* s) {
         SocketConnection* conn = s->connections[i];
 
         if (!SocketConnection_isConnected(conn)) {
+            // not freed here, Client still holds it
             s->connections[i] = s->connections[--s->count];
             i--;
             continue;

@@ -10,14 +10,13 @@
 typedef struct {
     Entity base;
     ZombieModel model;
-
-    double rotation;
-    double rotationMotionFactor;
-    float  timeOffset;
-    float  speed;
+    float rotation;
+    float rotationMotionFactor;
+    float timeOffset;
+    float speed;
 } Zombie;
 
-void Zombie_init  (Zombie* z, Level* level, double x, double y, double zpos);
+void Zombie_init  (Zombie* z, Level* level, float x, float y, float zpos);
 void Zombie_onTick(Zombie* z);
 void Zombie_render(const Zombie* z, float partialTicks);
 

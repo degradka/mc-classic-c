@@ -1,4 +1,4 @@
-// hitresult.h: block raycast result
+// hitresult.h: picked block and face
 
 #ifndef HITRESULT_H
 #define HITRESULT_H
@@ -9,7 +9,7 @@ struct Player; typedef struct Player Player;
 
 typedef struct HitResult {
     int x, y, z; // block position
-    int o;       // unused
+    int o;       // the type name, always 0
     int f;       // face 0..5
 } HitResult;
 

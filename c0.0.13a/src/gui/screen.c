@@ -12,10 +12,6 @@ void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col) {
     float g = ((col >> 8)  & 0xFF) / 255.0f;
     float b = (col & 0xFF) / 255.0f;
 
-    // alpha test is on globally at 0.5 for the world, translucent fills need it off
-    GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
-    if (wasAlpha) glDisable(GL_ALPHA_TEST);
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glColor4f(r, g, b, a);
@@ -28,7 +24,6 @@ void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col) {
     Tessellator_end(&TESSELLATOR);
 
     glDisable(GL_BLEND);
-    if (wasAlpha) glEnable(GL_ALPHA_TEST);
 }
 
 void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsigned int col2) {
@@ -41,9 +36,6 @@ void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsi
     float r2 = ((col2 >> 16) & 0xFF) / 255.0f;
     float g2 = ((col2 >> 8)  & 0xFF) / 255.0f;
     float b2 = (col2 & 0xFF) / 255.0f;
-
-    GLboolean wasAlpha = glIsEnabled(GL_ALPHA_TEST);
-    if (wasAlpha) glDisable(GL_ALPHA_TEST);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -58,7 +50,6 @@ void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsi
     glEnd();
 
     glDisable(GL_BLEND);
-    if (wasAlpha) glEnable(GL_ALPHA_TEST);
 }
 
 void Screen_drawCenteredString(Screen* s, const char* str, int x, int y, unsigned int color) {

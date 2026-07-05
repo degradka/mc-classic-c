@@ -4,13 +4,14 @@
 #define IMPROVED_NOISE_H
 
 #include "synth.h"
+#include "../../../jrandom.h"
 
 typedef struct {
     Synth synth;
     int p[512];
 } ImprovedNoise;
 
-void   ImprovedNoise_init(ImprovedNoise* n);
+void   ImprovedNoise_init(ImprovedNoise* n, JRandom* random);
 double ImprovedNoise_noise(const ImprovedNoise* n, double x, double y, double z);
 
 #endif

@@ -7,6 +7,7 @@
 
 typedef struct Client Client;
 
+// a linear scan, there are never many clients
 typedef struct MinecraftServer {
     SocketServer socketServer;
     Client* clients[SOCKET_SERVER_MAX_CONNECTIONS];

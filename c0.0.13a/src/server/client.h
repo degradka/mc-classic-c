@@ -8,6 +8,7 @@
 
 struct MinecraftServer;
 
+// command() is empty
 typedef struct Client {
     struct MinecraftServer* server;
     SocketConnection* conn;

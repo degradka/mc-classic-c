@@ -12,7 +12,7 @@ typedef struct {
     int levels;
 } PerlinNoise;
 
-void PerlinNoise_init(PerlinNoise* n, int levels);
+void PerlinNoise_init(PerlinNoise* n, JRandom* random, int levels);
 void PerlinNoise_destroy(PerlinNoise* n);
 
 #endif

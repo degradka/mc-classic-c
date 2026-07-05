@@ -2,6 +2,7 @@
 
 #include "particle_engine.h"
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include "../renderer/textures.h"
 #include "../player.h"
@@ -31,7 +32,7 @@ void ParticleEngine_onTick(ParticleEngine* pe) {
     for (int i = 0; i < pe->count; ) {
         Particle_onTick(&pe->items[i]);
         if (pe->items[i].base.removed) {
-            pe->items[i] = pe->items[pe->count - 1];
+            memmove(&pe->items[i], &pe->items[i + 1], (size_t)(pe->count - i - 1) * sizeof(Particle));
             pe->count--;
         } else {
             i++;
@@ -45,20 +46,11 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, pe->texture);
 
-    glDisableClientState(GL_COLOR_ARRAY);
-    GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
-    if (cullWasEnabled) glDisable(GL_CULL_FACE);
-
-    // camera facing vectors so each particle billboards toward the player
-    float yawRad   = player->e.yRotation * (float)M_PI / 180.0f;
-    float pitchRad = player->e.xRotation * (float)M_PI / 180.0f;
-
-    float cameraX = -cosf(yawRad);
-    float cameraY =  cosf(pitchRad);
-    float cameraZ = -sinf(yawRad);
-
-    float cameraXWithY = -cameraZ * sinf(pitchRad);
-    float cameraZWithY =  cameraX * sinf(pitchRad);
+    float cameraX = -(float)cos(player->e.yRotation * M_PI / 180.0);
+    float cameraZ = -(float)sin(player->e.yRotation * M_PI / 180.0);
+    float cameraXWithY = -cameraZ * (float)sin(player->e.xRotation * M_PI / 180.0);
+    float cameraZWithY =  cameraX * (float)sin(player->e.xRotation * M_PI / 180.0);
+    float cameraY = (float)cos(player->e.xRotation * M_PI / 180.0);
 
     glColor4f(0.8f, 0.8f, 0.8f, 1.0f);
 
@@ -75,6 +67,5 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     }
     Tessellator_end(&pe->tess);
 
-    if (cullWasEnabled) glEnable(GL_CULL_FACE);
     glDisable(GL_TEXTURE_2D);
 }
