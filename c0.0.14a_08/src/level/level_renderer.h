@@ -52,7 +52,7 @@ void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
 void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
-void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, int mode, int tileId);
+void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, struct HitResult* h, int mode, int tileId);
 void LevelRenderer_renderHitOutline(struct HitResult* h, int mode);
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);

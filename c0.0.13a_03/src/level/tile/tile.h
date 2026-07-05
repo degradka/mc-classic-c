@@ -70,7 +70,7 @@ extern Tile TILE_CALM_LAVA;  // id=11
 void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
-void Face_render(Tessellator* t, int x, int y, int z, int face);
+void Face_render(Tessellator* t, int x, int y, int z, int face, double px, double py, double pz);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 

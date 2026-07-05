@@ -752,7 +752,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, selectedTileId);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -778,7 +778,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, selectedTileId);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);

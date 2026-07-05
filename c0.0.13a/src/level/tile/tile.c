@@ -451,37 +451,39 @@ void Tile_registerAll(void) {
 }
 
 /* untextured single face helper for hit highlight */
-void Face_render(Tessellator* t, int x, int y, int z, int face) {
+// only draws a face if the player is on the side it faces, matching the real
+// game's block highlight (was drawing all 6 faces unconditionally)
+void Face_render(Tessellator* t, int x, int y, int z, int face, double px, double py, double pz) {
     const float minX = (float)x,     maxX = (float)x + 1.0f;
     const float minY = (float)y,     maxY = (float)y + 1.0f;
     const float minZ = (float)z,     maxZ = (float)z + 1.0f;
 
-    if (face == 0) { // bottom
+    if (face == 0 && y > py) { // bottom
         Tessellator_vertex(t, minX, minY, maxZ);
         Tessellator_vertex(t, minX, minY, minZ);
         Tessellator_vertex(t, maxX, minY, minZ);
         Tessellator_vertex(t, maxX, minY, maxZ);
-    } else if (face == 1) { // top
+    } else if (face == 1 && y < py) { // top
         Tessellator_vertex(t, maxX, maxY, maxZ);
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, maxY, maxZ);
-    } else if (face == 2) { // negative Z
+    } else if (face == 2 && z > pz) { // negative Z
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, maxX, maxY, minZ);
         Tessellator_vertex(t, maxX, minY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);
-    } else if (face == 3) { // positive Z
+    } else if (face == 3 && z < pz) { // positive Z
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, minY, maxZ);
         Tessellator_vertex(t, maxX, minY, maxZ);
         Tessellator_vertex(t, maxX, maxY, maxZ);
-    } else if (face == 4) { // negative X
+    } else if (face == 4 && x > px) { // negative X
         Tessellator_vertex(t, minX, maxY, maxZ);
         Tessellator_vertex(t, minX, maxY, minZ);
         Tessellator_vertex(t, minX, minY, minZ);
         Tessellator_vertex(t, minX, minY, maxZ);
-    } else if (face == 5) { // +X
+    } else if (face == 5 && x < px) { // +X
         Tessellator_vertex(t, maxX, minY, maxZ);
         Tessellator_vertex(t, maxX, minY, minZ);
         Tessellator_vertex(t, maxX, maxY, minZ);

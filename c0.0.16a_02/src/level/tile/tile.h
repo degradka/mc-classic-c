@@ -79,7 +79,7 @@ extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light bloc
 void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
-void Face_render(Tessellator* t, int x, int y, int z, int face);
+void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 

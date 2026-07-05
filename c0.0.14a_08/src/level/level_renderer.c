@@ -335,15 +335,15 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
 }
 
 /*
-   mode 0 is additive pulsing, an untextured full cube outline on all 6 faces
+   mode 0 is additive pulsing, only the cube faces facing the player
    mode 1 is alpha blended, a textured preview block on the adjacent cell,
    rendered in both layers (0 and 1)
 */
-void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileId) {
+void LevelRenderer_renderHit(LevelRenderer* r, const Player* player, HitResult* h, int mode, int tileId) {
     if (!h) return;
 
     if (mode == 0) {
-        // destroy highlight: additive, pulsing, draws all 6 faces untextured
+        // destroy highlight: additive, pulsing, only faces facing the player
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
@@ -351,7 +351,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
 
         Tessellator_begin(&TESSELLATOR);
         for (int face = 0; face < 6; ++face) {
-            Face_render(&TESSELLATOR, h->x, h->y, h->z, face);
+            Face_render(&TESSELLATOR, h->x, h->y, h->z, face, player->e.x, player->e.y, player->e.z);
         }
         Tessellator_end(&TESSELLATOR);
 
