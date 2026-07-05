@@ -17,6 +17,13 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->depth = depth;
     level->renderer = NULL;
     level->unprocessed = 0;
+    level->xSpawn = level->ySpawn = level->zSpawn = 0;
+    level->rotSpawn = 0.0f;
+    level->tickRandom = (unsigned int)rand();
+    level->tickCount = 0;
+    level->tickList = NULL;
+    level->tickListSize = 0;
+    level->tickListCapacity = 0;
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -33,6 +40,7 @@ void Level_init(Level* level, int width, int height, int depth) {
     }
 
     calcLightDepths(level, 0, 0, level->width, level->height);
+    if (level->xSpawn == 0 && level->ySpawn == 0 && level->zSpawn == 0) Level_findSpawn(level);
 }
 
 // used by the pause menu's Generate new level, which regenerates at a
@@ -48,6 +56,11 @@ void Level_resize(Level* level, int width, int height, int depth) {
     level->height = height;
     level->depth = depth;
     level->unprocessed = 0;
+    level->xSpawn = level->ySpawn = level->zSpawn = 0;
+    level->rotSpawn = 0.0f;
+    free(level->tickList);
+    level->tickList = NULL;
+    level->tickListSize = level->tickListCapacity = 0;
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -58,6 +71,7 @@ void Level_resize(Level* level, int width, int height, int depth) {
 
     Level_generateMap(level);
     calcLightDepths(level, 0, 0, width, height);
+    Level_findSpawn(level);
 
     level->renderer = renderer;
 }
@@ -148,6 +162,7 @@ bool Level_containsLiquid(const Level* level, const AABB* box, int liquidId) {
 void Level_destroy(Level* level) {
     free(level->blocks);
     free(level->lightDepths);
+    free(level->tickList);
 }
 
 ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
@@ -380,15 +395,132 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
            (y >= level->lightDepths[x + z * level->width]);
 }
 
+float Level_getBrightness(const Level* level, int x, int y, int z) {
+    return Level_isLit(level, x, y, z) ? 1.0f : 0.5f;
+}
+
+int Level_getHighestTile(const Level* level, int x, int z) {
+    int i = level->depth;
+    while (i > 0) {
+        int id = Level_getTile(level, x, i - 1, z);
+        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+        bool airOrLiquid = (id == 0) || (t && t->liquidType != LIQUID_NONE);
+        if (!airOrLiquid) break;
+        i--;
+    }
+    return i;
+}
+
+float Level_getGroundLevel(const Level* level) {
+    return (float)(level->depth / 2 - 2);
+}
+
+float Level_getWaterLevel(const Level* level) {
+    return (float)(level->depth / 2);
+}
+
+// picks a random column near the map center and spawns on its topmost solid
+// tile once it's above water level. The real source has a byte overflow
+// retry cap here that can never actually trigger (compared against the
+// literal 10000, but the counter is a byte that wraps at 127), so it's not
+// ported. Terrain above water is found almost immediately on any normal map.
+void Level_findSpawn(Level* level) {
+    while (1) {
+        int x = rand() % (level->width / 2) + level->width / 4;
+        int z = rand() % (level->height / 2) + level->height / 4;
+        int y = Level_getHighestTile(level, x, z) + 1;
+        if ((float)y > Level_getWaterLevel(level)) {
+            level->xSpawn = x;
+            level->ySpawn = y;
+            level->zSpawn = z;
+            return;
+        }
+    }
+}
+
+void Level_setSpawnPos(Level* level, int x, int y, int z, float rot) {
+    level->xSpawn = x;
+    level->ySpawn = y;
+    level->zSpawn = z;
+    level->rotSpawn = rot;
+}
+
+void Level_swap(Level* level, int x1, int y1, int z1, int x2, int y2, int z2) {
+    int a = Level_getTile(level, x1, y1, z1);
+    int b = Level_getTile(level, x2, y2, z2);
+    Level_setTileNoUpdate(level, x1, y1, z1, b);
+    Level_setTileNoUpdate(level, x2, y2, z2, a);
+
+    notifyNeighborChanged(level, x1 - 1, y1, z1, b);
+    notifyNeighborChanged(level, x1 + 1, y1, z1, b);
+    notifyNeighborChanged(level, x1, y1 - 1, z1, b);
+    notifyNeighborChanged(level, x1, y1 + 1, z1, b);
+    notifyNeighborChanged(level, x1, y1, z1 - 1, b);
+    notifyNeighborChanged(level, x1, y1, z1 + 1, b);
+
+    notifyNeighborChanged(level, x2 - 1, y2, z2, a);
+    notifyNeighborChanged(level, x2 + 1, y2, z2, a);
+    notifyNeighborChanged(level, x2, y2 - 1, z2, a);
+    notifyNeighborChanged(level, x2, y2 + 1, z2, a);
+    notifyNeighborChanged(level, x2, y2, z2 - 1, a);
+    notifyNeighborChanged(level, x2, y2, z2 + 1, a);
+
+    calcLightDepths(level, x1, z1, 1, 1);
+    calcLightDepths(level, x2, z2, 1, 1);
+    if (level->renderer) {
+        levelRenderer_tileChanged(level->renderer, x1, y1, z1);
+        levelRenderer_tileChanged(level->renderer, x2, y2, z2);
+    }
+}
+
+void Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId) {
+    if (level->tickListSize == level->tickListCapacity) {
+        level->tickListCapacity = level->tickListCapacity ? level->tickListCapacity * 2 : 16;
+        level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
+    }
+    TickEntry* e = &level->tickList[level->tickListSize++];
+    e->x = x; e->y = y; e->z = z; e->tileId = tileId;
+}
+
 void Level_onTick(Level* level) {
+    level->tickCount++;
+
+    if (level->tickCount % 5 == 0 && level->tickListSize > 0) {
+        int n = level->tickListSize;
+        // drain the queue snapshot from the front, matching the Java
+        // ArrayList.remove(0) fifo drain of everything queued so far
+        for (int i = 0; i < n; ++i) {
+            TickEntry e = level->tickList[i];
+            if (e.x < 0 || e.y < 0 || e.z < 0 || e.x >= level->width || e.y >= level->depth || e.z >= level->height) continue;
+            int current = Level_getTile(level, e.x, e.y, e.z);
+            if (current == e.tileId && current > 0) {
+                const Tile* t = gTiles[current];
+                if (t && t->onTick) t->onTick(t, level, e.x, e.y, e.z);
+            }
+        }
+        int remaining = level->tickListSize - n;
+        memmove(level->tickList, level->tickList + n, (size_t)remaining * sizeof(TickEntry));
+        level->tickListSize = remaining;
+    }
+
     level->unprocessed += level->width * level->height * level->depth;
     int ticks = level->unprocessed / 200; // c0.0.13a halved TILE_UPDATE_INTERVAL from 400
     level->unprocessed -= ticks * 200;
 
+    // packed single-draw LCG replacing three independent rand()%dim calls,
+    // bit widths sized to the level dimensions (power of 2 masks)
+    int bitsX = 1; while ((1 << bitsX) < level->width)  bitsX++;
+    int bitsZ = 1; while ((1 << bitsZ) < level->height) bitsZ++;
+    int maskX = level->width  - 1;
+    int maskZ = level->height - 1;
+    int maskY = level->depth  - 1;
+
     for (int i = 0; i < ticks; ++i) {
-        int x = rand() % level->width;
-        int y = rand() % level->depth;
-        int z = rand() % level->height;
+        level->tickRandom = level->tickRandom * 3 + 1013904223;
+        int shifted = (int)level->tickRandom >> 2;
+        int x = shifted & maskX;
+        int z = (shifted >> bitsX) & maskZ;
+        int y = (shifted >> (bitsX + bitsZ)) & maskY;
         int id = Level_getTile(level, x, y, z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (t && t->onTick) t->onTick(t, level, x, y, z);

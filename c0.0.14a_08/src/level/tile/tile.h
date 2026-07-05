@@ -61,11 +61,20 @@ extern Tile TILE_DIRT;      // id=3
 extern Tile TILE_STONEBRICK;// id=4
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
+extern Tile TILE_BEDROCK;   // id=7, new in c0.0.14a_08, plain tile, unreachable from the hotbar
 
 extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
 extern Tile TILE_LAVA;       // id=10
 extern Tile TILE_CALM_LAVA;  // id=11
+
+extern Tile TILE_SAND;   // id=12, new in c0.0.14a_08, falls through air
+extern Tile TILE_GRAVEL; // id=13, new in c0.0.14a_08, falls through air
+extern Tile TILE_GOLD_ORE;  // id=14, new in c0.0.14a_08
+extern Tile TILE_IRON_ORE;  // id=15, new in c0.0.14a_08
+extern Tile TILE_COAL_ORE;  // id=16, new in c0.0.14a_08
+extern Tile TILE_LOG;    // id=17, new in c0.0.14a_08, per face texture
+extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light blocking
 
 void Tile_registerAll(void);
 

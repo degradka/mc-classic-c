@@ -29,6 +29,10 @@ typedef struct LevelRenderer {
     double      lastSortX, lastSortY, lastSortZ; // player pos at the last sort
 
     unsigned int surroundLists; // glGenLists(2) base: +0 ground, +1 water
+
+    // c0.0.14a_08: new cloud layer, scrolls once per game tick
+    int         cloudTick;
+    int         cloudTexture;
 } LevelRenderer;
 
 void LevelRenderer_init(LevelRenderer* renderer, Level* level, int terrainTex);
@@ -37,8 +41,11 @@ void LevelRenderer_destroy(LevelRenderer* renderer);
 
 void LevelRenderer_cull(LevelRenderer* renderer, const Frustum* frustum);
 void LevelRenderer_toggleDrawDistance(LevelRenderer* renderer);
+float LevelRenderer_getFogEndDistance(const LevelRenderer* renderer);
 void LevelRenderer_renderSurroundingGround(const LevelRenderer* renderer);
 void LevelRenderer_renderSurroundingWater(const LevelRenderer* renderer);
+void LevelRenderer_tick(LevelRenderer* renderer);
+void LevelRenderer_renderClouds(LevelRenderer* renderer, float partialTicks);
 
 void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
 void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);

@@ -34,16 +34,16 @@ void ZombieModel_init(ZombieModel* m) {
     Cube_setPos(&m->leftLeg, 2, 12, 0);
 }
 
-void ZombieModel_render(const ZombieModel* m, double time) {
+void ZombieModel_render(ZombieModel* m, double time) {
     // animate
-    ((Cube*)&m->head)->yRot      = (float)sin(time * 0.83);
-    ((Cube*)&m->head)->xRot      = (float)sin(time) * 0.8f;
-    ((Cube*)&m->rightArm)->xRot  = (float)sin(time * 0.6662 + M_PI) * 2.0f;
-    ((Cube*)&m->rightArm)->zRot  = (float)(sin(time * 0.2312) + 1.0);
-    ((Cube*)&m->leftArm)->xRot   = (float)sin(time * 0.6662) * 2.0f;
-    ((Cube*)&m->leftArm)->zRot   = (float)(sin(time * 0.2812) - 1.0);
-    ((Cube*)&m->rightLeg)->xRot  = (float)sin(time * 0.6662) * 1.4f;
-    ((Cube*)&m->leftLeg)->xRot   = (float)sin(time * 0.6662 + M_PI) * 1.4f;
+    m->head.yRot      = (float)sin(time * 0.83);
+    m->head.xRot      = (float)sin(time) * 0.8f;
+    m->rightArm.xRot  = (float)sin(time * 0.6662 + M_PI) * 2.0f;
+    m->rightArm.zRot  = (float)(sin(time * 0.2312) + 1.0);
+    m->leftArm.xRot   = (float)sin(time * 0.6662) * 2.0f;
+    m->leftArm.zRot   = (float)(sin(time * 0.2812) - 1.0);
+    m->rightLeg.xRot  = (float)sin(time * 0.6662) * 1.4f;
+    m->leftLeg.xRot   = (float)sin(time * 0.6662 + M_PI) * 1.4f;
 
     // draw
     Cube_render(&m->head);

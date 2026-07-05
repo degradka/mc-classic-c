@@ -30,11 +30,14 @@ void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int 
     c->z = (minZ + maxZ) * 0.5;
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
-    c->lists = glGenLists(3);
+    // c0.0.14a_08 merges the old lit+shadow solid passes into one (brightness
+    // is now per face instead of a binary lit/shadow pass split), so chunks
+    // only need 2 lists: 0 = solid, 1 = liquid (renumbered down from 2)
+    c->lists = glGenLists(2);
 }
 
 void Chunk_destroy(Chunk* c) {
-    glDeleteLists(c->lists, 3);
+    glDeleteLists(c->lists, 2);
 }
 
 void Chunk_rebuild(Chunk* c, int layer) {

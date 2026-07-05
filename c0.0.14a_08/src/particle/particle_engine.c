@@ -39,7 +39,7 @@ void ParticleEngine_onTick(ParticleEngine* pe) {
     }
 }
 
-void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks, int layer) {
+void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks) {
     if (pe->count == 0) return;
 
     glEnable(GL_TEXTURE_2D);
@@ -60,18 +60,16 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     float cameraXWithY = -cameraZ * sinf(pitchRad);
     float cameraZWithY =  cameraX * sinf(pitchRad);
 
-    glColor4f(0.8f, 0.8f, 0.8f, 1.0f);
-
     Tessellator_begin(&pe->tess);
     for (int i = 0; i < pe->count; ++i) {
         Particle* p = &pe->items[i];
-        int lit = Entity_isLit(&p->base) ? 1 : 0;
-        int inLayer = (layer == 1) ? 1 : 0;
-        if ((lit ^ inLayer) == 1) {
-            Particle_render(p, &pe->tess, partialTicks,
-                            cameraX, cameraY, cameraZ,
-                            cameraXWithY, cameraZWithY);
-        }
+        // c0.0.14a_08: per particle brightness tint replaces the old flat
+        // 0.8 gray and the binary lit/shadow two pass split
+        float b = 0.8f * Entity_getBrightness(&p->base);
+        Tessellator_color(&pe->tess, b, b, b);
+        Particle_render(p, &pe->tess, partialTicks,
+                        cameraX, cameraY, cameraZ,
+                        cameraXWithY, cameraZWithY);
     }
     Tessellator_end(&pe->tess);
 

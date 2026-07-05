@@ -27,7 +27,7 @@
 #include "gui/screen.h"
 #include "gui/pause_screen.h"
 
-#define MAX_MOBS 100
+#define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
 
 static GLFWwindow*    window;
 static Level          level;
@@ -42,14 +42,21 @@ static int mobCount = 0;
 
 static int prevLeft  = GLFW_RELEASE;
 static int prevRight = GLFW_RELEASE;
+static int prevMiddle = GLFW_RELEASE;
 static int prevEnter = GLFW_RELEASE;
-static int prevNum1 = GLFW_RELEASE, prevNum2 = GLFW_RELEASE;
-static int prevNum3 = GLFW_RELEASE, prevNum4 = GLFW_RELEASE;
-static int prevNum6 = GLFW_RELEASE;
+static int prevNumKeys[9]; // GLFW_KEY_1..GLFW_KEY_9, initialized to GLFW_RELEASE in init()
 static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
 static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
+
+// c0.0.14a_08: hotbar expanded from 6 individually wired keys to a real 9
+// slot bar (rock, dirt, stonebrick, wood, sapling, log, leaves, sand,
+// gravel), selectable by keys 1-9, mouse wheel, or middle click pick block
+static const int gHotbar[9] = { 1, 3, 4, 5, 6, 17, 18, 12, 13 };
+
+static int gTickCount = 0;
+static int gLastMineTick = 0;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
 static int gYMouseAxis = 1;            // toggled by Y key, 1 or negative 1
@@ -103,6 +110,10 @@ static void releaseMouseAndOpenPause(void) {
 // matches Minecraft.grabMouse(): grabs cursor again and closes any open screen
 void Minecraft_closeScreenAndGrabMouse(void) {
     activeScreen = NULL;
+    // ticks keep advancing while paused, so without this the auto repeat
+    // mining check sees a stale gLastMineTick and fires the instant the
+    // menu closes, destroying whatever's still targeted
+    gLastMineTick = gTickCount;
     int ww, wh; glfwGetWindowSize(window, &ww, &wh);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
@@ -231,9 +242,39 @@ static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mo
     }
 }
 
+// c0.0.14a_08: mouse wheel now cycles the hotbar selection
+static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
+    (void)w; (void)xoffset;
+    if (activeScreen) return;
+
+    int dir = (yoffset > 0.0) ? 1 : (yoffset < 0.0) ? -1 : 0;
+    if (dir == 0) return;
+
+    int k = 0;
+    for (int i = 0; i < 9; ++i) if (gHotbar[i] == selectedTileId) k = i;
+    k += dir;
+    while (k < 0) k += 9;
+    while (k >= 9) k -= 9;
+    selectedTileId = gHotbar[k];
+}
+
+// c0.0.14a_08: daylight fog switched from exponential to linear, with its far
+// end tied to the draw distance toggle (see LevelRenderer_getFogEndDistance).
+// type -1 is new: sets up the same linear daylight fog for cloud rendering,
+// but returns immediately without touching lighting/color material state
+// (clouds render fully unlit).
 static void setupFog(int type) {
+    if (type == -1) {
+        glFogi(GL_FOG_MODE, GL_LINEAR);
+        glFogf(GL_FOG_START, 0.0f);
+        glFogf(GL_FOG_END, LevelRenderer_getFogEndDistance(&levelRenderer));
+        glFogfv(GL_FOG_COLOR, fogColorDaylight);
+        GLfloat skyAmbient[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, skyAmbient);
+        return;
+    }
+
     glEnable(GL_FOG);
-    glFogi(GL_FOG_MODE, GL_EXP);
 
     int px = (int)floor(player.e.x);
     int py = (int)floor(player.e.y + 0.12);
@@ -243,22 +284,27 @@ static void setupFog(int type) {
     GLfloat ambient[4];
 
     // whichever liquid the player's head is inside overrides the daylight
-    // and shadow fog entirely, regardless of which layer is being drawn
+    // and shadow fog entirely, regardless of which type is being set up
     if (currentTile && currentTile->liquidType == LIQUID_WATER) {
         GLfloat waterFog[4] = { 0.02f, 0.02f, 0.2f, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
         glFogf(GL_FOG_DENSITY, 0.1f);
         glFogfv(GL_FOG_COLOR, waterFog);
         ambient[0] = 0.3f; ambient[1] = 0.3f; ambient[2] = 0.7f; ambient[3] = 1.0f;
     } else if (currentTile && currentTile->liquidType == LIQUID_LAVA) {
         GLfloat lavaFog[4] = { 0.6f, 0.1f, 0.0f, 1.0f };
+        glFogi(GL_FOG_MODE, GL_EXP);
         glFogf(GL_FOG_DENSITY, 2.0f);
         glFogfv(GL_FOG_COLOR, lavaFog);
         ambient[0] = 0.4f; ambient[1] = 0.3f; ambient[2] = 0.3f; ambient[3] = 1.0f;
-    } else if (type == 0) { // daylight
-        glFogf(GL_FOG_DENSITY, 0.001f);
+    } else if (type == 0) { // daylight, now linear instead of exponential
+        glFogi(GL_FOG_MODE, GL_LINEAR);
+        glFogf(GL_FOG_START, 0.0f);
+        glFogf(GL_FOG_END, LevelRenderer_getFogEndDistance(&levelRenderer));
         glFogfv(GL_FOG_COLOR, fogColorDaylight);
         ambient[0] = 1.0f; ambient[1] = 1.0f; ambient[2] = 1.0f; ambient[3] = 1.0f;
-    } else {                 // shadow
+    } else {                 // shadow, unchanged, only used for the hit highlight now
+        glFogi(GL_FOG_MODE, GL_EXP);
         glFogf(GL_FOG_DENSITY, 0.01f);
         glFogfv(GL_FOG_COLOR, fogColorShadow);
         ambient[0] = 0.6f; ambient[1] = 0.6f; ambient[2] = 0.6f; ambient[3] = 1.0f;
@@ -287,9 +333,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.13a_03", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.14a_08", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.13a_03", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.14a_08", NULL, NULL);
     }
 
     if (!window) {
@@ -331,6 +377,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
     glfwSetKeyCallback(window, keyCallback);
+    glfwSetScrollCallback(window, scrollCallback);
 
     Tile_registerAll();
 
@@ -444,7 +491,7 @@ static void drawGui(float partialTicks) {
     glPopMatrix();
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.13a_03", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.14a_08", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -585,25 +632,20 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevR = r;
 
-    // Enter = save level
+    // c0.0.14a_08: Enter no longer saves, it sets the spawn point instead
     int enter = glfwGetKey(w, GLFW_KEY_ENTER);
     if (enter == GLFW_PRESS && prevEnter == GLFW_RELEASE) {
-        Level_save(&level);
+        Level_setSpawnPos(&level, (int)player.e.x, (int)player.e.y, (int)player.e.z, player.e.yRotation);
+        Entity_resetPosition(&player.e);
     }
     prevEnter = enter;
 
-    // 1..4 = select tile
-    int n1 = glfwGetKey(w, GLFW_KEY_1);
-    int n2 = glfwGetKey(w, GLFW_KEY_2);
-    int n3 = glfwGetKey(w, GLFW_KEY_3);
-    int n4 = glfwGetKey(w, GLFW_KEY_4);
-    int n6 = glfwGetKey(w, GLFW_KEY_6);
-    if (n1 == GLFW_PRESS && prevNum1 == GLFW_RELEASE) selectedTileId = 1;  // rock
-    if (n2 == GLFW_PRESS && prevNum2 == GLFW_RELEASE) selectedTileId = 3;  // dirt
-    if (n3 == GLFW_PRESS && prevNum3 == GLFW_RELEASE) selectedTileId = 4;  // stone brick
-    if (n4 == GLFW_PRESS && prevNum4 == GLFW_RELEASE) selectedTileId = 5;  // wood
-    if (n6 == GLFW_PRESS && prevNum6 == GLFW_RELEASE) selectedTileId = 6;  // bush
-    prevNum1 = n1; prevNum2 = n2; prevNum3 = n3; prevNum4 = n4; prevNum6 = n6;
+    // 1..9 = select tile directly from the hotbar
+    for (int i = 0; i < 9; ++i) {
+        int k = glfwGetKey(w, GLFW_KEY_1 + i);
+        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) selectedTileId = gHotbar[i];
+        prevNumKeys[i] = k;
+    }
 
     // G = spawn zombie at player
     int g = glfwGetKey(w, GLFW_KEY_G);
@@ -627,9 +669,12 @@ static void handleGameplayKeys(GLFWwindow* w) {
     prevF = kF;
 }
 
+static void mineOrPlace(void);
+
 static void handleBlockClicks(GLFWwindow* w) {
     int left  = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
     int right = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT);
+    int middle = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_MIDDLE);
 
     // boot time idle state, no screen open yet, cursor just has not been grabbed
     if (glfwGetInputMode(w, GLFW_CURSOR) != GLFW_CURSOR_DISABLED &&
@@ -639,6 +684,7 @@ static void handleBlockClicks(GLFWwindow* w) {
         // consume this edge so it doesn't also act this frame
         prevLeft = left;
         prevRight = right;
+        prevMiddle = middle;
         return;
     }
 
@@ -647,45 +693,68 @@ static void handleBlockClicks(GLFWwindow* w) {
     }
     prevRight = right;
 
-    // left click performs the current mode
-    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
-        if (gEditMode == 0) {
-            // destroy
-            int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
-            const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-            bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
-            if (t && changed) {
-                Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
-            }
-        } else {
-            // place on adjacent face
-            int nx=0, ny=0, nz=0;
-            switch (hitResult.f) {
-                case 0: ny = -1; break; // bottom
-                case 1: ny =  1; break; // top
-                case 2: nz = -1; break; // negative Z
-                case 3: nz =  1; break; // positive Z
-                case 4: nx = -1; break; // negative X
-                case 5: nx =  1; break; // positive X
-            }
-            int x = hitResult.x + nx;
-            int y = hitResult.y + ny;
-            int z = hitResult.z + nz;
+    // c0.0.14a_08: middle click picks the block under the crosshair (grass
+    // picks dirt instead of grass itself), only if it's one of the 9 hotbar
+    // tiles, matching the real hotbar-membership check
+    if (middle == GLFW_PRESS && prevMiddle == GLFW_RELEASE && !isHitNull) {
+        int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
+        if (id == TILE_GRASS.id) id = TILE_DIRT.id;
+        for (int i = 0; i < 9; ++i) {
+            if (gHotbar[i] == id) selectedTileId = id;
+        }
+    }
+    prevMiddle = middle;
 
-            // AABB collision check, disallow placing inside player or mobs
-            AABB aabb = Level_getTilePickAABB(&level, x, y, z);
-            if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
-                bool blocked = false;
-                for (int i = 0; i < mobCount; ++i) {
-                    if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
-                }
-                if (!blocked) {
-                    level_setTile(&level, x, y, z, selectedTileId);
-                }
+    // left click performs the current mode: on a fresh press immediately,
+    // then c0.0.14a_08 auto-repeats every ticksPerSecond/4 ticks (~5 ticks at
+    // 20 TPS) for as long as the button stays held, instead of requiring
+    // discrete repeated clicks
+    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
+        mineOrPlace();
+        gLastMineTick = gTickCount;
+    } else if (left == GLFW_PRESS && !isHitNull && (gTickCount - gLastMineTick) >= timer.ticksPerSecond / 4.0f) {
+        mineOrPlace();
+        gLastMineTick = gTickCount;
+    }
+    prevLeft = left;
+}
+
+static void mineOrPlace(void) {
+    if (gEditMode == 0) {
+        // destroy
+        int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
+        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+        bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
+        if (t && changed) {
+            Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
+        }
+    } else {
+        // place on adjacent face
+        int nx=0, ny=0, nz=0;
+        switch (hitResult.f) {
+            case 0: ny = -1; break; // bottom
+            case 1: ny =  1; break; // top
+            case 2: nz = -1; break; // negative Z
+            case 3: nz =  1; break; // positive Z
+            case 4: nx = -1; break; // negative X
+            case 5: nx =  1; break; // positive X
+        }
+        int x = hitResult.x + nx;
+        int y = hitResult.y + ny;
+        int z = hitResult.z + nz;
+
+        // AABB collision check, disallow placing inside player or mobs
+        AABB aabb = Level_getTilePickAABB(&level, x, y, z);
+        if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
+            bool blocked = false;
+            for (int i = 0; i < mobCount; ++i) {
+                if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
+            }
+            if (!blocked) {
+                level_setTile(&level, x, y, z, selectedTileId);
             }
         }
     }
-    prevLeft = left;
 }
 
 // maps the current cursor position into the same fixed 240 tall logical GUI
@@ -770,33 +839,31 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
+    // c0.0.14a_08 merges the old lit+shadow solid passes into one, colored
+    // per face by Level_getBrightness instead of a binary lit/shadow choice,
+    // so zombies and particles no longer need a separate lit/shadow split
+    // either (they now tint themselves via Entity_getBrightness)
     setupFog(0);
-    LevelRenderer_render(lr, p, 0);    // lit layer
+    LevelRenderer_render(lr, p, 0);
 
-    // Zombies in sunlight (lit)
     for (int i = 0; i < mobCount; ++i) {
         const Zombie* z = &mobs[i];
-        if (Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
+        if (frustum_isVisible(&frustum, &z->base.boundingBox)) {
             Zombie_render(z, t);
         }
     }
 
-    ParticleEngine_render(&particleEngine, p, t, 0);
-
-    setupFog(1);
-    LevelRenderer_render(lr, p, 1);    // shadow layer
-
-    // Zombies in shadow (not lit)
-    for (int i = 0; i < mobCount; ++i) {
-        const Zombie* z = &mobs[i];
-        if (!Entity_isLit(&z->base) && frustum_isVisible(&frustum, &z->base.boundingBox)) {
-            Zombie_render(z, t);
-        }
-    }
-
-    ParticleEngine_render(&particleEngine, p, t, 1);
+    ParticleEngine_render(&particleEngine, p, t);
 
     LevelRenderer_renderSurroundingGround(lr);
+
+    // new cloud layer, rendered fully unlit under its own linear fog setup,
+    // sandwiched between the ground skirt and the hit highlight
+    glDisable(GL_LIGHTING);
+    setupFog(-1);
+    LevelRenderer_renderClouds(lr, t);
+    setupFog(1);
+    glEnable(GL_LIGHTING);
 
     if (!isHitNull) {
         glDisable(GL_LIGHTING);
@@ -811,13 +878,14 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     setupFog(0);
     LevelRenderer_renderSurroundingWater(lr);
 
-    // liquid layer, drawn twice: once depth only so the translucent surface
-    // does not overdraw itself, then for real with color writes back on
+    // liquid layer (renumbered down from 2, no more separate shadow pass),
+    // drawn twice: once depth only so the translucent surface does not
+    // overdraw itself, then for real with color writes back on
     glEnable(GL_BLEND);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-    LevelRenderer_render(lr, p, 2);
+    LevelRenderer_render(lr, p, 1);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    LevelRenderer_render(lr, p, 2);
+    LevelRenderer_render(lr, p, 1);
     glDisable(GL_BLEND);
 
     glDisable(GL_LIGHTING);
@@ -897,6 +965,9 @@ int main(void) {
 
 static void tick(Player* p, GLFWwindow* w) {
     (void)w;
+
+    gTickCount++;
+    LevelRenderer_tick(&levelRenderer); // scrolls the new cloud layer
 
     // random tile ticks (grass growth/decay lives here)
     Level_onTick(&level);

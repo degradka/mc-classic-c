@@ -9,6 +9,8 @@ void Cube_init(Cube* c, int tx, int ty) {
     c->texOffX = tx; c->texOffY = ty;
     c->x = c->y = c->z = 0.0f;
     c->xRot = c->yRot = c->zRot = 0.0f;
+    c->displayList = 0;
+    c->built = 0;
 }
 
 Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
@@ -57,18 +59,33 @@ Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
     return c;
 }
 
-void Cube_setPos(Cube* c, float x, float y, float z) { c->x = x; c->y = y; c->z = z; }
+void Cube_setPos(Cube* c, float x, float y, float z) {
+    (void)z;
+    c->x = x; c->y = y; c->z = 0.0f;
+}
 
-void Cube_render(const Cube* c) {
+// c0.0.14a_08: bakes the raw (untranslated, unrotated) geometry into a GL
+// display list on first render, then just applies the transform and
+// glCallList every frame after, instead of re-issuing all 24 vertices in
+// immediate mode every single frame
+void Cube_render(Cube* c) {
+    if (!c->built) {
+        c->displayList = glGenLists(1);
+        glNewList(c->displayList, GL_COMPILE);
+        glBegin(GL_QUADS);
+        for (int i = 0; i < 6; ++i) Polygon_render(&c->polys[i]);
+        glEnd();
+        glEndList();
+        c->built = 1;
+    }
+
     glPushMatrix();
     glTranslatef(c->x, c->y, c->z);
     glRotated(c->zRot * 180.0 / M_PI, 0, 0, 1);
     glRotated(c->yRot * 180.0 / M_PI, 0, 1, 0);
     glRotated(c->xRot * 180.0 / M_PI, 1, 0, 0);
 
-    glBegin(GL_QUADS);
-    for (int i = 0; i < 6; ++i) Polygon_render(&c->polys[i]);
-    glEnd();
+    glCallList(c->displayList);
 
     glPopMatrix();
 }

@@ -7,6 +7,7 @@ void Player_init(Player* p, Level* level) {
     Entity_init(&p->e, level);
     p->e.heightOffset = 1.62f;
     for (int i = 0; i < 5; ++i) p->keys[i] = false;
+    p->jumping = false;
 }
 
 void Player_setKey(Player* p, int id, bool state) {
@@ -44,47 +45,53 @@ void Player_onTick(Player* p) {
     if (p->keys[PLAYER_KEY_LEFT])  strafe  -= 1.0f;
     if (p->keys[PLAYER_KEY_RIGHT]) strafe  += 1.0f;
 
+    // c0.0.14a_08: jump debounce, once triggered the key must be released
+    // before another jump can fire, even if onGround becomes true again
+    // while it's still held
     if (p->keys[PLAYER_KEY_JUMP]) {
         if (inWater || inLava) {
-            p->e.motionY += 0.04;
-        } else if (p->e.onGround) {
-            p->e.motionY = 0.42;
+            p->e.motionY += 0.04f;
+        } else if (p->e.onGround && !p->jumping) {
+            p->e.motionY = 0.42f;
+            p->jumping = true;
         }
+    } else {
+        p->jumping = false;
     }
 
     if (inWater) {
-        double yo = p->e.y;
+        float yo = p->e.y;
         Entity_moveRelative(&p->e, strafe, forward, 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
-        p->e.motionX *= 0.8;
-        p->e.motionY *= 0.8;
-        p->e.motionZ *= 0.8;
-        p->e.motionY -= 0.02;
-        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6 - p->e.y + yo, p->e.motionZ)) {
-            p->e.motionY = 0.3;
+        p->e.motionX *= 0.8f;
+        p->e.motionY *= 0.8f;
+        p->e.motionZ *= 0.8f;
+        p->e.motionY -= 0.02f;
+        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6f - p->e.y + yo, p->e.motionZ)) {
+            p->e.motionY = 0.3f;
         }
     } else if (inLava) {
-        double yo = p->e.y;
+        float yo = p->e.y;
         Entity_moveRelative(&p->e, strafe, forward, 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
-        p->e.motionX *= 0.5;
-        p->e.motionY *= 0.5;
-        p->e.motionZ *= 0.5;
-        p->e.motionY -= 0.02;
-        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6 - p->e.y + yo, p->e.motionZ)) {
-            p->e.motionY = 0.3;
+        p->e.motionX *= 0.5f;
+        p->e.motionY *= 0.5f;
+        p->e.motionZ *= 0.5f;
+        p->e.motionY -= 0.02f;
+        if (p->e.horizontalCollision && Entity_isFree(&p->e, p->e.motionX, p->e.motionY + 0.6f - p->e.y + yo, p->e.motionZ)) {
+            p->e.motionY = 0.3f;
         }
     } else {
         Entity_moveRelative(&p->e, strafe, forward, p->e.onGround ? 0.1f : 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
-        p->e.motionX *= 0.91;
-        p->e.motionY *= 0.98;
-        p->e.motionZ *= 0.91;
-        p->e.motionY -= 0.08;
+        p->e.motionX *= 0.91f;
+        p->e.motionY *= 0.98f;
+        p->e.motionZ *= 0.91f;
+        p->e.motionY -= 0.08f;
 
         if (p->e.onGround) {
-            p->e.motionX *= 0.6;
-            p->e.motionZ *= 0.6;
+            p->e.motionX *= 0.6f;
+            p->e.motionZ *= 0.6f;
         }
     }
 }

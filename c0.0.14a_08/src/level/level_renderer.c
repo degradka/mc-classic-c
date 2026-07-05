@@ -14,6 +14,7 @@
 #include "../timer.h"
 #include "../hitresult.h"
 #include "../player.h"
+#include "../renderer/tessellator.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -31,7 +32,7 @@ static void compileSurroundingGround(LevelRenderer* r) {
     glBindTexture(GL_TEXTURE_2D, rockTex);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-    const float y = 32.0f - 2.0f; // Level.getGroundLevel() minus 2, ground level is hardcoded 32
+    const float y = Level_getGroundLevel(r->level);
     int s = 128;
     if (s > r->level->width)  s = r->level->width;
     if (s > r->level->height) s = r->level->height;
@@ -91,7 +92,7 @@ static void compileSurroundingWater(LevelRenderer* r) {
     GLuint waterTex = loadTextureTiled("resources/water.png", GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, waterTex);
 
-    const float y = 32.0f; // Level.getGroundLevel()
+    const float y = Level_getWaterLevel(r->level);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -162,6 +163,65 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     glNewList(r->surroundLists + 1, GL_COMPILE);
     compileSurroundingWater(r);
     glEndList();
+
+    r->cloudTick = 0;
+    r->cloudTexture = loadTexture("resources/clouds.png", GL_NEAREST);
+}
+
+void LevelRenderer_tick(LevelRenderer* r) {
+    r->cloudTick++;
+}
+
+// c0.0.14a_08's fog end distance shrinks with the draw distance toggle:
+// 1024/256/64/16 across the 4 states
+float LevelRenderer_getFogEndDistance(const LevelRenderer* r) {
+    return (float)(1024 >> (r->drawDistance * 2));
+}
+
+// two stacked planes: a scrolling textured cloud layer, and a plain sky
+// colored ceiling above it, both tiled 512 units per cell out to a 2048
+// unit skirt past the map edges same as the ground/water horizon
+void LevelRenderer_renderClouds(LevelRenderer* r, float partialTicks) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, r->cloudTexture);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    const float texScale = 4.8828125e-4f; // 1/2048
+    const float y = (float)(r->level->depth + 2);
+    const float uOffset = (r->cloudTick + partialTicks) * texScale * 0.03f;
+
+    Tessellator_begin(&TESSELLATOR);
+    for (int xx = -2048; xx < r->level->width + 2048; xx += 512) {
+        for (int zz = -2048; zz < r->level->height + 2048; zz += 512) {
+            float u0 = xx * texScale + uOffset, u1 = (xx + 512) * texScale + uOffset;
+            float v0 = zz * texScale, v1 = (zz + 512) * texScale;
+
+            Tessellator_vertexUV(&TESSELLATOR, (float)xx,       y, (float)(zz + 512), u0, v1);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx+512), y, (float)(zz + 512), u1, v1);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx+512), y, (float)zz,         u1, v0);
+            Tessellator_vertexUV(&TESSELLATOR, (float)xx,       y, (float)zz,         u0, v0);
+
+            Tessellator_vertexUV(&TESSELLATOR, (float)xx,       y, (float)zz,         u0, v0);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx+512), y, (float)zz,         u1, v0);
+            Tessellator_vertexUV(&TESSELLATOR, (float)(xx+512), y, (float)(zz + 512), u1, v1);
+            Tessellator_vertexUV(&TESSELLATOR, (float)xx,       y, (float)(zz + 512), u0, v1);
+        }
+    }
+    Tessellator_end(&TESSELLATOR);
+    glDisable(GL_TEXTURE_2D);
+
+    Tessellator_begin(&TESSELLATOR);
+    Tessellator_color(&TESSELLATOR, 0.5f, 0.8f, 1.0f);
+    const float y2 = (float)(r->level->depth + 10);
+    for (int xx = -2048; xx < r->level->width + 2048; xx += 512) {
+        for (int zz = -2048; zz < r->level->height + 2048; zz += 512) {
+            Tessellator_vertex(&TESSELLATOR, (float)xx,       y2, (float)zz);
+            Tessellator_vertex(&TESSELLATOR, (float)(xx+512), y2, (float)zz);
+            Tessellator_vertex(&TESSELLATOR, (float)(xx+512), y2, (float)(zz + 512));
+            Tessellator_vertex(&TESSELLATOR, (float)xx,       y2, (float)(zz + 512));
+        }
+    }
+    Tessellator_end(&TESSELLATOR);
 }
 
 void LevelRenderer_cull(LevelRenderer* r, const Frustum* frustum_) {
@@ -267,9 +327,8 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     // rebuild up to 4 per frame (c0.0.13a halved MAX_REBUILDS_PER_FRAME from 8)
     int limit = n < 4 ? n : 4;
     for (int i = 0; i < limit; ++i) {
-        Chunk_rebuild(list[i], 0);
-        Chunk_rebuild(list[i], 1);
-        Chunk_rebuild(list[i], 2);
+        Chunk_rebuild(list[i], 0); // solid, single pass since c0.0.14a_08
+        Chunk_rebuild(list[i], 1); // liquid, renumbered down from 2
     }
 
     return limit;

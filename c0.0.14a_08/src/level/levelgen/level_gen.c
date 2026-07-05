@@ -168,6 +168,153 @@ static void carveTunnels(Level* level) {
     }
 }
 
+// New in c0.0.14a_08: ore veins, reusing the same tunnel walk algorithm as
+// carveTunnels but replacing Rock with ore instead of clearing to air. Count
+// and vein size both scale with `percent` (a relative rarity weight, not a
+// depth restriction despite how it reads at a glance): Coal is the most
+// common and has the biggest veins, Gold the rarest and smallest.
+static void placeOreVein(Level* level, int oreId, int percent) {
+    const int w = level->width, h = level->height, d = level->depth;
+    int count = w * h * d / 256 / 64 * percent / 100;
+
+    for (int i = 0; i < count; ++i) {
+        float x = randf() * w;
+        float y = randf() * d;
+        float z = randf() * h;
+        int length = (int)((randf() + randf()) * 75.0f * percent / 100.0f);
+        float dir1 = randf() * (float)M_PI * 2.0f;
+        float dira1 = 0.0f;
+        float dir2 = randf() * (float)M_PI * 2.0f;
+        float dira2 = 0.0f;
+
+        for (int l = 0; l < length; ++l) {
+            x = (float)(x + sin(dir1) * cos(dir2));
+            z = (float)(z + cos(dir1) * cos(dir2));
+            y = (float)(y + sin(dir2));
+
+            dir1 += dira1 * 0.2f;
+            dira1 *= 0.9f;
+            dira1 += randf() - randf();
+
+            dir2 += dira2 * 0.5f;
+            dir2 *= 0.5f;
+            dira2 *= 0.9f;
+            dira2 += randf() - randf();
+
+            float size = (float)(sin(l * M_PI / length) * percent / 100.0 + 1.0);
+
+            for (int xx = (int)(x - size); xx <= (int)(x + size); ++xx) {
+                for (int yy = (int)(y - size); yy <= (int)(y + size); ++yy) {
+                    for (int zz = (int)(z - size); zz <= (int)(z + size); ++zz) {
+                        float xd = xx - x;
+                        float yd = yy - y;
+                        float zd = zz - z;
+                        float dd = xd * xd + yd * yd * 2.0f + zd * zd;
+                        if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
+                            xx < level->width - 1 && yy < level->depth - 1 && zz < level->height - 1) {
+                            int ii = (yy * h + zz) * w + xx;
+                            if (level->blocks[ii] == TILE_ROCK.id) {
+                                level->blocks[ii] = (byte)oreId;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (i % 100 == 0) Minecraft_levelLoadProgress(i * 100 / (count > 1 ? count - 1 : 1));
+    }
+}
+
+// New in c0.0.14a_08: replaces the grass top tile with Sand or Gravel at or
+// below water level, based on two independent 8 octave Perlin fields.
+static void growBeaches(Level* level, const int* heightmap) {
+    PerlinNoise sandNoise, gravelNoise;
+    PerlinNoise_init(&sandNoise, 8);
+    PerlinNoise_init(&gravelNoise, 8);
+
+    const int w = level->width, h = level->height, d = level->depth;
+    for (int x = 0; x < w; ++x) {
+        Minecraft_levelLoadProgress(x * 100 / (w > 1 ? w - 1 : 1));
+        for (int z = 0; z < h; ++z) {
+            int isSand   = sandNoise.synth.getValue(&sandNoise.synth, x, z) > 8.0;
+            int isGravel = gravelNoise.synth.getValue(&gravelNoise.synth, x, z) > 12.0;
+
+            int surfaceY = heightmap[x + z * w] + d / 2;
+            int aboveIdx = ((surfaceY + 1) * h + z) * w + x;
+            if (level->blocks[aboveIdx] != 0) continue; // covered, leave alone
+
+            int id = TILE_GRASS.id;
+            if (surfaceY <= d / 2 - 1 && isGravel) id = TILE_GRAVEL.id;
+            if (surfaceY <= d / 2 - 1 && isSand)   id = TILE_SAND.id;
+            level->blocks[(surfaceY * h + z) * w + x] = (byte)id;
+        }
+    }
+
+    PerlinNoise_destroy(&sandNoise);
+    PerlinNoise_destroy(&gravelNoise);
+}
+
+// New in c0.0.14a_08: real tree generation, replacing the previously
+// treeless world gen entirely. Random walk site search, 4-5 block trunks,
+// a 3x3 leaf canopy that drops its 4 diagonal corners only on the very top
+// layer for a "+" shaped cap.
+static void plantTrees(Level* level, const int* heightmap) {
+    const int w = level->width, h = level->height, d = level->depth;
+    int attempts = w * h / 4000;
+
+    for (int a = 0; a < attempts; ++a) {
+        if (a % 20 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
+
+        int cx = rand() % w;
+        int cz = rand() % h;
+        for (int outer = 0; outer < 20; ++outer) {
+            int x = cx, z = cz;
+            for (int inner = 0; inner < 20; ++inner) {
+                x += (rand() % 6) - (rand() % 6);
+                z += (rand() % 6) - (rand() % 6);
+                if (x < 0 || z < 0 || x >= w || z >= h) continue;
+
+                int baseY = heightmap[x + z * w] + d / 2 + 1;
+                int trunkHeight = rand() % 2 + 4;
+
+                int canPlace = 1;
+                for (int ly = baseY; ly <= baseY + 1 + trunkHeight && canPlace; ++ly) {
+                    int radius = (ly >= baseY + 1 + trunkHeight - 2) ? 2 : 1;
+                    for (int lx = x - radius; lx <= x + radius && canPlace; ++lx) {
+                        for (int lz = z - radius; lz <= z + radius && canPlace; ++lz) {
+                            if (lx < 0 || ly < 0 || lz < 0 || lx >= w || ly >= d || lz >= h) { canPlace = 0; break; }
+                            if (level->blocks[(ly * h + lz) * w + lx] != 0) { canPlace = 0; break; }
+                        }
+                    }
+                }
+
+                if (canPlace &&
+                    level->blocks[((baseY - 1) * h + z) * w + x] == TILE_GRASS.id &&
+                    baseY < d - trunkHeight - 1) {
+                    level->blocks[((baseY - 1) * h + z) * w + x] = TILE_DIRT.id;
+
+                    int topY = baseY + trunkHeight;
+                    for (int ly = topY - 2; ly <= topY; ++ly) {
+                        int fromTop = topY - ly; // 0 only on the very top canopy layer
+                        for (int lx = x - 1; lx <= x + 1; ++lx) {
+                            int dx = lx - x;
+                            for (int lz = z - 1; lz <= z + 1; ++lz) {
+                                int dz = lz - z;
+                                if (fromTop != 0 || abs(dx) != 1 || abs(dz) != 1) {
+                                    level->blocks[(ly * h + lz) * w + lx] = TILE_LEAVES.id;
+                                }
+                            }
+                        }
+                    }
+                    for (int ly = 0; ly < trunkHeight; ++ly) {
+                        level->blocks[((baseY + ly) * h + z) * w + x] = TILE_LOG.id;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Growable stack flood fill, the same algorithm as the Java source's
 // coordinate stack minus its fixed capacity buffer chaining workaround.
 // A reallocated stack achieves identical fill behavior more simply.
@@ -304,16 +451,25 @@ void LevelGen_generateMap(Level* level) {
 
     Minecraft_levelLoadUpdate("Soiling..");
     buildBlocks(level, heightmap);
-    free(heightmap);
 
     Minecraft_levelLoadUpdate("Carving..");
     carveTunnels(level);
+    placeOreVein(level, TILE_COAL_ORE.id, 90);
+    placeOreVein(level, TILE_IRON_ORE.id, 70);
+    placeOreVein(level, TILE_GOLD_ORE.id, 50);
 
     Minecraft_levelLoadUpdate("Watering..");
     addWater(level);
 
     Minecraft_levelLoadUpdate("Melting..");
     addLava(level);
+
+    Minecraft_levelLoadUpdate("Growing..");
+    growBeaches(level, heightmap);
+
+    Minecraft_levelLoadUpdate("Planting..");
+    plantTrees(level, heightmap);
+    free(heightmap);
 
     level->createTime = (long long)time(NULL) * 1000;
     snprintf(level->creator, sizeof(level->creator), "%s", Minecraft_getUserName());

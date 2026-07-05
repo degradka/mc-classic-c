@@ -17,8 +17,8 @@ typedef struct {
 } Particle;
 
 void Particle_init(Particle* p, Level* level,
-                   double x, double y, double z,
-                   double motionX, double motionY, double motionZ,
+                   float x, float y, float z,
+                   float motionX, float motionY, float motionZ,
                    int textureId);
 
 void Particle_onTick(Particle* p);

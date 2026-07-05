@@ -17,6 +17,9 @@
 typedef struct Player {
     Entity e;
     bool keys[5];
+    // c0.0.14a_08: jump key debounce latch, can't retrigger a jump while the
+    // key stays held across an onGround transition until it's released
+    bool jumping;
 } Player;
 
 void Player_init(Player* player, Level* level);

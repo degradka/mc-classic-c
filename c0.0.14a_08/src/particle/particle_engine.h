@@ -21,7 +21,9 @@ typedef struct ParticleEngine {
 
 void ParticleEngine_init  (ParticleEngine* pe, Level* level, GLuint terrainTex);
 void ParticleEngine_onTick(ParticleEngine* pe);
-void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks, int layer);
+// c0.0.14a_08 drops the lit/shadow layer split (replaced by per particle
+// brightness tinting), so this is now a single unconditional pass
+void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks);
 
 void ParticleEngine_add(ParticleEngine* pe, const Particle* p);
 

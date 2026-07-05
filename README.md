@@ -34,6 +34,8 @@ Released May 22 2009. Added level saving for accounts, changed the lava, water, 
 
 Released May 22 2009. Starting from this version, the client jar is obfuscated: package, class, field, and method names are all reduced to single letters with no other information to recover them from. This port was rebuilt by diffing the obfuscated bytecode against the last known good c0.0.13a source and inferring what each piece does from its behavior, so some names and structure here are a best guess rather than a faithful match to what Mojang actually called things.
 
+c0.0.13a_03 is also the last version with a standalone launcher jar available, so it's the last one built by playing the real client side by side with the port. From c0.0.14a_08 on, the client jars are applet only, with no standalone jar or launcher build available, so later versions are ported from reading the decompiled source and the wiki changelog rather than playing the original side by side. Treat behavior in c0.0.14a_08 and everything after it as best effort rather than verified.
+
 * Real Perlin noise hills terrain with an erosion pass, replacing c0.0.13a's flat generation
 * Mobs no longer auto spawn when a level generates
 * Lava lakes capped below sea level, and interior water lakes seeded far more often
@@ -46,11 +48,19 @@ Released May 22 2009. Starting from this version, the client jar is obfuscated: 
 
 ### c0.0.14a_08
 
-In progress. Released May 28 2009 and the last release of Early Classic before multiplayer began. Also obfuscated, ported the same way as c0.0.13a_03.
+Released May 28 2009 and the last release of Early Classic before multiplayer began. Also obfuscated, ported the same way as c0.0.13a_03.
 
-## c0.30
-
-Planned, after c0.0.14a_08.
+* Real tree generation: random walk placement, 4-5 block trunks, a leaf canopy that caps into a "+" shape on top
+* Ore veins: coal, iron, and gold generate inside the rock layer
+* Beach generation replaces grass with sand or gravel near sea level
+* Sand and gravel fall through open air, both on a tick and instantly when their support is removed
+* Shadows now fall on every tile face including water and lava surfaces, replacing the old flat lit/shadow split
+* Daylight fog is linear instead of exponential, and now shrinks with the draw distance toggle
+* Clouds
+* Hotbar expanded to 9 slots, selectable with number keys, the scroll wheel, or middle click to pick the block under the crosshair
+* Holding the mouse button now mines or places repeatedly instead of needing repeated clicks
+* Enter sets the world's spawn point instead of saving the level
+* Mob cap raised from 100 to 256
 
 ## Building
 

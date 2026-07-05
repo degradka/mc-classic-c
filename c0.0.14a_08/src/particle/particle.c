@@ -7,8 +7,8 @@
 static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
 
 void Particle_init(Particle* p, Level* level,
-                   double x, double y, double z,
-                   double mx, double my, double mz, int textureId)
+                   float x, float y, float z,
+                   float mx, float my, float mz, int textureId)
 {
     Entity_init(&p->base, level);
     p->textureId = textureId;
@@ -25,14 +25,17 @@ void Particle_init(Particle* p, Level* level,
     p->base.motionY = my + (frand01() * 2.0f - 1.0f) * 0.4f;
     p->base.motionZ = mz + (frand01() * 2.0f - 1.0f) * 0.4f;
 
-    double speed = (frand01() + frand01() + 1.0) * 0.15;
-    double d = sqrt(p->base.motionX*p->base.motionX +
+    float speed = (frand01() + frand01() + 1.0f) * 0.15f;
+    float d = sqrtf(p->base.motionX*p->base.motionX +
                     p->base.motionY*p->base.motionY +
                     p->base.motionZ*p->base.motionZ);
-    if (d > 0.0) {
-        p->base.motionX = p->base.motionX / d * speed * 0.4;
-        p->base.motionY = p->base.motionY / d * speed * 0.4 + 0.1;
-        p->base.motionZ = p->base.motionZ / d * speed * 0.4;
+    // c0.0.14a_08 drops the zero guard here (divides unconditionally); kept
+    // since a truly zero jittered vector is not reachable in practice and
+    // this is strictly safer
+    if (d > 0.0f) {
+        p->base.motionX = p->base.motionX / d * speed * 0.4f;
+        p->base.motionY = p->base.motionY / d * speed * 0.4f + 0.1f;
+        p->base.motionZ = p->base.motionZ / d * speed * 0.4f;
     }
 
     p->textureUOffset = frand01() * 3.0f;
@@ -46,25 +49,28 @@ void Particle_init(Particle* p, Level* level,
 void Particle_onTick(Particle* p) {
     Entity_onTick(&p->base);
 
+    // c0.0.14a_08 drops the early return after removing on the final tick,
+    // so a particle gets one extra physics update the tick it's removed on.
+    // Harmless: it's dropped from the engine's list before ever rendering
+    // again, ported to match anyway since it costs nothing.
     if (p->age++ >= p->lifetime) {
         Entity_remove(&p->base);
-        return;
     }
 
     // gravity
-    p->base.motionY -= 0.04;
+    p->base.motionY -= 0.04f;
 
     // move
     Entity_move(&p->base, p->base.motionX, p->base.motionY, p->base.motionZ);
 
     // damping
-    p->base.motionX *= 0.98;
-    p->base.motionY *= 0.98;
-    p->base.motionZ *= 0.98;
+    p->base.motionX *= 0.98f;
+    p->base.motionY *= 0.98f;
+    p->base.motionZ *= 0.98f;
 
     if (p->base.onGround) {
-        p->base.motionX *= 0.7;
-        p->base.motionZ *= 0.7;
+        p->base.motionX *= 0.7f;
+        p->base.motionZ *= 0.7f;
     }
 }
 
