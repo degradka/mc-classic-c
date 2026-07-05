@@ -60,3 +60,5 @@ rubydung
 
 # Resources folder for debug
 **/src/resources
+
+**/PORTING_SCOPE.md

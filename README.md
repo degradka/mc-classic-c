@@ -30,9 +30,13 @@ Released May 22 2009. Added level saving for accounts, changed the lava, water, 
 * Reset position with R, toggle draw distance with F
 * Multiplayer classes ported and present in source, unused in the running game, matching the real client for this version
 
+### c0.0.13a_03
+
+In progress. Starting from this version, the client jar is obfuscated: package, class, field, and method names are all reduced to single letters with no other information to recover them from. Everything from here on is being rebuilt by diffing the obfuscated bytecode against the last known good source and inferring what each piece does from its behavior, so some names and structure in this port are a best guess rather than a faithful match to what Mojang actually called things.
+
 ## c0.30
 
-In progress.
+Planned, after c0.0.13a_03.
 
 ## Building
 
