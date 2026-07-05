@@ -1,34 +1,40 @@
-# Classic 0.0.13a_03
+# Classic 0.0.14a_08
 
 [Back to all versions](../README.md)
 
-Released May 22, 2009, the same day as 0.0.13a. The first obfuscated version.
+Released May 28, 2009. The versions between 0.0.13a_03 and this one aren't ported separately,
+everything they changed is in here.
 
 ## What changed
 
+- New tiles
+  - Sand and gravel, they fall when there's air under them
+  - Gold, iron and coal ore
+  - Log and leaves
 - World generation
-  - Rolling hills: the heightmap step is filled in now, so the terrain is no longer flat
-  - A new Soiling.. stage puts grass, dirt and rock on top of the heightmap
-  - Lava only goes below depth / 2 - 4, so it stays under sea level
-  - Water lakes get one try per 200 tiles of area instead of one per 5000
-- No zombies at the start of a level anymore, **G** still spawns them
-- **Escape** closes whatever menu is open
-- The pause menu background is darker
-- The loading screen has a progress bar
-- Generate new level makes a 256x256x64 level instead of 32x512x64
-- Save level.. and Load level.. now work through the website the applet runs on, for players who are logged in
+  - Ore veins in the rock
+  - Sand and gravel instead of grass near the water
+  - Trees, with a "+" shaped top layer of leaves
+  - Two new stages, Growing.. and Planting..
+- Every face is shaded by the light of the block in front of it, water and lava included, instead of the old lit and shadow passes
+- Clouds
+- Generate new level asks for a size: Small, Normal or Huge (128, 256 or 512 wide)
+- The daylight fog is linear now, its end is 1024, 256, 64 or 16 blocks depending on the view distance
+- Controls
+  - **1** to **9** pick one of 9 tiles, the mouse wheel goes through them
+  - Middle click picks the block you look at, grass gives dirt
+  - Holding the left button keeps breaking or placing, every quarter second
+  - **Enter** sets the spawn point to where you stand instead of saving the level
+  - **G** only spawns zombies while there are fewer than 256 entities
 
 ## How it was ported
 
-- From this version on every class, field and method in the jar is a single letter
-- Ported on top of c0.0.13a: the new jar was decompiled and diffed against 0.0.13a, and what each changed piece does was figured out from the code itself
-- Some of the world generation methods don't decompile at all, those were read from the bytecode
+- Obfuscated like 0.0.13a_03, ported the same way, on top of it
 
 ## Differences from the original
 
 - It's a normal window, not an applet
 - Save level.. and Load level.. only did something when you were logged in on minecraft.net, which is gone. Here you're never logged in, so they do nothing, same as the original without an account
-- G stops at 100 zombies, the jar has no limit
 
 ## Building and running
 
@@ -48,7 +54,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.0.13a_03/src
+cd mc-classic-c/c0.0.14a_08/src
 make
 ```
 
@@ -71,4 +77,4 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.0.13a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a_03)
+- [minecraft.wiki: Java Edition Classic 0.0.14a_08](https://minecraft.wiki/w/Java_Edition_Classic_0.0.14a_08)

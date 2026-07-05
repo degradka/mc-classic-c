@@ -2,7 +2,7 @@
 
 #include "pause_screen.h"
 
-extern void Minecraft_generateNewLevel(void);
+extern void Minecraft_showNewLevelScreen(void);
 extern void Minecraft_setScreen(Screen* screen);
 extern void Minecraft_grabMouse(void);
 
@@ -16,9 +16,7 @@ static void PauseScreen_render(Screen* self, int xm, int ym) {
 static void PauseScreen_buttonClicked(Screen* self, Button* b) {
     (void)self;
     if (b->id == 0) {
-        Minecraft_generateNewLevel();
-        Minecraft_setScreen(NULL);
-        Minecraft_grabMouse();
+        Minecraft_showNewLevelScreen();
     }
     if (b->id == 3) {
         Minecraft_setScreen(NULL);
@@ -32,7 +30,7 @@ void PauseScreen_init(PauseScreen* ps, Font* font, int width, int height) {
     s->render = PauseScreen_render;
     s->buttonClicked = PauseScreen_buttonClicked;
 
-    Screen_addButton(s, 0, width / 2 - 100, height / 3,      200, 20, "Generate new level");
+    Screen_addButton(s, 0, width / 2 - 100, height / 3,      200, 20, "Generate new level...");
     Screen_addButton(s, 1, width / 2 - 100, height / 3 + 32, 200, 20, "Save level..");
     Screen_addButton(s, 2, width / 2 - 100, height / 3 + 64, 200, 20, "Load level..");
     Screen_addButton(s, 3, width / 2 - 100, height / 3 + 96, 200, 20, "Back to game");

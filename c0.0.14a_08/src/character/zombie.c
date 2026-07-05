@@ -58,6 +58,8 @@ void Zombie_render(const Zombie* z, float partialTicks) {
     glPushMatrix();
 
     double time = (double)getCurrentTimeInNanoseconds() / 1.0E9 * 10.0 * z->speed + z->timeOffset;
+    float br = Entity_getBrightness(&z->base);
+    glColor3f(br, br, br);
     float size = 0.058333334f;
     float yy = (float)(-fabs(sin(time * 0.6662)) * 5.0 - 23.0);
 

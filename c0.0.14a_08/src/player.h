@@ -8,15 +8,17 @@
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
 
-#define PLAYER_KEY_UP    0
-#define PLAYER_KEY_DOWN  1
-#define PLAYER_KEY_LEFT  2
-#define PLAYER_KEY_RIGHT 3
-#define PLAYER_KEY_JUMP  4
+// the movement input from the keyboard
+typedef struct {
+    float xa, ya;
+    bool jumping;
+    bool jump;
+    bool keys[10];
+} Input;
 
 typedef struct Player {
     Entity e;
-    bool keys[10];
+    Input input;
 } Player;
 
 void Player_init(Player* player, Level* level);

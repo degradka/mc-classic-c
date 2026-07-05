@@ -12,6 +12,7 @@ void Entity_init(Entity* e, Level* level) {
     e->prevX = e->prevY = e->prevZ = 0.0f;
     e->motionX = e->motionY = e->motionZ = 0.0f;
     e->xRotation = e->yRotation = 0.0f;
+    e->xRotI = e->yRotI = 0.0f;
     e->onGround = false;
     e->horizontalCollision = false;
     e->heightOffset = 0.0f;
@@ -19,7 +20,7 @@ void Entity_init(Entity* e, Level* level) {
     e->boundingBoxHeight = 1.8f;
     e->removed = false;
 
-    Entity_resetPosition(e);
+    Entity_setPosition(e, 0.0f, 0.0f, 0.0f);
 }
 
 void Entity_setPosition(Entity* e, float x, float y, float z) {
@@ -29,24 +30,41 @@ void Entity_setPosition(Entity* e, float x, float y, float z) {
     e->boundingBox = AABB_create(x - w, y - h, z - w, x + w, y + h, z + w);
 }
 
+// climbs from the spawn until the box is free, a failed spawn search (y -100) never moves it
 void Entity_resetPosition(Entity* e) {
-    float x = (float)JRandom_mathRandom() * (float)(e->level->width - 2) + 1.0f;
-    float y = (float)(e->level->depth + 10);
-    float z = (float)JRandom_mathRandom() * (float)(e->level->height - 2) + 1.0f;
-    Entity_setPosition(e, x, y, z);
+    float x = (float)e->level->xSpawn + 0.5f;
+    float y = (float)e->level->ySpawn;
+    float z = (float)e->level->zSpawn + 0.5f;
+    while (y > 0.0f) {
+        Entity_setPosition(e, x, y, z);
+        ArrayList_AABB cubes = Level_getCubes(e->level, &e->boundingBox);
+        int n = cubes.size;
+        free(cubes.aabbs);
+        if (n == 0) break;
+        y += 1.0f;
+    }
+    e->motionX = e->motionY = e->motionZ = 0.0f;
+    e->yRotation = e->level->rotSpawn;
+    e->xRotation = 0.0f;
 }
 
 void Entity_turn(Entity* e, float dx, float dy) {
+    float xOld = e->xRotation;
+    float yOld = e->yRotation;
     e->yRotation = (float)(e->yRotation + dx * 0.15);
     e->xRotation = (float)(e->xRotation - dy * 0.15);
     if (e->xRotation < -90.0f) e->xRotation = -90.0f;
     if (e->xRotation > 90.0f) e->xRotation = 90.0f;
+    e->xRotI = e->xRotation - xOld;
+    e->yRotI = e->yRotation - yOld;
 }
 
 void Entity_onTick(Entity* e) {
     e->prevX = e->x;
     e->prevY = e->y;
     e->prevZ = e->z;
+    e->xRotI = 0.0f;
+    e->yRotI = 0.0f;
 }
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
@@ -79,10 +97,11 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
 }
 
 void Entity_moveRelative(Entity* e, float x, float z, float speed) {
-    float dist = x * x + z * z;
+    float dist = (float)sqrt(x * x + z * z);
     if (dist < 0.01f) return;
+    if (dist < 1.0f) dist = 1.0f;
 
-    dist = speed / (float)sqrt(dist);
+    dist = speed / dist;
     x *= dist;
     z *= dist;
 
@@ -110,6 +129,10 @@ bool Entity_isInWater(const Entity* e) {
 
 bool Entity_isInLava(const Entity* e) {
     return Level_containsLiquid(e->level, &e->boundingBox, LIQUID_LAVA);
+}
+
+float Entity_getBrightness(const Entity* e) {
+    return Level_getBrightness(e->level, (int)e->x, (int)(e->y + e->heightOffset / 2.0f), (int)e->z);
 }
 
 bool Entity_isLit(const Entity* e) {

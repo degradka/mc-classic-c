@@ -2,10 +2,11 @@
 
 #include "player.h"
 #include <math.h>
+#include <string.h>
 
 void Player_init(Player* p, Level* level) {
     Entity_init(&p->e, level);
-    for (int i = 0; i < 10; ++i) p->keys[i] = false;
+    memset(&p->input, 0, sizeof(p->input));
     p->e.heightOffset = 1.62f;
 }
 
@@ -16,44 +17,51 @@ void Player_setKey(Player* p, int key, bool state) {
     if (key == GLFW_KEY_LEFT || key == GLFW_KEY_A) id = 2;
     if (key == GLFW_KEY_RIGHT || key == GLFW_KEY_D) id = 3;
     if (key == GLFW_KEY_SPACE || key == GLFW_KEY_LEFT_SUPER) id = 4;
-    if (id >= 0) p->keys[id] = state;
+    if (id >= 0) p->input.keys[id] = state;
 }
 
 void Player_releaseAllKeys(Player* p) {
-    for (int i = 0; i < 10; ++i) p->keys[i] = false;
+    for (int i = 0; i < 10; ++i) p->input.keys[i] = false;
 }
 
 void Player_turn(Player* p, float dx, float dy) {
     Entity_turn(&p->e, dx, dy);
 }
 
+static void Input_update(Input* in) {
+    in->xa = 0.0f;
+    in->ya = 0.0f;
+    if (in->keys[0]) in->ya -= 1.0f;
+    if (in->keys[1]) in->ya += 1.0f;
+    if (in->keys[2]) in->xa -= 1.0f;
+    if (in->keys[3]) in->xa += 1.0f;
+    in->jump = in->keys[4];
+}
+
 void Player_onTick(Player* p) {
     Entity_onTick(&p->e);
 
-    float xa = 0.0f, ya = 0.0f;
-
     bool inWater = Entity_isInWater(&p->e);
     bool inLava  = Entity_isInLava(&p->e);
+    Input_update(&p->input);
 
-    if (p->keys[PLAYER_KEY_UP])    ya--;
-    if (p->keys[PLAYER_KEY_DOWN])  ya++;
-    if (p->keys[PLAYER_KEY_LEFT])  xa--;
-    if (p->keys[PLAYER_KEY_RIGHT]) xa++;
-    if (p->keys[PLAYER_KEY_JUMP]) {
+    // holding jump only jumps once until it's let go
+    if (p->input.jump) {
         if (inWater) {
             p->e.motionY += 0.04f;
         } else if (inLava) {
             p->e.motionY += 0.04f;
-        } else if (p->e.onGround) {
+        } else if (p->e.onGround && !p->input.jumping) {
             p->e.motionY = 0.42f;
-            // the key has to be pressed again for the next jump
-            p->keys[PLAYER_KEY_JUMP] = false;
+            p->input.jumping = true;
         }
+    } else {
+        p->input.jumping = false;
     }
 
     if (inWater) {
         float yo = p->e.y;
-        Entity_moveRelative(&p->e, xa, ya, 0.02f);
+        Entity_moveRelative(&p->e, p->input.xa, p->input.ya, 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
         p->e.motionX *= 0.8f;
         p->e.motionY *= 0.8f;
@@ -64,7 +72,7 @@ void Player_onTick(Player* p) {
         }
     } else if (inLava) {
         float yo = p->e.y;
-        Entity_moveRelative(&p->e, xa, ya, 0.02f);
+        Entity_moveRelative(&p->e, p->input.xa, p->input.ya, 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
         p->e.motionX *= 0.5f;
         p->e.motionY *= 0.5f;
@@ -74,7 +82,7 @@ void Player_onTick(Player* p) {
             p->e.motionY = 0.3f;
         }
     } else {
-        Entity_moveRelative(&p->e, xa, ya, p->e.onGround ? 0.1f : 0.02f);
+        Entity_moveRelative(&p->e, p->input.xa, p->input.ya, p->e.onGround ? 0.1f : 0.02f);
         Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
         p->e.motionX *= 0.91f;
         p->e.motionY *= 0.98f;

@@ -21,7 +21,7 @@ typedef struct ParticleEngine {
 
 void ParticleEngine_init  (ParticleEngine* pe, Level* level, GLuint terrainTex);
 void ParticleEngine_onTick(ParticleEngine* pe);
-void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks, int layer);
+void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks);
 
 void ParticleEngine_add(ParticleEngine* pe, const Particle* p);
 

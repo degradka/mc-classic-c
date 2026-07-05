@@ -24,15 +24,13 @@ static int Tile_default_getTexture(const Tile* self, int face) {
     return self->textureId;
 }
 
-// the base face check, layer 2 is liquids only
-// layer < 0 is what liquids pass to skip the lit check
+// layer 1 is the liquid pass, solid tiles only draw in layer 0
 static int Tile_default_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
     (void)self; (void)face;
-    if (layer == 2) return 0;
-    int lit = 1;
-    if (layer >= 0) lit = Level_isLit(lvl, x, y, z) ^ (layer == 1);
-    return (!Level_isSolidTile(lvl, x, y, z)) && (lit != 0);
+    if (layer == 1) return 0;
+    return !Level_isSolidTile(lvl, x, y, z);
 }
+
 
 static void Tile_default_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
     int tex = self->getTexture(self, face);
@@ -125,41 +123,62 @@ static void Tile_renderBackFace(const Tile* self, Tessellator* t, int x, int y, 
     }
 }
 
+
+// each face is shaded by the brightness of the tile in front of it
 static bool Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
-    const float c1 = 1.0f, c2 = 0.8f, c3 = 0.6f;
     bool drawn = false;
+    float c2 = 0.8f;
+    float c3 = 0.6f;
+    float br;
 
     if (self->shouldRenderFace(self, lvl, x, y - 1, z, layer, 0)) {
-        Tessellator_color(t, c1, c1, c1);
+        br = Level_getBrightness(lvl, x, y - 1, z);
+        Tessellator_color(t, br * 1.0f, br * 1.0f, br * 1.0f);
         self->renderFace(self, t, x, y, z, 0);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y + 1, z, layer, 1)) {
-        Tessellator_color(t, c1, c1, c1);
+        br = Level_getBrightness(lvl, x, y + 1, z);
+        Tessellator_color(t, br * 1.0f, br * 1.0f, br * 1.0f);
         self->renderFace(self, t, x, y, z, 1);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y, z - 1, layer, 2)) {
-        Tessellator_color(t, c2, c2, c2);
+        br = Level_getBrightness(lvl, x, y, z - 1);
+        Tessellator_color(t, c2 * br, c2 * br, c2 * br);
         self->renderFace(self, t, x, y, z, 2);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y, z + 1, layer, 3)) {
-        Tessellator_color(t, c2, c2, c2);
+        br = Level_getBrightness(lvl, x, y, z + 1);
+        Tessellator_color(t, c2 * br, c2 * br, c2 * br);
         self->renderFace(self, t, x, y, z, 3);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x - 1, y, z, layer, 4)) {
-        Tessellator_color(t, c3, c3, c3);
+        br = Level_getBrightness(lvl, x - 1, y, z);
+        Tessellator_color(t, c3 * br, c3 * br, c3 * br);
         self->renderFace(self, t, x, y, z, 4);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x + 1, y, z, layer, 5)) {
-        Tessellator_color(t, c3, c3, c3);
+        br = Level_getBrightness(lvl, x + 1, y, z);
+        Tessellator_color(t, c3 * br, c3 * br, c3 * br);
         self->renderFace(self, t, x, y, z, 5);
         drawn = true;
     }
     return drawn;
+}
+
+// a face is pickable when the tile in front of it isn't solid
+bool Tile_isFaceVisible(const Level* lvl, int x, int y, int z, int face) {
+    if (face == 0) y--;
+    if (face == 1) y++;
+    if (face == 2) z--;
+    if (face == 3) z++;
+    if (face == 4) x--;
+    if (face == 5) x++;
+    return !Level_isSolidTile(lvl, x, y, z);
 }
 
 /* tile instances and registry */
@@ -170,10 +189,15 @@ static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, in
     (void)self; (void)lvl; (void)x; (void)y; (void)z; (void)type;
 }
 
+static void Tile_default_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self; (void)lvl; (void)x; (void)y; (void)z;
+}
+
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
-    t->tileId = t->calmTileId = t->spreadSpeed = 0;
+    t->tileId = t->calmTileId = 0;
+    t->shouldTick = false;
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
@@ -184,6 +208,7 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->getAABB     = Tile_default_getAABB;
     t->mayPick     = Tile_default_mayPick;
     t->neighborChanged = Tile_default_neighborChanged;
+    t->onPlace = Tile_default_onPlace;
     t->shouldRenderFace = Tile_default_shouldRenderFace;
     t->renderFace = Tile_default_renderFace;
 
@@ -191,16 +216,23 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
 }
 
 Tile TILE_ROCK;
+Tile TILE_GRASS;
 Tile TILE_DIRT;
 Tile TILE_STONEBRICK;
 Tile TILE_WOOD;
-Tile TILE_GRASS;
 Tile TILE_BUSH;
 Tile TILE_UNBREAKABLE;
 Tile TILE_WATER;
 Tile TILE_CALM_WATER;
 Tile TILE_LAVA;
 Tile TILE_CALM_LAVA;
+Tile TILE_SAND;
+Tile TILE_GRAVEL;
+Tile TILE_GOLD_ORE;
+Tile TILE_IRON_ORE;
+Tile TILE_COAL_ORE;
+Tile TILE_LOG;
+Tile TILE_LEAVES;
 
 static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
@@ -214,7 +246,6 @@ static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     if (!Level_isLit(lvl, x, y + 1, z)) {
         level_setTile(lvl, x, y, z, TILE_DIRT.id);
     } else {
-        // y spreads from -3 to +1
         for (int i = 0; i < 4; ++i) {
             int tx = x + JRandom_nextIntN(&lvl->random, 3) - 1;
             int ty = y + JRandom_nextIntN(&lvl->random, 5) - 3;
@@ -233,6 +264,41 @@ static int Bush_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     return 0;
 }
 
+static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    int below = Level_getTile(lvl, x, y - 1, z);
+    if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
+        level_setTile(lvl, x, y, z, 0);
+    }
+}
+
+static int Log_getTexture(const Tile* self, int face) {
+    (void)self;
+    if (face == 1) return 21;
+    if (face == 0) return 21;
+    return 20;
+}
+
+static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
+static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
+
+// sand and gravel drop straight down to the first tile below
+static void Falling_fall(Level* lvl, int x, int y, int z) {
+    int ny = y;
+    while (Level_getTile(lvl, x, ny - 1, z) == 0 && ny > 0) ny--;
+    if (ny != y) Level_swap(lvl, x, y, z, x, ny, z);
+}
+
+static void Falling_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    Falling_fall(lvl, x, y, z);
+}
+
+static void Falling_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    (void)self; (void)type;
+    Falling_fall(lvl, x, y, z);
+}
+
 static int Liquid_isSolid(const Tile* self) { (void)self; return 0; }
 static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
@@ -240,49 +306,41 @@ static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
 }
 static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
 
-static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth);
+static void Liquid_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    Level_addToTickNextTick(lvl, x, y, z, self->tileId);
+}
 
-// falls through air, then spreads to the 4 sides
-// lava falls one step a tick, water keeps falling
-static int Liquid_updateWater(const Tile* self, Level* lvl, int x, int y, int z, int depth) {
-    int hasChanged = 0;
+// always says nothing changed, it only schedules the new tile
+static bool Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z) {
+    if (Level_getTile(lvl, x, y, z) == 0) {
+        if (level_setTile(lvl, x, y, z, self->tileId)) Level_addToTickNextTick(lvl, x, y, z, self->tileId);
+    }
+    return false;
+}
 
+// falls through air, lava only one block, then spreads to the 4 sides
+static void Liquid_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
+    bool hasChanged = false;
     while (Level_getTile(lvl, x, --y, z) == 0) {
-        int change = level_setTile(lvl, x, y, z, self->tileId);
-        if (change) hasChanged = 1;
+        bool change = level_setTile(lvl, x, y, z, self->tileId);
+        if (change) hasChanged = true;
         if (!change || self->liquidType == LIQUID_LAVA) break;
     }
     y++;
-
     if (self->liquidType == LIQUID_WATER || !hasChanged) {
-        // no short circuit, all 4 neighbors get checked
-        int c1 = Liquid_checkWater(self, lvl, x - 1, y, z, depth);
-        int c2 = Liquid_checkWater(self, lvl, x + 1, y, z, depth);
-        int c3 = Liquid_checkWater(self, lvl, x, y, z - 1, depth);
-        int c4 = Liquid_checkWater(self, lvl, x, y, z + 1, depth);
-        hasChanged = hasChanged || c1 || c2 || c3 || c4;
+        hasChanged |= Liquid_checkWater(self, lvl, x - 1, y, z);
+        hasChanged |= Liquid_checkWater(self, lvl, x + 1, y, z);
+        hasChanged |= Liquid_checkWater(self, lvl, x, y, z - 1);
+        hasChanged |= Liquid_checkWater(self, lvl, x, y, z + 1);
     }
-
     if (!hasChanged) {
         Level_setTileNoUpdate(lvl, x, y, z, self->calmTileId);
+    } else {
+        Level_addToTickNextTick(lvl, x, y, z, self->tileId);
     }
-    return hasChanged;
 }
 
-static int Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z, int depth) {
-    if (Level_getTile(lvl, x, y, z) != 0) return 0;
-
-    int changed = level_setTile(lvl, x, y, z, self->tileId);
-    if (changed && depth < self->spreadSpeed) {
-        return Liquid_updateWater(self, lvl, x, y, z, depth + 1);
-    }
-    return 0;
-}
-
-static void Liquid_tick(const Tile* self, Level* lvl, int x, int y, int z) {
-    Liquid_updateWater(self, lvl, x, y, z, 0);
-}
-
+// schedules a tick tagged with the neighbor's id, it only runs if that id ends up here
 static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
     if (self->liquidType == LIQUID_WATER && (type == TILE_LAVA.id || type == TILE_CALM_LAVA.id)) {
         Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
@@ -290,13 +348,14 @@ static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, i
     if (self->liquidType == LIQUID_LAVA && (type == TILE_WATER.id || type == TILE_CALM_WATER.id)) {
         Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
     }
+    Level_addToTickNextTick(lvl, x, y, z, type);
 }
 
-// water only shows in the liquid layer, lava in every layer through the -1
+// water only shows in the liquid layer, lava in both
 // no face against the same liquid
 static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
     if (x < 0 || y < 0 || z < 0 || x >= lvl->width || z >= lvl->height) return 0;
-    if (layer != 2 && self->liquidType == LIQUID_WATER) return 0;
+    if (layer != 1 && self->liquidType == LIQUID_WATER) return 0;
 
     int id = Level_getTile(lvl, x, y, z);
     if (id == self->tileId || id == self->calmTileId) return 0;
@@ -310,28 +369,49 @@ static void Liquid_renderFace(const Tile* self, Tessellator* t, int x, int y, in
 }
 
 static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
-    int hasAirNeighbor = 0;
-    if (Level_getTile(lvl, x - 1, y, z) == 0) hasAirNeighbor = 1;
-    if (Level_getTile(lvl, x + 1, y, z) == 0) hasAirNeighbor = 1;
-    if (Level_getTile(lvl, x, y, z - 1) == 0) hasAirNeighbor = 1;
-    if (Level_getTile(lvl, x, y, z + 1) == 0) hasAirNeighbor = 1;
-    if (Level_getTile(lvl, x, y - 1, z) == 0) hasAirNeighbor = 1;
+    bool hasAirNeighbor = false;
+    if (Level_getTile(lvl, x - 1, y, z) == 0) hasAirNeighbor = true;
+    if (Level_getTile(lvl, x + 1, y, z) == 0) hasAirNeighbor = true;
+    if (Level_getTile(lvl, x, y, z - 1) == 0) hasAirNeighbor = true;
+    if (Level_getTile(lvl, x, y, z + 1) == 0) hasAirNeighbor = true;
+    if (Level_getTile(lvl, x, y - 1, z) == 0) hasAirNeighbor = true;
 
-    if (hasAirNeighbor) {
-        Level_setTileNoUpdate(lvl, x, y, z, self->tileId); // start flowing again
-    }
     if (self->liquidType == LIQUID_WATER && type == TILE_LAVA.id) {
         Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        return;
     }
     if (self->liquidType == LIQUID_LAVA && type == TILE_WATER.id) {
         Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        return;
     }
+    if (hasAirNeighbor) {
+        Level_setTileNoUpdate(lvl, x, y, z, self->tileId);
+        Level_addToTickNextTick(lvl, x, y, z, self->tileId);
+    }
+}
+
+static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
+    registerTile(t, id, liquidType == LIQUID_LAVA ? 30 : 14, NULL);
+    t->liquidType = liquidType;
+    t->tileId = calm ? id - 1 : id;
+    t->calmTileId = calm ? id : id + 1;
+    t->yy0 = -0.1f;
+    t->yy1 = 0.9f;
+    t->shouldTick = !calm;
+    t->isSolid = Liquid_isSolid;
+    t->getAABB = Liquid_getAABB;
+    t->mayPick = Liquid_mayPick;
+    t->shouldRenderFace = Liquid_shouldRenderFace;
+    t->renderFace = Liquid_renderFace;
+    t->onPlace = Liquid_onPlace;
+    t->onTick = calm ? NULL : Liquid_onTick;
+    t->neighborChanged = calm ? CalmLiquid_neighborChanged : Liquid_neighborChanged;
 }
 
 static bool Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
                         int layer, int x, int y, int z)
 {
-    // drawn in exactly one of the two layers, lit or shadow
+    // layer 0 when lit, layer 1 (the liquid pass) when not
     const int lit = (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
                     ? 1
                     : (y >= lvl->lightDepths[x + z * lvl->width]);
@@ -366,85 +446,45 @@ static bool Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
     return true;
 }
 
-static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
-    (void)self;
-    int below = Level_getTile(lvl, x, y-1, z);
-    if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
-        level_setTile(lvl, x, y, z, 0);
-    }
-}
 
 void Tile_registerAll(void) {
     memset((void*)gTiles, 0, sizeof(gTiles));
-    registerTile(&TILE_ROCK,       1,  1,  NULL);
-    registerTile(&TILE_GRASS,      2,  3,  Grass_getTexture);
-    registerTile(&TILE_DIRT,       3,  2,  NULL);
-    registerTile(&TILE_STONEBRICK, 4, 16,  NULL);
-    registerTile(&TILE_WOOD,       5,  4,  NULL);
-    registerTile(&TILE_BUSH,       6, 15,  NULL);
+    registerTile(&TILE_ROCK,        1,  1, NULL);
+    registerTile(&TILE_GRASS,       2,  3, Grass_getTexture);
+    registerTile(&TILE_DIRT,        3,  2, NULL);
+    registerTile(&TILE_STONEBRICK,  4, 16, NULL);
+    registerTile(&TILE_WOOD,        5,  4, NULL);
+    registerTile(&TILE_BUSH,        6, 15, NULL);
+    registerTile(&TILE_UNBREAKABLE, 7, 17, NULL);
+    setupLiquid(&TILE_WATER,      8, LIQUID_WATER, false);
+    setupLiquid(&TILE_CALM_WATER, 9, LIQUID_WATER, true);
+    setupLiquid(&TILE_LAVA,      10, LIQUID_LAVA, false);
+    setupLiquid(&TILE_CALM_LAVA, 11, LIQUID_LAVA, true);
+    registerTile(&TILE_SAND,       12, 18, NULL);
+    registerTile(&TILE_GRAVEL,     13, 19, NULL);
+    registerTile(&TILE_GOLD_ORE,   14, 32, NULL);
+    registerTile(&TILE_IRON_ORE,   15, 33, NULL);
+    registerTile(&TILE_COAL_ORE,   16, 34, NULL);
+    registerTile(&TILE_LOG,        17, 20, Log_getTexture);
+    registerTile(&TILE_LEAVES,     18, 22, NULL);
 
+    TILE_GRASS.shouldTick = true;
     TILE_GRASS.onTick     = Grass_onTick;
 
+    TILE_BUSH.shouldTick  = true;
     TILE_BUSH.isSolid     = Bush_isSolid;
     TILE_BUSH.blocksLight = Bush_blocksLight;
     TILE_BUSH.getAABB     = Bush_getAABB;
     TILE_BUSH.render      = Bush_render;
     TILE_BUSH.onTick      = Bush_onTick;
 
-    registerTile(&TILE_UNBREAKABLE, 7, 17, NULL);
+    TILE_SAND.onPlace           = Falling_onPlace;
+    TILE_SAND.neighborChanged   = Falling_neighborChanged;
+    TILE_GRAVEL.onPlace         = Falling_onPlace;
+    TILE_GRAVEL.neighborChanged = Falling_neighborChanged;
 
-    registerTile(&TILE_WATER,      8, 14, NULL);
-    registerTile(&TILE_CALM_WATER, 9, 14, NULL);
-    registerTile(&TILE_LAVA,      10, 30, NULL);
-    registerTile(&TILE_CALM_LAVA, 11, 30, NULL);
-
-    TILE_WATER.liquidType      = LIQUID_WATER;
-    TILE_CALM_WATER.liquidType = LIQUID_WATER;
-    TILE_LAVA.liquidType       = LIQUID_LAVA;
-    TILE_CALM_LAVA.liquidType  = LIQUID_LAVA;
-
-    TILE_WATER.isSolid      = Liquid_isSolid;
-    TILE_CALM_WATER.isSolid = Liquid_isSolid;
-    TILE_LAVA.isSolid       = Liquid_isSolid;
-    TILE_CALM_LAVA.isSolid  = Liquid_isSolid;
-
-    TILE_WATER.getAABB      = Liquid_getAABB;
-    TILE_CALM_WATER.getAABB = Liquid_getAABB;
-    TILE_LAVA.getAABB       = Liquid_getAABB;
-    TILE_CALM_LAVA.getAABB  = Liquid_getAABB;
-
-    TILE_WATER.mayPick      = Liquid_mayPick;
-    TILE_CALM_WATER.mayPick = Liquid_mayPick;
-    TILE_LAVA.mayPick       = Liquid_mayPick;
-    TILE_CALM_LAVA.mayPick  = Liquid_mayPick;
-
-    // a full block with a bit off the top so the surface sits lower
-    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.1f;
-    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.9f;
-
-    TILE_WATER.shouldRenderFace      = Liquid_shouldRenderFace;
-    TILE_CALM_WATER.shouldRenderFace = Liquid_shouldRenderFace;
-    TILE_LAVA.shouldRenderFace       = Liquid_shouldRenderFace;
-    TILE_CALM_LAVA.shouldRenderFace  = Liquid_shouldRenderFace;
-
-    TILE_WATER.renderFace      = Liquid_renderFace;
-    TILE_CALM_WATER.renderFace = Liquid_renderFace;
-    TILE_LAVA.renderFace       = Liquid_renderFace;
-    TILE_CALM_LAVA.renderFace  = Liquid_renderFace;
-
-    TILE_WATER.tileId = TILE_WATER.id; TILE_WATER.calmTileId = TILE_CALM_WATER.id; TILE_WATER.spreadSpeed = 8;
-    TILE_LAVA.tileId  = TILE_LAVA.id;  TILE_LAVA.calmTileId  = TILE_CALM_LAVA.id;  TILE_LAVA.spreadSpeed  = 2;
-    TILE_CALM_WATER.tileId = TILE_WATER.id; TILE_CALM_WATER.calmTileId = TILE_CALM_WATER.id; TILE_CALM_WATER.spreadSpeed = 8;
-    TILE_CALM_LAVA.tileId  = TILE_LAVA.id;  TILE_CALM_LAVA.calmTileId  = TILE_CALM_LAVA.id;  TILE_CALM_LAVA.spreadSpeed  = 2;
-
-    TILE_WATER.onTick = Liquid_tick;
-    TILE_LAVA.onTick  = Liquid_tick;
-    // calm variants don't tick
-
-    TILE_WATER.neighborChanged      = Liquid_neighborChanged;
-    TILE_LAVA.neighborChanged       = Liquid_neighborChanged;
-    TILE_CALM_WATER.neighborChanged = CalmLiquid_neighborChanged;
-    TILE_CALM_LAVA.neighborChanged  = CalmLiquid_neighborChanged;
+    TILE_LEAVES.isSolid     = Leaves_isSolid;
+    TILE_LEAVES.blocksLight = Leaves_blocksLight;
 }
 
 // highlight face, only drawn when the player is on its side

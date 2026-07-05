@@ -3,6 +3,8 @@
 #include "level.h"
 #include "level_renderer.h"
 #include "tile/tile.h"
+#include "../character/zombie.h"
+#include <string.h>
 
 #include <zlib.h>
 #include <stdlib.h>
@@ -17,7 +19,15 @@ void Level_init(Level* level) {
     memset(level, 0, sizeof(*level));
     JRandom_initRandom(&level->random);
     level->randValue = JRandom_nextInt(&level->random);
-    level->unprocessed = 0;
+    level->listCapacity = 10;
+}
+
+// ArrayList.ensureCapacity, grows by half plus one
+static void growList(Level* level) {
+    int need = level->entityCount + 1;
+    if (need <= level->listCapacity) return;
+    int cap = level->listCapacity * 3 / 2 + 1;
+    level->listCapacity = cap < need ? need : cap;
 }
 
 void Level_setData(Level* level, int w, int d, int h, byte* blocks) {
@@ -34,6 +44,37 @@ void Level_setData(Level* level, int w, int d, int h, byte* blocks) {
     }
     calcLightDepths(level, 0, 0, w, h);
     if (level->renderer) LevelRenderer_allChanged(level->renderer);
+    level->tickListSize = 0;
+    Level_findSpawn(level);
+}
+
+// a fresh Random each time, not the level's
+void Level_findSpawn(Level* level) {
+    JRandom random;
+    JRandom_initRandom(&random);
+    int tries = 0;
+    int x, y, z;
+    do {
+        x = JRandom_nextIntN(&random, level->width / 2) + level->width / 4;
+        z = JRandom_nextIntN(&random, level->height / 2) + level->height / 4;
+        y = Level_getHighestTile(level, x, z) + 1;
+        if (++tries == 10000) {
+            level->xSpawn = x;
+            level->ySpawn = -100;
+            level->zSpawn = z;
+            return;
+        }
+    } while ((float)y <= Level_getWaterLevel(level));
+    level->xSpawn = x;
+    level->ySpawn = y;
+    level->zSpawn = z;
+}
+
+void Level_setSpawnPos(Level* level, int x, int y, int z, float rot) {
+    level->xSpawn = x;
+    level->ySpawn = y;
+    level->zSpawn = z;
+    level->rotSpawn = rot;
 }
 
 // x1 and z1 are counts, not end coordinates
@@ -68,12 +109,15 @@ bool Level_isSolidTile(const Level* level, int x, int y, int z) {
 }
 
 static bool containsLiquidType(const Level* level, const AABB* box, int liquidId, bool any) {
-    int x0 = (int)floor(box->minX);
-    int x1 = (int)floor(box->maxX + 1.0f);
-    int y0 = (int)floor(box->minY);
-    int y1 = (int)floor(box->maxY + 1.0f);
-    int z0 = (int)floor(box->minZ);
-    int z1 = (int)floor(box->maxZ + 1.0f);
+    int x0 = (int)box->minX;
+    int x1 = (int)box->maxX + 1;
+    int y0 = (int)box->minY;
+    int y1 = (int)box->maxY + 1;
+    int z0 = (int)box->minZ;
+    int z1 = (int)box->maxZ + 1;
+    if (box->minX < 0.0f) x0--;
+    if (box->minY < 0.0f) y0--;
+    if (box->minZ < 0.0f) z0--;
 
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
@@ -102,20 +146,29 @@ bool Level_containsLiquid(const Level* level, const AABB* box, int liquidId) {
 void Level_destroy(Level* level) {
     free(level->blocks);
     free(level->lightDepths);
+    free(level->tickList);
+    free(level->entities);
     level->blocks = NULL;
     level->lightDepths = NULL;
+    level->tickList = NULL;
+    level->entities = NULL;
+    level->tickListSize = level->tickListCapacity = 0;
+    level->entityCount = level->entityCapacity = 0;
 }
 
 ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
     ArrayList_AABB out = { .size = 0, .capacity = 16 };
     out.aabbs = (AABB*)malloc((size_t)out.capacity * sizeof(AABB));
 
-    int x0 = (int)floor(aabb->minX);
-    int x1 = (int)floor(aabb->maxX + 1.0f);
-    int y0 = (int)floor(aabb->minY);
-    int y1 = (int)floor(aabb->maxY + 1.0f);
-    int z0 = (int)floor(aabb->minZ);
-    int z1 = (int)floor(aabb->maxZ + 1.0f);
+    int x0 = (int)aabb->minX;
+    int x1 = (int)aabb->maxX + 1;
+    int y0 = (int)aabb->minY;
+    int y1 = (int)aabb->maxY + 1;
+    int z0 = (int)aabb->minZ;
+    int z1 = (int)aabb->maxZ + 1;
+    if (aabb->minX < 0.0f) x0--;
+    if (aabb->minY < 0.0f) y0--;
+    if (aabb->minZ < 0.0f) z0--;
 
     for (int x = x0; x < x1; ++x)
     for (int y = y0; y < y1; ++y)
@@ -297,23 +350,45 @@ static void neighborChanged(Level* level, int x, int y, int z, int type) {
     if (t) t->neighborChanged(t, level, x, y, z, type);
 }
 
-bool level_setTile(Level* level, int x, int y, int z, int type) {
-    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
-
-    int index = (y * level->height + z) * level->width + x;
-    if (type == level->blocks[index]) return false;
-    level->blocks[index] = (byte)type;
-
+static void updateNeighborsAt(Level* level, int x, int y, int z, int type) {
     neighborChanged(level, x - 1, y, z, type);
     neighborChanged(level, x + 1, y, z, type);
     neighborChanged(level, x, y - 1, z, type);
     neighborChanged(level, x, y + 1, z, type);
     neighborChanged(level, x, y, z - 1, type);
     neighborChanged(level, x, y, z + 1, type);
+}
 
+// air at the map edge between the ground and the water level turns into water
+bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type) {
+    if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
+    int index = (y * level->height + z) * level->width + x;
+    if (type == level->blocks[index]) return false;
+    if (type == 0 && (x == 0 || z == 0 || x == level->width - 1 || z == level->height - 1) &&
+        (float)y >= Level_getGroundLevel(level) && (float)y < Level_getWaterLevel(level)) {
+        type = TILE_WATER.id;
+    }
+    level->blocks[index] = (byte)type;
     calcLightDepths(level, x, z, 1, 1);
     if (level->renderer) levelRenderer_tileChanged(level->renderer, x, y, z);
     return true;
+}
+
+void Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1) {
+    int a = Level_getTile(level, x0, y0, z0);
+    int b = Level_getTile(level, x1, y1, z1);
+    Level_setTileNoNeighborChange(level, x0, y0, z0, b);
+    Level_setTileNoNeighborChange(level, x1, y1, z1, a);
+    updateNeighborsAt(level, x0, y0, z0, b);
+    updateNeighborsAt(level, x1, y1, z1, a);
+}
+
+bool level_setTile(Level* level, int x, int y, int z, int type) {
+    if (Level_setTileNoNeighborChange(level, x, y, z, type)) {
+        updateNeighborsAt(level, x, y, z, type);
+        return true;
+    }
+    return false;
 }
 
 bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
@@ -335,20 +410,112 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
     return y >= level->lightDepths[x + z * level->width];
 }
 
+float Level_getBrightness(const Level* level, int x, int y, int z) {
+    return Level_isLit(level, x, y, z) ? 1.0f : 0.5f;
+}
+
+float Level_getGroundLevel(const Level* level) {
+    return (float)(level->depth / 2 - 2);
+}
+
+float Level_getWaterLevel(const Level* level) {
+    return (float)(level->depth / 2);
+}
+
+int Level_getHighestTile(const Level* level, int x, int z) {
+    int y = level->depth;
+    while ((Level_getTile(level, x, y - 1, z) == 0 || gTiles[Level_getTile(level, x, y - 1, z)]->liquidType != 0) && y > 0) y--;
+    return y;
+}
+
+static bool solidAt(const Level* level, float x, float y, float z) {
+    int id = Level_getTile(level, (int)x, (int)y, (int)z);
+    return id > 0 && gTiles[id]->isSolid(gTiles[id]);
+}
+
+bool Level_isSolid(const Level* level, float x, float y, float z, float r) {
+    if (solidAt(level, x - r, y - r, z - r)) return true;
+    if (solidAt(level, x - r, y - r, z + r)) return true;
+    if (solidAt(level, x - r, y + r, z - r)) return true;
+    if (solidAt(level, x - r, y + r, z + r)) return true;
+    if (solidAt(level, x + r, y - r, z - r)) return true;
+    if (solidAt(level, x + r, y - r, z + r)) return true;
+    if (solidAt(level, x + r, y + r, z - r)) return true;
+    return solidAt(level, x + r, y + r, z + r);
+}
+
+bool Level_isFree(const Level* level, const AABB* box) {
+    for (int i = 0; i < level->entityCount; ++i) {
+        if (AABB_intersects(&level->entities[i].base.boundingBox, box)) return false;
+    }
+    return true;
+}
+
+void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
+    if (level->tickListSize == level->tickListCapacity) {
+        level->tickListCapacity = level->tickListCapacity ? level->tickListCapacity * 2 : 256;
+        level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
+    }
+    TickEntry e = { x, y, z, id };
+    level->tickList[level->tickListSize++] = e;
+}
+
+void Level_addEntity(Level* level, const Zombie* z) {
+    growList(level);
+    if (level->entityCount == level->entityCapacity) {
+        level->entityCapacity = level->entityCapacity ? level->entityCapacity * 2 : 16;
+        level->entities = (Zombie*)realloc(level->entities, (size_t)level->entityCapacity * sizeof(Zombie));
+    }
+    level->entities[level->entityCount++] = *z;
+}
+
 void Level_onTick(Level* level) {
+    level->tickCount++;
+
+    for (int i = 0; i < level->entityCount; ++i) {
+        Zombie_onTick(&level->entities[i]);
+        if (level->entities[i].base.removed) {
+            memmove(&level->entities[i], &level->entities[i + 1], (size_t)(level->entityCount - i - 1) * sizeof(Zombie));
+            level->entityCount--;
+            i--;
+        }
+    }
+
+    int wBits = 1, hBits = 1;
+    while (1 << wBits < level->width) wBits++;
+    while (1 << hBits < level->height) hBits++;
+    int hMask = level->height - 1;
+    int wMask = level->width - 1;
+    int dMask = level->depth - 1;
+
+    // takes the first n entries off the front, new ones wait for the next round
+    if (level->tickCount % 5 == 0) {
+        int n = level->tickListSize;
+        TickEntry* batch = (TickEntry*)malloc((size_t)(n > 0 ? n : 1) * sizeof(TickEntry));
+        memcpy(batch, level->tickList, (size_t)n * sizeof(TickEntry));
+        level->tickListSize = 0;
+        for (int i = 0; i < n; ++i) {
+            TickEntry e = batch[i];
+            if (e.x < 0 || e.y < 0 || e.z < 0 || e.x >= level->width || e.y >= level->depth || e.z >= level->height) continue;
+            int id = level->blocks[(e.y * level->height + e.z) * level->width + e.x];
+            if (id != e.id || id <= 0) continue;
+            if (gTiles[id]->onTick) gTiles[id]->onTick(gTiles[id], level, e.x, e.y, e.z);
+        }
+        free(batch);
+    }
+
     level->unprocessed += level->width * level->height * level->depth;
     int ticks = level->unprocessed / 200;
     level->unprocessed -= ticks * 200;
 
     // the tick lcg, overflowing like a 32 bit int
     for (int i = 0; i < ticks; ++i) {
-        level->randValue = (int)((unsigned)level->randValue * 1664525u + 1013904223u);
-        int x = level->randValue >> 16 & (level->width - 1);
-        level->randValue = (int)((unsigned)level->randValue * 1664525u + 1013904223u);
-        int y = level->randValue >> 16 & (level->depth - 1);
-        level->randValue = (int)((unsigned)level->randValue * 1664525u + 1013904223u);
-        int z = level->randValue >> 16 & (level->height - 1);
+        level->randValue = (int)((unsigned)level->randValue * 3u + 1013904223u);
+        int r = level->randValue >> 2;
+        int z = r >> wBits & hMask;
+        int x = r & wMask;
+        int y = r >> (wBits + hBits) & dMask;
         int id = level->blocks[(y * level->height + z) * level->width + x];
-        if (gTiles[id] && gTiles[id]->onTick) gTiles[id]->onTick(gTiles[id], level, x, y, z);
+        if (gTiles[id] && gTiles[id]->shouldTick && gTiles[id]->onTick) gTiles[id]->onTick(gTiles[id], level, x, y, z);
     }
 }

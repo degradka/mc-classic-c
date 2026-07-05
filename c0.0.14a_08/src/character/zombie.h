@@ -7,7 +7,7 @@
 #include "cube.h"
 #include "zombie_model.h"
 
-typedef struct {
+typedef struct Zombie {
     Entity base;
     ZombieModel model;
     float rotation;

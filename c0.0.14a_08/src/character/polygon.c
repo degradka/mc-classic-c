@@ -12,8 +12,6 @@ void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
 }
 
 void Polygon_render(const Polygon* p) {
-    glColor3f(1.f, 1.f, 1.f);
-
     const float uDiv = 63.999f;
     const float vDiv = 31.999f;
 

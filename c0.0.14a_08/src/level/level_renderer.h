@@ -1,4 +1,4 @@
-// level/level_renderer.h: chunk grid, culling, dirty chunks, picking and the hit highlight
+// level/level_renderer.h: chunk grid, dirty chunks, surroundings, clouds and the hit highlight
 
 #ifndef LEVELRENDERER_H
 #define LEVELRENDERER_H
@@ -10,40 +10,47 @@ struct Level;   typedef struct Level Level;
 struct Chunk;   typedef struct Chunk Chunk;
 struct Player;  typedef struct Player Player;
 
-#define CHUNK_SIZE 16
-
 typedef struct LevelRenderer {
-    Chunk*      chunks;
-    Chunk**     sortedChunks;
-    int         chunkAmountX, chunkAmountY, chunkAmountZ;
-
     Level*      level;
+    // fixed grid order
+    Chunk*      grid;
+    // the same chunks, sorted by distance when the player moves far enough
+    Chunk**     chunks;
+    int         xChunks, yChunks, zChunks;
+    unsigned int* callLists;
+
     int         terrainTex;
     int         rockTex;
     int         waterTex;
+    int         cloudsTex;
 
     int         drawDistance;
+    // counts ticks, moves the clouds
+    int         cloudTickCounter;
     float       lX, lY, lZ;
 
     unsigned int surroundLists;
 } LevelRenderer;
 
-void LevelRenderer_init(LevelRenderer* renderer, Level* level, int terrainTex);
+void LevelRenderer_init(LevelRenderer* renderer, int terrainTex);
+void LevelRenderer_setLevel(LevelRenderer* renderer, Level* level);
 void LevelRenderer_allChanged(LevelRenderer* renderer);
 void LevelRenderer_render(LevelRenderer* renderer, const Player* player, int layer);
+void LevelRenderer_renderEntities(LevelRenderer* renderer, const Frustum* frustum, float a);
+void LevelRenderer_renderClouds(LevelRenderer* renderer, float a);
+// the camera is in a solid tile, draw it dark from both sides
+void LevelRenderer_renderInside(LevelRenderer* renderer, int x, int y, int z);
 void LevelRenderer_destroy(LevelRenderer* renderer);
 
 void LevelRenderer_cull(LevelRenderer* renderer, const Frustum* frustum);
-void LevelRenderer_toggleDrawDistance(LevelRenderer* renderer);
+void LevelRenderer_updateDirtyChunks(LevelRenderer* renderer, const Player* player);
 void LevelRenderer_renderSurroundingGround(const LevelRenderer* renderer);
 void LevelRenderer_renderSurroundingWater(const LevelRenderer* renderer);
 
-void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
+void LevelRenderer_setDirty(LevelRenderer* renderer, int x0, int y0, int z0, int x1, int y1, int z1);
 void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
 
-void LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
-void LevelRenderer_pick(LevelRenderer* r, const Player* player, const Frustum* frustum);
 void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, const HitResult* h, int mode, int tileType);
 void LevelRenderer_renderHitOutline(const HitResult* h, int mode);
 

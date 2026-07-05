@@ -21,7 +21,9 @@ struct Tile {
     int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
 
     // liquids only, the flowing and calm ids
-    int tileId, calmTileId, spreadSpeed;
+    int tileId, calmTileId;
+    // picked by the level's random ticks
+    bool shouldTick;
 
     // the shape, a full cube by default
     float xx0, yy0, zz0, xx1, yy1, zz1;
@@ -29,6 +31,7 @@ struct Tile {
     int  (*getTexture)(const Tile* self, int face);
     // true when a face was drawn
     bool (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);
+    // random ticks and the level's scheduled ticks, may be NULL
     void (*onTick)(const Tile* self, Level* lvl, int x, int y, int z);
 
     int  (*isSolid)(const Tile* self);
@@ -39,6 +42,8 @@ struct Tile {
     int  (*mayPick)(const Tile* self);
 
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
+    // after the player places it
+    void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
 
     int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
@@ -59,11 +64,20 @@ extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
 extern Tile TILE_LAVA;       // id=10
 extern Tile TILE_CALM_LAVA;  // id=11
+extern Tile TILE_SAND;       // id=12
+extern Tile TILE_GRAVEL;     // id=13
+extern Tile TILE_GOLD_ORE;   // id=14
+extern Tile TILE_IRON_ORE;   // id=15
+extern Tile TILE_COAL_ORE;   // id=16
+extern Tile TILE_LOG;        // id=17
+extern Tile TILE_LEAVES;     // id=18
 
 void Tile_registerAll(void);
 
 // Helper to render a plain, untextured face (for highlights)
 void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);
+// the tile in front of the face isn't solid
+bool Tile_isFaceVisible(const Level* lvl, int x, int y, int z, int face);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 
