@@ -374,12 +374,12 @@ static void drawGui(float partialTicks) {
 
     // held block preview in the top right corner, 16x16 logical size
     glPushMatrix();
-    glTranslated((double)screenWidth - 16.0, 16.0, 0.0);
+    glTranslated((double)screenWidth - 16.0, 16.0, -50.0);
     glScalef(16.0f, 16.0f, 16.0f);
-    glRotatef(30.0f, 1, 0, 0);
+    glRotatef(-30.0f, 1, 0, 0);
     glRotatef(45.0f, 0, 1, 0);
-    glTranslatef(-1.5f, 0.5f, -0.5f);
-    glScalef(-1.0f, -1.0f, 1.0f);
+    glTranslatef(-1.5f, 0.5f, 0.5f);
+    glScalef(-1.0f, -1.0f, -1.0f);
 
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     glEnable(GL_TEXTURE_2D);
@@ -570,7 +570,7 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevY = kY;
 
-    // F = cycle draw distance, Java key 33 is F, not I as I first assumed
+    // F = cycle draw distance
     int kF = glfwGetKey(w, GLFW_KEY_F);
     if (kF == GLFW_PRESS && prevF == GLFW_RELEASE) {
         LevelRenderer_toggleDrawDistance(&levelRenderer);
