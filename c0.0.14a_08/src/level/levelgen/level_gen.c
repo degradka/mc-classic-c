@@ -1,0 +1,295 @@
+// level/levelgen/level_gen.c
+
+#include "level_gen.h"
+#include "../tile/tile.h"
+#include "synth/synth.h"
+#include "synth/perlin_noise.h"
+#include "synth/distort.h"
+#include <math.h>
+#include <time.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+extern void Minecraft_beginLevelLoading(const char* title);
+extern void Minecraft_levelLoadUpdate(const char* status);
+extern void Minecraft_levelLoadProgress(int percent);
+
+// the generator keeps one Random for the whole game
+static JRandom genRandom;
+static bool genRandomReady = false;
+
+// the level being built
+typedef struct {
+    int width, height, depth;
+    byte* blocks;
+} Gen;
+
+static int* raise(Gen* g) {
+    PerlinNoise p1, p2, p3, p4, p5;
+    Distort d1, d2;
+    PerlinNoise_init(&p1, &genRandom, 8);
+    PerlinNoise_init(&p2, &genRandom, 8);
+    Distort_init(&d1, &p1.synth, &p2.synth);
+    PerlinNoise_init(&p3, &genRandom, 8);
+    PerlinNoise_init(&p4, &genRandom, 8);
+    Distort_init(&d2, &p3.synth, &p4.synth);
+    PerlinNoise_init(&p5, &genRandom, 8);
+
+    int* heightmap = (int*)malloc((size_t)g->width * g->height * sizeof(int));
+    for (int x = 0; x < g->width; ++x) {
+        Minecraft_levelLoadProgress(x * 100 / (g->width - 1));
+        for (int z = 0; z < g->height; ++z) {
+            double h1 = d1.synth.getValue(&d1.synth, x, z) / 8.0 - 8.0;
+            double h2 = d2.synth.getValue(&d2.synth, x, z) / 8.0 + 8.0;
+            double c = p5.synth.getValue(&p5.synth, x, z) / 8.0;
+            if (c > 2.0) h2 = h1;
+            double h = h1 > h2 ? h1 : h2;
+            h = (h * h * h / 100.0 + h * 3.0) / 8.0;
+            heightmap[x + z * g->width] = (int)h;
+        }
+    }
+    PerlinNoise_destroy(&p1); PerlinNoise_destroy(&p2); PerlinNoise_destroy(&p3);
+    PerlinNoise_destroy(&p4); PerlinNoise_destroy(&p5);
+    return heightmap;
+}
+
+static void erode(Gen* g, int* heightmap) {
+    PerlinNoise p1, p2, p3, p4;
+    Distort d1, d2;
+    PerlinNoise_init(&p1, &genRandom, 8);
+    PerlinNoise_init(&p2, &genRandom, 8);
+    Distort_init(&d1, &p1.synth, &p2.synth);
+    PerlinNoise_init(&p3, &genRandom, 8);
+    PerlinNoise_init(&p4, &genRandom, 8);
+    Distort_init(&d2, &p3.synth, &p4.synth);
+
+    for (int x = 0; x < g->width; ++x) {
+        Minecraft_levelLoadProgress(x * 100 / (g->width - 1));
+        for (int z = 0; z < g->height; ++z) {
+            double e = d1.synth.getValue(&d1.synth, x << 1, z << 1) / 8.0;
+            int o = d2.synth.getValue(&d2.synth, x << 1, z << 1) > 0.0 ? 1 : 0;
+            if (e > 2.0) {
+                int h = heightmap[x + z * g->width];
+                heightmap[x + z * g->width] = ((h - o) / 2 << 1) + o;
+            }
+        }
+    }
+    PerlinNoise_destroy(&p1); PerlinNoise_destroy(&p2); PerlinNoise_destroy(&p3); PerlinNoise_destroy(&p4);
+}
+
+static void soil(Gen* g, const int* heightmap) {
+    int w = g->width, h = g->height, d = g->depth;
+    for (int x = 0; x < w; ++x) {
+        Minecraft_levelLoadProgress(x * 100 / (g->width - 1));
+        for (int y = 0; y < d; ++y) {
+            for (int z = 0; z < h; ++z) {
+                int i = (y * g->height + z) * g->width + x;
+                int dh = heightmap[x + z * w] + d / 2;
+                int rh = dh - 2;
+                int id = 0;
+                if (y == dh && y >= d / 2 - 1) id = TILE_GRASS.id;
+                else if (y <= dh) id = TILE_DIRT.id;
+                if (y <= rh) id = TILE_ROCK.id;
+                g->blocks[i] = (byte)id;
+            }
+        }
+    }
+}
+
+static void carveTunnels(Gen* g) {
+    int w = g->width, h = g->height, d = g->depth;
+    int count = w * h * d / 256 / 64;
+
+    for (int i = 0; i < count; ++i) {
+        Minecraft_levelLoadProgress(i * 100 / (count - 1));
+        float x = JRandom_nextFloat(&genRandom) * (float)w;
+        float y = JRandom_nextFloat(&genRandom) * (float)d;
+        float z = JRandom_nextFloat(&genRandom) * (float)h;
+        int length = (int)(JRandom_nextFloat(&genRandom) + JRandom_nextFloat(&genRandom) * 150.0f);
+        float dir1 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
+        float dira1 = 0.0f;
+        float dir2 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
+        float dira2 = 0.0f;
+
+        for (int l = 0; l < length; ++l) {
+            x = (float)(x + sin(dir1) * cos(dir2));
+            z = (float)(z + cos(dir1) * cos(dir2));
+            y = (float)(y + sin(dir2));
+            dir1 += dira1 * 0.2f;
+            dira1 *= 0.9f;
+            dira1 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
+            dir2 += dira2 * 0.5f;
+            dir2 *= 0.5f;
+            dira2 *= 0.9f;
+            dira2 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
+            float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
+
+            for (int xx = (int)(x - size); xx <= (int)(x + size); ++xx)
+            for (int yy = (int)(y - size); yy <= (int)(y + size); ++yy)
+            for (int zz = (int)(z - size); zz <= (int)(z + size); ++zz) {
+                float xd = (float)xx - x;
+                float yd = (float)yy - y;
+                float zd = (float)zz - z;
+                float dd = xd * xd + yd * yd * 2.0f + zd * zd;
+                if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
+                    xx < g->width - 1 && yy < g->depth - 1 && zz < g->height - 1) {
+                    int ii = (yy * g->height + zz) * g->width + xx;
+                    if (g->blocks[ii] == TILE_ROCK.id) g->blocks[ii] = 0;
+                }
+            }
+        }
+    }
+}
+
+// growable stack flood fill, it keeps the fill order of chained coordinate stacks
+static int growStack(int** stack, int* capacity) {
+    int newCap = *capacity * 2;
+    int* p = (int*)realloc(*stack, (size_t)newCap * sizeof(int));
+    if (!p) return 0;
+    *stack = p;
+    *capacity = newCap;
+    return 1;
+}
+
+static long long floodFillLiquid(Gen* level, int x, int y, int z, int source, int target) {
+    const int w = level->width, h = level->height;
+    const int upStep = w * h;
+
+    int capacity = 65536;
+    int* stack = (int*)malloc((size_t)capacity * sizeof(int));
+    if (!stack) return 0;
+    int sp = 0;
+    stack[sp++] = (y * h + z) * w + x;
+
+    long long tiles = 0;
+
+    while (sp > 0) {
+        int cl = stack[--sp];
+
+        int z0 = (cl / w) % h;
+        int y0 = cl / upStep;
+        int x0 = cl % w;
+
+        while (x0 > 0 && level->blocks[cl - 1] == source) { x0--; cl--; }
+        int x1 = x0;
+        while (x1 < w && level->blocks[cl + (x1 - x0)] == source) x1++;
+
+        int lastNorth = 0, lastSouth = 0, lastBelow = 0;
+        tiles += (x1 - x0);
+
+        for (int xx = x0; xx < x1; ++xx) {
+            level->blocks[cl] = (byte)target;
+
+            if (z0 > 0) {
+                int north = (level->blocks[cl - w] == source);
+                if (north && !lastNorth) {
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
+                    stack[sp++] = cl - w;
+                }
+                lastNorth = north;
+            }
+            if (z0 < h - 1) {
+                int south = (level->blocks[cl + w] == source);
+                if (south && !lastSouth) {
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
+                    stack[sp++] = cl + w;
+                }
+                lastSouth = south;
+            }
+            if (y0 > 0) {
+                int belowId = level->blocks[cl - upStep];
+                if (target == TILE_LAVA.id || target == TILE_CALM_LAVA.id) {
+                    if (belowId == TILE_WATER.id || belowId == TILE_CALM_WATER.id) {
+                        level->blocks[cl - upStep] = (byte)TILE_ROCK.id;
+                    }
+                }
+                int below = (belowId == source);
+                if (below && !lastBelow) {
+                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
+                    stack[sp++] = cl - upStep;
+                }
+                lastBelow = below;
+            }
+            cl++;
+        }
+    }
+
+    free(stack);
+    return tiles;
+}
+
+static void addWater(Gen* g) {
+    int target = TILE_CALM_WATER.id;
+    long long tiles = 0;
+    Minecraft_levelLoadProgress(0);
+    for (int x = 0; x < g->width; ++x) {
+        tiles += floodFillLiquid(g, x, g->depth / 2 - 1, 0, 0, target);
+        tiles += floodFillLiquid(g, x, g->depth / 2 - 1, g->height - 1, 0, target);
+    }
+    for (int z = 0; z < g->height; ++z) {
+        tiles += floodFillLiquid(g, 0, g->depth / 2 - 1, z, 0, target);
+        tiles += floodFillLiquid(g, g->width - 1, g->depth / 2 - 1, z, 0, target);
+    }
+    int count = g->width * g->height / 200;
+    for (int i = 0; i < count; ++i) {
+        if (i % 100 == 0) Minecraft_levelLoadProgress(i * 100 / (count - 1));
+        int x = JRandom_nextIntN(&genRandom, g->width);
+        int y = g->depth / 2 - 1 - JRandom_nextIntN(&genRandom, 3);
+        int z = JRandom_nextIntN(&genRandom, g->height);
+        if (g->blocks[(y * g->height + z) * g->width + x] == 0) tiles += floodFillLiquid(g, x, y, z, 0, target);
+    }
+    Minecraft_levelLoadProgress(100);
+    printf("Flood filled %lld tiles\n", tiles);
+}
+
+static void addLava(Gen* g) {
+    int lavaCount = 0;
+    int count = g->width * g->height * g->depth / 10000;
+    for (int i = 0; i < count; ++i) {
+        if (i % 100 == 0) Minecraft_levelLoadProgress(i * 100 / (count - 1));
+        int x = JRandom_nextIntN(&genRandom, g->width);
+        int y = JRandom_nextIntN(&genRandom, g->depth / 2 - 4);
+        int z = JRandom_nextIntN(&genRandom, g->height);
+        if (g->blocks[(y * g->height + z) * g->width + x] == 0) {
+            lavaCount++;
+            floodFillLiquid(g, x, y, z, 0, TILE_CALM_LAVA.id);
+        }
+    }
+    Minecraft_levelLoadProgress(100);
+    printf("LavaCount: %d\n", lavaCount);
+}
+
+// the size it's given is ignored, it always makes 256x256x64
+bool LevelGen_generateLevel(Level* level, const char* userName, int width, int height, int depth) {
+    (void)width; (void)height; (void)depth;
+    if (!genRandomReady) { JRandom_initRandom(&genRandom); genRandomReady = true; }
+
+    Minecraft_beginLevelLoading("Generating level");
+    Gen g = { 256, 256, 64, NULL };
+    g.blocks = (byte*)calloc((size_t)256 * 256 * 64, 1);
+    if (!g.blocks) {
+        fprintf(stderr, "Failed to allocate level memory\n");
+        exit(EXIT_FAILURE);
+    }
+
+    Minecraft_levelLoadUpdate("Raising..");
+    int* heightmap = raise(&g);
+    Minecraft_levelLoadUpdate("Eroding..");
+    erode(&g, heightmap);
+    Minecraft_levelLoadUpdate("Soiling..");
+    soil(&g, heightmap);
+    free(heightmap);
+    Minecraft_levelLoadUpdate("Carving..");
+    carveTunnels(&g);
+    Minecraft_levelLoadUpdate("Watering..");
+    addWater(&g);
+    Minecraft_levelLoadUpdate("Melting..");
+    addLava(&g);
+
+    Level_setData(level, 256, 64, 256, g.blocks);
+    level->createTime = (long long)time(NULL) * 1000;
+    snprintf(level->creator, sizeof(level->creator), "%s", userName);
+    snprintf(level->name, sizeof(level->name), "A Nice World");
+    return true;
+}
