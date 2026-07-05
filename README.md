@@ -32,11 +32,25 @@ Released May 22 2009. Added level saving for accounts, changed the lava, water, 
 
 ### c0.0.13a_03
 
-In progress. Starting from this version, the client jar is obfuscated: package, class, field, and method names are all reduced to single letters with no other information to recover them from. Everything from here on is being rebuilt by diffing the obfuscated bytecode against the last known good source and inferring what each piece does from its behavior, so some names and structure in this port are a best guess rather than a faithful match to what Mojang actually called things.
+Released May 22 2009. Starting from this version, the client jar is obfuscated: package, class, field, and method names are all reduced to single letters with no other information to recover them from. This port was rebuilt by diffing the obfuscated bytecode against the last known good c0.0.13a source and inferring what each piece does from its behavior, so some names and structure here are a best guess rather than a faithful match to what Mojang actually called things.
+
+* Real Perlin noise hills terrain with an erosion pass, replacing c0.0.13a's flat generation
+* Mobs no longer auto spawn when a level generates
+* Lava lakes capped below sea level, and interior water lakes seeded far more often
+* Lava now falls through an entire open shaft in one tick instead of one block per tick
+* Escape closes an open menu screen
+* Darker pause menu overlay, and a real loading progress bar during world generation
+* Bigger infinite horizon ground and water skirt
+* "Generate new level" defaults to a 256x256x64 world, owned by "anonymous" instead of "noname"
+* Networked level save/load intentionally not ported: the real jar's backend for it is long dead, so there is nothing left to faithfully port
+
+### c0.0.14a_08
+
+In progress. Released May 28 2009 and the last release of Early Classic before multiplayer began. Also obfuscated, ported the same way as c0.0.13a_03.
 
 ## c0.30
 
-Planned, after c0.0.13a_03.
+Planned, after c0.0.14a_08.
 
 ## Building
 
@@ -84,3 +98,5 @@ The `resources/` folder from the same version needs to sit next to the built bin
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
 * [Java Edition Classic 0.0.13a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a)
+* [Java Edition Classic 0.0.13a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a_03)
+* [Java Edition Classic 0.0.14a_08](https://minecraft.wiki/w/Java_Edition_Classic_0.0.14a_08)
