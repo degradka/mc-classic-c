@@ -20,9 +20,8 @@ static inline float randf(void) {
     return (float)rand() / ((float)RAND_MAX + 1.0f);
 }
 
-// c0.0.13a_03 replaced the flat stub heightmap with real rolling hills: two
-// distorted Perlin fields blended through a third noise field acting as a
-// selector, then cube shaped so tall values rise steeply
+// two distorted Perlin fields blended through a third noise field as a
+// selector. Had the wrong constants copied from c0.0.13a_03, fixed to match.
 static int* raiseHeightmap(int width, int height) {
     int* heightmap = (int*)malloc((size_t)width * height * sizeof(int));
 
@@ -45,12 +44,13 @@ static int* raiseHeightmap(int width, int height) {
             if (done % 256 == 0) Minecraft_levelLoadProgress(done * 100 / (total > 1 ? total - 1 : 1));
             done++;
 
-            double d14 = distortA.synth.getValue(&distortA.synth, x, y) / 8.0 - 8.0;
-            double d16 = distortB.synth.getValue(&distortB.synth, x, y) / 8.0 + 8.0;
+            double d14 = distortA.synth.getValue(&distortA.synth, x * 1.3, y * 1.3) / 8.0 - 8.0;
+            double d16 = distortB.synth.getValue(&distortB.synth, x * 1.3, y * 1.3) / 6.0 + 6.0;
             double d18 = plain.synth.getValue(&plain.synth, x, y) / 8.0;
-            if (d18 > 2.0) d16 = d14;
-            double d20 = (d14 > d16) ? d14 : d16;
-            heightmap[i] = (int)((d20 * d20 * d20 / 100.0 + d20 * 3.0) / 8.0);
+            if (d18 > 0.0) d16 = d14;
+            double d20 = (d14 > d16 ? d14 : d16) / 2.0;
+            if (d20 < 0.0) d20 = d20 / 2.0;
+            heightmap[i] = (int)d20;
         }
     }
 
@@ -95,25 +95,36 @@ static void erodeHeightmap(int width, int height, int* heightmap) {
     PerlinNoise_destroy(&d1); PerlinNoise_destroy(&d2);
 }
 
-// fills grass/dirt/rock per column from the heightmap, matching the new
-// "Soiling.." stage (c0.0.13a's buildBlocks used fixed thresholds instead)
-static void buildBlocks(Level* level, const int* heightmap) {
+// fills dirt/rock per column from the heightmap (grass itself gets placed
+// later, by the beach pass overwriting whatever ends up exposed at the
+// surface). Rock depth used a fixed surfaceY-2 in c0.0.13a_03; c0.0.14a_08
+// makes it noise-driven per column instead, and writes the result back into
+// the heightmap for the beach/tree passes to read.
+static void buildBlocks(Level* level, int* heightmap) {
     const int w = level->width, h = level->height, d = level->depth;
+
+    PerlinNoise rockNoise;
+    PerlinNoise_init(&rockNoise, 8);
 
     for (int x = 0; x < w; ++x) {
         for (int z = 0; z < h; ++z) {
-            int surfaceY = heightmap[x + z * w] + d / 2;
-            int rockY = surfaceY - 2;
+            int i = x + z * w;
+            int rockDepth = (int)(rockNoise.synth.getValue(&rockNoise.synth, x, z) / 24.0) - 4;
+            int surfaceY = heightmap[i] + d / 2;
+            int rockY = surfaceY + rockDepth;
+            heightmap[i] = surfaceY > rockY ? surfaceY : rockY;
+
             for (int y = 0; y < d; ++y) {
                 int idx = (y * h + z) * w + x;
                 int id = 0;
-                if (y == surfaceY && y >= d / 2 - 1) id = TILE_GRASS.id;
-                else if (y <= surfaceY) id = TILE_DIRT.id;
+                if (y <= surfaceY) id = TILE_DIRT.id;
                 if (y <= rockY) id = TILE_ROCK.id;
                 level->blocks[idx] = (byte)id;
             }
         }
     }
+
+    PerlinNoise_destroy(&rockNoise);
 }
 
 static void carveTunnels(Level* level) {
@@ -239,7 +250,9 @@ static void growBeaches(Level* level, const int* heightmap) {
             int isSand   = sandNoise.synth.getValue(&sandNoise.synth, x, z) > 8.0;
             int isGravel = gravelNoise.synth.getValue(&gravelNoise.synth, x, z) > 12.0;
 
-            int surfaceY = heightmap[x + z * w] + d / 2;
+            // heightmap already holds an absolute Y here, buildBlocks wrote
+            // it back with the depth/2 offset baked in
+            int surfaceY = heightmap[x + z * w];
             int aboveIdx = ((surfaceY + 1) * h + z) * w + x;
             if (level->blocks[aboveIdx] != 0) continue; // covered, leave alone
 
@@ -274,7 +287,7 @@ static void plantTrees(Level* level, const int* heightmap) {
                 z += (rand() % 6) - (rand() % 6);
                 if (x < 0 || z < 0 || x >= w || z >= h) continue;
 
-                int baseY = heightmap[x + z * w] + d / 2 + 1;
+                int baseY = heightmap[x + z * w] + 1; // heightmap already absolute here
                 int trunkHeight = rand() % 2 + 4;
 
                 int canPlace = 1;
