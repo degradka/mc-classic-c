@@ -24,10 +24,14 @@ void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int 
     c->dirtiedTime = currentTimeMillis();
     c->visible = false;
 
-    // precompute chunk center for distance checks
-    c->x = (minX + maxX) * 0.5;
-    c->y = (minY + maxY) * 0.5;
-    c->z = (minZ + maxZ) * 0.5;
+    // c0.0.14a_08 switched Chunk's constructor from min+max to min+fixed
+    // size, and distance checks from a precomputed center to the raw min
+    // corner (c0.0.13a_03 still used a real center, confirmed against its
+    // own real source, so this is a genuine c0.0.14a_08 change, not a port
+    // mistake carried forward from there)
+    c->x = minX;
+    c->y = minY;
+    c->z = minZ;
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
     // c0.0.14a_08 merges the old lit+shadow solid passes into one (brightness

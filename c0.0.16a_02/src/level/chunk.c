@@ -24,10 +24,12 @@ void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int 
     c->dirtiedTime = currentTimeMillis();
     c->visible = false;
 
-    // precompute chunk center for distance checks
-    c->x = (minX + maxX) * 0.5;
-    c->y = (minY + maxY) * 0.5;
-    c->z = (minZ + maxZ) * 0.5;
+    // distance checks use the chunk's min corner, not its center, matching
+    // the real source (Chunk only ever stores a min corner and a fixed size,
+    // it has no center of its own)
+    c->x = minX;
+    c->y = minY;
+    c->z = minZ;
 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
     // c0.0.14a_08 merges the old lit+shadow solid passes into one (brightness
