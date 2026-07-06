@@ -80,6 +80,16 @@ minecraft.exe [host] [port] [username]
 
 No arguments starts singleplayer as before. `username` is optional and defaults to `guest` when connecting.
 
+### c0.0.17a
+
+Released June 10 2009, paired with the dedicated server 1.3. The real client is applet only with no standalone launcher jar.
+
+* New Tab key: hold it while connected to see a list of everyone currently on the server
+* Chat now shows a scrollback of recent messages while the chat line is open, instead of only ever showing the last few faded lines
+* Chat can no longer be opened in singleplayer at all (previously it opened a chat line that did nothing when you tried to send)
+* Pause menu now disables Generate new level too while connected to a server, on top of Save/Load already being disabled
+* Draw distance (F) now cycles backward when held with Shift, instead of only ever cycling forward
+
 ## Building
 
 ### Windows
@@ -128,6 +138,8 @@ The `resources/` folder from the same version needs to sit next to the built bin
 
 On Windows the built exe needs `zlib1.dll` next to it (the same one the client uses) — nothing else, since the server has no rendering and uses native Win32 threads instead of `libwinpthread-1.dll`.
 
+`server/server1.3/` is the same idea, paired with the c0.0.17a client instead, and follows the identical build/run/DLL layout. It adds a couple of gameplay-relevant checks the original 1.2 didn't have: placing or breaking a block more than 8 blocks away gets you kicked for cheating, and only a specific set of "safe" tiles (stone brick, wood, log, leaves, sand, gravel, rock, dirt, bush) can be placed by hand at all. The real server's login name verification (checking a connecting player's name against minecraft.net's session servers) is intentionally not implemented here, same reasoning as the networked level save/load noted above for c0.0.13a_03 — there's no live session server to check against, so any username is accepted.
+
 ## References
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
@@ -135,3 +147,4 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.13a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a_03)
 * [Java Edition Classic 0.0.14a_08](https://minecraft.wiki/w/Java_Edition_Classic_0.0.14a_08)
 * [Java Edition Classic 0.0.16a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.16a_02)
+* [Java Edition Classic 0.0.17a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.17a)
