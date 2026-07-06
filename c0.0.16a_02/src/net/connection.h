@@ -4,19 +4,19 @@
 #define NET_CONNECTION_H
 
 #include <stdbool.h>
-#include "net_socket.h"
+#include <stdint.h>
 
-#define NET_READ_BUFFER_SIZE  (256 * 1024)
-#define NET_WRITE_BUFFER_SIZE (32 * 1024)
+#define NET_BUFFER_SIZE (1024 * 1024)
 
 typedef struct {
-    sock_t sock;
+    // a sock_t, kept as an integer so winsock stays out of everything that includes this
+    uintptr_t sock;
     bool   connected;
 
-    unsigned char readBuf[NET_READ_BUFFER_SIZE];
+    unsigned char readBuf[NET_BUFFER_SIZE];
     int readLen;
 
-    unsigned char writeBuf[NET_WRITE_BUFFER_SIZE];
+    unsigned char writeBuf[NET_BUFFER_SIZE];
     int writeLen;
 
     // the gzipped level, gathered from the chunk packets
@@ -25,17 +25,17 @@ typedef struct {
     int levelBufCapacity;
 } NetConnection;
 
-// connects, sends Login and shows "Connecting.."
-// false on failure, the error screen is already up
+// connects and queues the login, false if the connect failed
 bool NetConnection_open(NetConnection* c, const char* host, int port, const char* username);
+// flushes what's queued and closes
 void NetConnection_close(NetConnection* c);
 
-// up to 100 packets a tick, then the writes are flushed
-// an error closes the connection and shows the disconnect screen
-void NetConnection_tick(NetConnection* c);
+// reads, handles up to 100 packets and flushes the writes
+// false means it threw, the caller shows the disconnect screen and closes
+bool NetConnection_tick(NetConnection* c);
 
 void NetConnection_sendSetBlock(NetConnection* c, int x, int y, int z, int mode, int type);
 void NetConnection_sendMessage(NetConnection* c, const char* text);
-void NetConnection_sendTeleportSelf(NetConnection* c, float x, float y, float z, float yaw, float pitch);
+void NetConnection_sendPosition(NetConnection* c, float x, float y, float z, float yRot, float xRot);
 
 #endif

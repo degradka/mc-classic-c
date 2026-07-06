@@ -12,7 +12,7 @@ void Entity_init(Entity* e, Level* level) {
     e->prevX = e->prevY = e->prevZ = 0.0f;
     e->motionX = e->motionY = e->motionZ = 0.0f;
     e->xRotation = e->yRotation = 0.0f;
-    e->xRotI = e->yRotI = 0.0f;
+    e->xRotO = e->yRotO = 0.0f;
     e->onGround = false;
     e->horizontalCollision = false;
     e->heightOffset = 0.0f;
@@ -32,6 +32,7 @@ void Entity_setPosition(Entity* e, float x, float y, float z) {
 
 // climbs from the spawn until the box is free, a failed spawn search (y -100) never moves it
 void Entity_resetPosition(Entity* e) {
+    if (!e->level) return;
     float x = (float)e->level->xSpawn + 0.5f;
     float y = (float)e->level->ySpawn;
     float z = (float)e->level->zSpawn + 0.5f;
@@ -49,22 +50,40 @@ void Entity_resetPosition(Entity* e) {
 }
 
 void Entity_turn(Entity* e, float dx, float dy) {
-    float xOld = e->xRotation;
-    float yOld = e->yRotation;
+    float xr = e->xRotation;
+    float yr = e->yRotation;
     e->yRotation = (float)(e->yRotation + dx * 0.15);
     e->xRotation = (float)(e->xRotation - dy * 0.15);
     if (e->xRotation < -90.0f) e->xRotation = -90.0f;
     if (e->xRotation > 90.0f) e->xRotation = 90.0f;
-    e->xRotI = e->xRotation - xOld;
-    e->yRotI = e->yRotation - yOld;
+    e->xRotO += e->xRotation - xr;
+    e->yRotO += e->yRotation - yr;
+}
+
+void Entity_moveTo(Entity* e, float x, float y, float z, float xRot, float yRot) {
+    e->prevX = e->x = x;
+    e->prevY = e->y = y;
+    e->prevZ = e->z = z;
+    e->xRotation = xRot;
+    e->yRotation = yRot;
+    Entity_setPosition(e, x, y, z);
+}
+
+void Entity_setPosUpdate(Entity* e, const PositionUpdate* u) {
+    if (u->hasPos) Entity_setPosition(e, u->x, u->y, u->z);
+    else Entity_setPosition(e, e->x, e->y, e->z);
+    if (u->hasRot) {
+        e->yRotation = u->yRot;
+        e->xRotation = u->xRot;
+    }
 }
 
 void Entity_onTick(Entity* e) {
     e->prevX = e->x;
     e->prevY = e->y;
     e->prevZ = e->z;
-    e->xRotI = 0.0f;
-    e->yRotI = 0.0f;
+    e->xRotO = e->xRotation;
+    e->yRotO = e->yRotation;
 }
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
@@ -128,7 +147,8 @@ bool Entity_isInWater(const Entity* e) {
 }
 
 bool Entity_isInLava(const Entity* e) {
-    return Level_containsLiquid(e->level, &e->boundingBox, LIQUID_LAVA);
+    AABB box = AABB_grow(&e->boundingBox, 0.0f, -0.4f, 0.0f);
+    return Level_containsLiquid(e->level, &box, LIQUID_LAVA);
 }
 
 float Entity_getBrightness(const Entity* e) {

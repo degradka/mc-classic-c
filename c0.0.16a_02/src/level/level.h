@@ -16,10 +16,13 @@ typedef unsigned char byte;
 
 struct LevelRenderer; typedef struct LevelRenderer LevelRenderer;
 struct Zombie;
+struct NetworkPlayer;
 
 // a scheduled tile tick, only run if the tile there still has this id
 typedef struct {
     int x, y, z, id;
+    // rounds left before it runs
+    int delay;
 } TickEntry;
 
 typedef struct Level {
@@ -35,9 +38,12 @@ typedef struct Level {
     TickEntry* tickList;
     int tickListSize, tickListCapacity;
 
-    // the zombies, the only entities the level holds in this version
+    // zombies and network players never touch each other, so they're kept in two lists
+    // minecraft.c owns the network players, the id map can still hold them after they leave a level
     struct Zombie* entities;
     int entityCount, entityCapacity;
+    struct NetworkPlayer** players;
+    int playerCount, playerCapacity;
     // the length of the array behind the entity list, level.dat keeps it
     int listCapacity;
 
@@ -72,6 +78,8 @@ void  calcLightDepths(Level* level, int x0, int z0, int x1, int z1);
 bool  Level_load(Level* level, const char* path);
 bool  Level_loadLegacy(Level* level, const char* path);
 void  Level_save(const Level* level, const char* path);
+// quitting before a level arrived from the server saves a null level
+void  Level_saveNull(const char* path);
 
 bool  level_setTile(Level* level, int x, int y, int z, int type);
 bool  Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type);
@@ -93,6 +101,9 @@ bool  Level_containsLiquid(const Level* level, const AABB* box, int liquidId);
 
 void  Level_addToTickNextTick(Level* level, int x, int y, int z, int id);
 void  Level_addEntity(Level* level, const struct Zombie* z);
+void  Level_addPlayer(Level* level, struct NetworkPlayer* p);
+void  Level_removePlayer(Level* level, struct NetworkPlayer* p);
+void  Level_tickEntities(Level* level);
 void  Level_onTick(Level* level);
 
 #endif  // LEVEL_H

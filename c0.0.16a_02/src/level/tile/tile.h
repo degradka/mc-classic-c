@@ -24,12 +24,10 @@ struct Tile {
     int tileId, calmTileId;
     // picked by the level's random ticks
     bool shouldTick;
-
-    // extra 5 tick rounds a scheduled tick waits, only lava has it
+    // how much gravity the destroy particles get
+    float gravity;
+    // extra tick list rounds before a scheduled tick runs, 5 for lava
     int tickDelay;
-
-    // break particle gravity
-    float particleGravity;
 
     // the shape, a full cube by default
     float xx0, yy0, zz0, xx1, yy1, zz1;
@@ -52,6 +50,8 @@ struct Tile {
     void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
 
     int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
+    // the light a face gets from the tile in front of it
+    float (*getBrightness)(const Tile* self, const Level* lvl, int x, int y, int z);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
 };
 

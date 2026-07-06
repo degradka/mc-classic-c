@@ -74,6 +74,7 @@ void Screen_initBase(Screen* s, Font* font, int width, int height) {
     s->keyPressed = Screen_keyPressed;
     s->buttonClicked = NULL;
     s->tick = NULL;
+    s->opened = NULL;
     s->removed = NULL;
 }
 

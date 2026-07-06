@@ -311,7 +311,7 @@ static void addLava(Gen* g) {
     printf("LavaCount: %d\n", lavaCount);
 }
 
-// grass on top, sand and gravel near the water level
+// grass on top, sand near the water level, gravel under water
 static void grow(Gen* g, const int* heightmap) {
     int w = g->width, h = g->height, d = g->depth;
     PerlinNoise p1, p2;
@@ -325,9 +325,11 @@ static void grow(Gen* g, const int* heightmap) {
             int y = heightmap[x + z * w];
             int i = (y * g->height + z) * g->width + x;
             int above = g->blocks[((y + 1) * g->height + z) * g->width + x] & 0xFF;
+            if ((above == TILE_WATER.id || above == TILE_CALM_WATER.id) && y <= d / 2 - 1 && gravel) {
+                g->blocks[i] = (byte)TILE_GRAVEL.id;
+            }
             if (above != 0) continue;
             int id = TILE_GRASS.id;
-            if (y <= d / 2 - 1 && gravel) id = TILE_GRAVEL.id;
             if (y <= d / 2 - 1 && sand) id = TILE_SAND.id;
             g->blocks[i] = (byte)id;
         }
@@ -352,7 +354,7 @@ static void plant(Gen* g, const int* heightmap) {
                 z += JRandom_nextIntN(&genRandom, 6) - JRandom_nextIntN(&genRandom, 6);
                 if (x < 0 || z < 0 || x >= g->width || z >= g->height) continue;
                 int y = heightmap[x + z * w] + 1;
-                int trunk = JRandom_nextIntN(&genRandom, 2) + 4;
+                int trunk = JRandom_nextIntN(&genRandom, 3) + 4;
                 bool ok = true;
                 for (int yy = y; yy <= y + 1 + trunk; ++yy) {
                     int r = 1;
@@ -372,13 +374,15 @@ static void plant(Gen* g, const int* heightmap) {
                 int below = g->blocks[((y - 1) * g->height + z) * g->width + x] & 0xFF;
                 if (below != TILE_GRASS.id || y >= g->depth - trunk - 1) continue;
                 g->blocks[idx - 1 * g->width * g->height] = (byte)TILE_DIRT.id;
-                for (int yy = y - 2 + trunk; yy <= y + trunk; ++yy) {
+                for (int yy = y - 3 + trunk; yy <= y + trunk; ++yy) {
                     int dy = yy - (y + trunk);
-                    for (int xx = x - 1; xx <= x + 1; ++xx) {
+                    int r = 1 - dy / 2;
+                    for (int xx = x - r; xx <= x + r; ++xx) {
                         int dx = xx - x;
-                        for (int zz = z - 1; zz <= z + 1; ++zz) {
+                        for (int zz = z - r; zz <= z + r; ++zz) {
                             int dz = zz - z;
-                            if (dy == 0 && abs(dx) == 1 && abs(dz) == 1) continue;
+                            // a corner is left out half the time, always on the top layer
+                            if (abs(dx) == r && abs(dz) == r && (JRandom_nextIntN(&genRandom, 2) == 0 || dy == 0)) continue;
                             g->blocks[(yy * g->height + zz) * g->width + xx] = (byte)TILE_LEAVES.id;
                         }
                     }

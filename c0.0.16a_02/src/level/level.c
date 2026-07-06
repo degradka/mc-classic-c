@@ -4,6 +4,7 @@
 #include "level_renderer.h"
 #include "tile/tile.h"
 #include "../character/zombie.h"
+#include "../net/network_player.h"
 #include <string.h>
 
 #include <zlib.h>
@@ -24,7 +25,7 @@ void Level_init(Level* level) {
 
 // ArrayList.ensureCapacity, grows by half plus one
 static void growList(Level* level) {
-    int need = level->entityCount + 1;
+    int need = level->entityCount + level->playerCount + 1;
     if (need <= level->listCapacity) return;
     int cap = level->listCapacity * 3 / 2 + 1;
     level->listCapacity = cap < need ? need : cap;
@@ -37,11 +38,12 @@ void Level_setData(Level* level, int w, int d, int h, byte* blocks) {
     level->height = h;
     level->depth = d;
     level->blocks = blocks;
-    level->lightDepths = (int*)calloc((size_t)w * h, sizeof(int));
+    level->lightDepths = (int*)malloc((size_t)w * h * sizeof(int));
     if (!level->lightDepths) {
         fprintf(stderr, "Failed to allocate level memory\n");
         exit(EXIT_FAILURE);
     }
+    for (int i = 0; i < w * h; i++) level->lightDepths[i] = d;
     calcLightDepths(level, 0, 0, w, h);
     if (level->renderer) LevelRenderer_allChanged(level->renderer);
     level->tickListSize = 0;
@@ -148,6 +150,9 @@ void Level_destroy(Level* level) {
     free(level->lightDepths);
     free(level->tickList);
     free(level->entities);
+    free(level->players);
+    level->players = NULL;
+    level->playerCount = level->playerCapacity = 0;
     level->blocks = NULL;
     level->lightDepths = NULL;
     level->tickList = NULL;
@@ -344,6 +349,19 @@ void Level_save(const Level* level, const char* path) {
     gzclose(f);
 }
 
+void Level_saveNull(const char* path) {
+    gzFile f = gzopen(path, "wb");
+    if (!f) return;
+    // the magic, version 2, then an object stream holding only TC_NULL
+    unsigned char data[10] = {
+        (unsigned char)(LEVEL_MAGIC >> 24), (unsigned char)(LEVEL_MAGIC >> 16),
+        (unsigned char)(LEVEL_MAGIC >> 8),  (unsigned char)LEVEL_MAGIC,
+        2, 0xAC, 0xED, 0x00, 0x05, 0x70
+    };
+    gzwrite(f, data, 10);
+    gzclose(f);
+}
+
 static void neighborChanged(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return;
     const Tile* t = gTiles[level->blocks[(y * level->height + z) * level->width + x]];
@@ -411,7 +429,7 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 }
 
 float Level_getBrightness(const Level* level, int x, int y, int z) {
-    return Level_isLit(level, x, y, z) ? 1.0f : 0.5f;
+    return Level_isLit(level, x, y, z) ? 1.0f : 0.6f;
 }
 
 float Level_getGroundLevel(const Level* level) {
@@ -448,6 +466,9 @@ bool Level_isFree(const Level* level, const AABB* box) {
     for (int i = 0; i < level->entityCount; ++i) {
         if (AABB_intersects(&level->entities[i].base.boundingBox, box)) return false;
     }
+    for (int i = 0; i < level->playerCount; ++i) {
+        if (AABB_intersects(&level->players[i]->base.boundingBox, box)) return false;
+    }
     return true;
 }
 
@@ -456,7 +477,8 @@ void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
         level->tickListCapacity = level->tickListCapacity ? level->tickListCapacity * 2 : 256;
         level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
     }
-    TickEntry e = { x, y, z, id };
+    TickEntry e = { x, y, z, id, 0 };
+    if (id > 0) e.delay = gTiles[id]->tickDelay;
     level->tickList[level->tickListSize++] = e;
 }
 
@@ -469,9 +491,25 @@ void Level_addEntity(Level* level, const Zombie* z) {
     level->entities[level->entityCount++] = *z;
 }
 
-void Level_onTick(Level* level) {
-    level->tickCount++;
+void Level_addPlayer(Level* level, NetworkPlayer* p) {
+    growList(level);
+    if (level->playerCount == level->playerCapacity) {
+        level->playerCapacity = level->playerCapacity ? level->playerCapacity * 2 : 16;
+        level->players = (NetworkPlayer**)realloc(level->players, (size_t)level->playerCapacity * sizeof(NetworkPlayer*));
+    }
+    level->players[level->playerCount++] = p;
+}
 
+void Level_removePlayer(Level* level, NetworkPlayer* p) {
+    for (int i = 0; i < level->playerCount; ++i) {
+        if (level->players[i] != p) continue;
+        memmove(&level->players[i], &level->players[i + 1], (size_t)(level->playerCount - i - 1) * sizeof(NetworkPlayer*));
+        level->playerCount--;
+        return;
+    }
+}
+
+void Level_tickEntities(Level* level) {
     for (int i = 0; i < level->entityCount; ++i) {
         Zombie_onTick(&level->entities[i]);
         if (level->entities[i].base.removed) {
@@ -480,6 +518,18 @@ void Level_onTick(Level* level) {
             i--;
         }
     }
+    for (int i = 0; i < level->playerCount; ++i) {
+        NetworkPlayer_onTick(level->players[i]);
+        if (level->players[i]->base.removed) {
+            memmove(&level->players[i], &level->players[i + 1], (size_t)(level->playerCount - i - 1) * sizeof(NetworkPlayer*));
+            level->playerCount--;
+            i--;
+        }
+    }
+}
+
+void Level_onTick(Level* level) {
+    level->tickCount++;
 
     int wBits = 1, hBits = 1;
     while (1 << wBits < level->width) wBits++;
@@ -496,6 +546,15 @@ void Level_onTick(Level* level) {
         level->tickListSize = 0;
         for (int i = 0; i < n; ++i) {
             TickEntry e = batch[i];
+            if (e.delay > 0) {
+                e.delay--;
+                if (level->tickListSize == level->tickListCapacity) {
+                    level->tickListCapacity *= 2;
+                    level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
+                }
+                level->tickList[level->tickListSize++] = e;
+                continue;
+            }
             if (e.x < 0 || e.y < 0 || e.z < 0 || e.x >= level->width || e.y >= level->depth || e.z >= level->height) continue;
             int id = level->blocks[(e.y * level->height + e.z) * level->width + e.x];
             if (id != e.id || id <= 0) continue;

@@ -124,45 +124,52 @@ static void Tile_renderBackFace(const Tile* self, Tessellator* t, int x, int y, 
 }
 
 
-// each face is shaded by the brightness of the tile in front of it
+static float Tile_default_getBrightness(const Tile* self, const Level* lvl, int x, int y, int z) {
+    (void)self;
+    return Level_getBrightness(lvl, x, y, z);
+}
+
+// each face is shaded by the brightness of the tile in front of it, the bottom at half
 static bool Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
     bool drawn = false;
+    float c1 = 0.0f;
     float c2 = 0.8f;
     float c3 = 0.6f;
     float br;
 
     if (self->shouldRenderFace(self, lvl, x, y - 1, z, layer, 0)) {
-        br = Level_getBrightness(lvl, x, y - 1, z);
-        Tessellator_color(t, br * 1.0f, br * 1.0f, br * 1.0f);
+        c1 = 0.5f;
+        br = self->getBrightness(self, lvl, x, y - 1, z);
+        Tessellator_color(t, c1 * br, c1 * br, c1 * br);
         self->renderFace(self, t, x, y, z, 0);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y + 1, z, layer, 1)) {
-        br = Level_getBrightness(lvl, x, y + 1, z);
+        br = self->getBrightness(self, lvl, x, y + 1, z);
         Tessellator_color(t, br * 1.0f, br * 1.0f, br * 1.0f);
         self->renderFace(self, t, x, y, z, 1);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y, z - 1, layer, 2)) {
-        br = Level_getBrightness(lvl, x, y, z - 1);
+        br = self->getBrightness(self, lvl, x, y, z - 1);
         Tessellator_color(t, c2 * br, c2 * br, c2 * br);
         self->renderFace(self, t, x, y, z, 2);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x, y, z + 1, layer, 3)) {
-        br = Level_getBrightness(lvl, x, y, z + 1);
+        br = self->getBrightness(self, lvl, x, y, z + 1);
         Tessellator_color(t, c2 * br, c2 * br, c2 * br);
         self->renderFace(self, t, x, y, z, 3);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x - 1, y, z, layer, 4)) {
-        br = Level_getBrightness(lvl, x - 1, y, z);
+        br = self->getBrightness(self, lvl, x - 1, y, z);
         Tessellator_color(t, c3 * br, c3 * br, c3 * br);
         self->renderFace(self, t, x, y, z, 4);
         drawn = true;
     }
     if (self->shouldRenderFace(self, lvl, x + 1, y, z, layer, 5)) {
-        br = Level_getBrightness(lvl, x + 1, y, z);
+        br = self->getBrightness(self, lvl, x + 1, y, z);
         Tessellator_color(t, c3 * br, c3 * br, c3 * br);
         self->renderFace(self, t, x, y, z, 5);
         drawn = true;
@@ -198,6 +205,9 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->liquidType = LIQUID_NONE;
     t->tileId = t->calmTileId = 0;
     t->shouldTick = false;
+    t->gravity = 1.0f;
+    t->tickDelay = 0;
+    t->getBrightness = Tile_default_getBrightness;
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
@@ -340,15 +350,26 @@ static void Liquid_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     }
 }
 
+static bool Liquid_meets(const Tile* self, int type) {
+    if (type == 0) return false;
+    int other = gTiles[type]->liquidType;
+    return (self->liquidType == LIQUID_WATER && other == LIQUID_LAVA) ||
+           (other == LIQUID_WATER && self->liquidType == LIQUID_LAVA);
+}
+
 // schedules a tick tagged with the neighbor's id, it only runs if that id ends up here
 static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
-    if (self->liquidType == LIQUID_WATER && (type == TILE_LAVA.id || type == TILE_CALM_LAVA.id)) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
-    }
-    if (self->liquidType == LIQUID_LAVA && (type == TILE_WATER.id || type == TILE_CALM_WATER.id)) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    if (Liquid_meets(self, type)) {
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
+        return;
     }
     Level_addToTickNextTick(lvl, x, y, z, type);
+}
+
+// lava lights itself, the colors just clamp
+static float Liquid_getBrightness(const Tile* self, const Level* lvl, int x, int y, int z) {
+    if (self->liquidType == LIQUID_LAVA) return 100.0f;
+    return Level_getBrightness(lvl, x, y, z);
 }
 
 // water only shows in the liquid layer, lava in both
@@ -360,6 +381,11 @@ static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, in
     int id = Level_getTile(lvl, x, y, z);
     if (id == self->tileId || id == self->calmTileId) return 0;
 
+    // the top is always drawn when there's air next to the liquid
+    if (face == 1 && (Level_getTile(lvl, x - 1, y, z) == 0 || Level_getTile(lvl, x + 1, y, z) == 0 ||
+                      Level_getTile(lvl, x, y, z - 1) == 0 || Level_getTile(lvl, x, y, z + 1) == 0)) {
+        return 1;
+    }
     return Tile_default_shouldRenderFace(self, lvl, x, y, z, -1, face);
 }
 
@@ -376,12 +402,8 @@ static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int 
     if (Level_getTile(lvl, x, y, z + 1) == 0) hasAirNeighbor = true;
     if (Level_getTile(lvl, x, y - 1, z) == 0) hasAirNeighbor = true;
 
-    if (self->liquidType == LIQUID_WATER && type == TILE_LAVA.id) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
-        return;
-    }
-    if (self->liquidType == LIQUID_LAVA && type == TILE_WATER.id) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+    if (Liquid_meets(self, type)) {
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
         return;
     }
     if (hasAirNeighbor) {
@@ -406,6 +428,8 @@ static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
     t->onPlace = Liquid_onPlace;
     t->onTick = calm ? NULL : Liquid_onTick;
     t->neighborChanged = calm ? CalmLiquid_neighborChanged : Liquid_neighborChanged;
+    t->getBrightness = Liquid_getBrightness;
+    if (liquidType == LIQUID_LAVA) t->tickDelay = 5;
 }
 
 static bool Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
@@ -485,6 +509,7 @@ void Tile_registerAll(void) {
 
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
+    TILE_LEAVES.gravity     = 0.4f;
 }
 
 // highlight face, only drawn when the player is on its side
@@ -541,7 +566,7 @@ void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleE
         float mz = tz - z - 0.5f;
 
         Particle p;
-        Particle_init(&p, lvl, tx, ty, tz, mx, my, mz, self->textureId);
+        Particle_init(&p, lvl, tx, ty, tz, mx, my, mz, self->textureId, self->gravity);
         ParticleEngine_add(engine, &p);
     }
 }

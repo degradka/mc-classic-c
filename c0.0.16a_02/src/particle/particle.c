@@ -6,10 +6,11 @@
 
 void Particle_init(Particle* p, Level* level,
                    float x, float y, float z,
-                   float mx, float my, float mz, int textureId)
+                   float mx, float my, float mz, int textureId, float gravity)
 {
     Entity_init(&p->base, level);
     p->textureId = textureId;
+    p->gravity = gravity;
 
     Entity_setSize(&p->base, 0.2f, 0.2f);
     p->base.heightOffset = p->base.boundingBoxHeight / 2.0f;
@@ -39,7 +40,7 @@ void Particle_onTick(Particle* p) {
     // a removed particle still moves this tick
     if (p->age++ >= p->lifetime) Entity_remove(&p->base);
 
-    p->yd = (float)(p->yd - 0.04);
+    p->yd = (float)(p->yd - 0.04 * (double)p->gravity);
     Entity_move(&p->base, p->xd, p->yd, p->zd);
 
     p->xd *= 0.98f;

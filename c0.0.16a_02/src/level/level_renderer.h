@@ -18,6 +18,7 @@ typedef struct LevelRenderer {
     Chunk**     chunks;
     int         xChunks, yChunks, zChunks;
     unsigned int* callLists;
+    int         callListCount;
 
     int         terrainTex;
     int         rockTex;
@@ -35,7 +36,8 @@ typedef struct LevelRenderer {
 void LevelRenderer_init(LevelRenderer* renderer, int terrainTex);
 void LevelRenderer_setLevel(LevelRenderer* renderer, Level* level);
 void LevelRenderer_allChanged(LevelRenderer* renderer);
-void LevelRenderer_render(LevelRenderer* renderer, const Player* player, int layer);
+int  LevelRenderer_render(LevelRenderer* renderer, const Player* player, int layer);
+void LevelRenderer_renderAgain(LevelRenderer* renderer);
 void LevelRenderer_renderEntities(LevelRenderer* renderer, const Frustum* frustum, float a);
 void LevelRenderer_renderClouds(LevelRenderer* renderer, float a);
 // the camera is in a solid tile, draw it dark from both sides

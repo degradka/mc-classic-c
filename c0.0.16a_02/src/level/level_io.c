@@ -28,8 +28,8 @@ static const JDesc LIST_DESC = { "java.util.ArrayList", 8683452581122892189LL, 3
 static const JField ENTITY_FIELDS[] = {
     { 'F', "bbHeight", NULL }, { 'F', "bbWidth", NULL }, { 'F', "heightOffset", NULL }, { 'Z', "horizontalCollision", NULL },
     { 'Z', "onGround", NULL }, { 'Z', "removed", NULL },
-    { 'F', "x", NULL }, { 'F', "xRot", NULL }, { 'F', "xRotI", NULL }, { 'F', "xd", NULL }, { 'F', "xo", NULL },
-    { 'F', "y", NULL }, { 'F', "yRot", NULL }, { 'F', "yRotI", NULL }, { 'F', "yd", NULL }, { 'F', "yo", NULL },
+    { 'F', "x", NULL }, { 'F', "xRot", NULL }, { 'F', "xRotO", NULL }, { 'F', "xd", NULL }, { 'F', "xo", NULL },
+    { 'F', "y", NULL }, { 'F', "yRot", NULL }, { 'F', "yRotO", NULL }, { 'F', "yd", NULL }, { 'F', "yo", NULL },
     { 'F', "z", NULL }, { 'F', "zd", NULL }, { 'F', "zo", NULL },
     { 'L', "bb", "Lcom/mojang/minecraft/phys/AABB;" }, { 'L', "level", "Lcom/mojang/minecraft/level/Level;" }
 };
@@ -64,12 +64,12 @@ static void writeZombie(JWriter* w, const Zombie* z, const Level* level) {
     JW_u1(w, e->removed);
     JW_f4(w, e->x);
     JW_f4(w, e->xRotation);
-    JW_f4(w, e->xRotI);
+    JW_f4(w, e->xRotO);
     JW_f4(w, e->motionX);
     JW_f4(w, e->prevX);
     JW_f4(w, e->y);
     JW_f4(w, e->yRotation);
-    JW_f4(w, e->yRotI);
+    JW_f4(w, e->yRotO);
     JW_f4(w, e->motionY);
     JW_f4(w, e->prevY);
     JW_f4(w, e->z);
@@ -90,6 +90,7 @@ static void writeZombie(JWriter* w, const Zombie* z, const Level* level) {
     JW_f4(w, z->timeOffset);
 }
 
+// stops before the first network player, it can't be serialized and the gzip is left unfinished
 static bool writeLevel(JWriter* w, const Level* level) {
     JW_i4(w, MAGIC);
     JW_u1(w, 2);
@@ -109,11 +110,12 @@ static bool writeLevel(JWriter* w, const Level* level) {
     JW_byteArray(w, level->blocks, level->width * level->height * level->depth);
     writeString(w, level->creator);
     JW_object(w, &LIST_DESC, &level->entities);
-    JW_i4(w, level->entityCount);
+    JW_i4(w, level->entityCount + level->playerCount);
     // the array length, not the size
     int cap = level->listCapacity;
     unsigned char c[4] = { (unsigned char)(cap >> 24), (unsigned char)(cap >> 16), (unsigned char)(cap >> 8), (unsigned char)cap };
     JW_block(w, c, 4);
+    if (level->playerCount > 0) return false;
     for (int i = 0; i < level->entityCount; ++i) writeZombie(w, &level->entities[i], level);
     JW_endBlock(w);
     writeString(w, level->name);
@@ -205,8 +207,8 @@ static bool loadV2(Level* level, const uint8_t* p, size_t len) {
         e->motionZ = JNode_float(n, EN, "zd");
         e->xRotation = JNode_float(n, EN, "xRot");
         e->yRotation = JNode_float(n, EN, "yRot");
-        e->xRotI = JNode_float(n, EN, "xRotI");
-        e->yRotI = JNode_float(n, EN, "yRotI");
+        e->xRotO = JNode_float(n, EN, "xRotO");
+        e->yRotO = JNode_float(n, EN, "yRotO");
         const JNode* bb = JNode_obj(n, EN, "bb");
         e->boundingBox.minX = JNode_float(bb, NULL, "x0");
         e->boundingBox.minY = JNode_float(bb, NULL, "y0");

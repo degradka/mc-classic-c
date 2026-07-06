@@ -8,6 +8,8 @@
 
 #include "stb_image.h"
 
+bool Font_threw = false;
+
 static inline void rgb_from_int(int c, float* r, float* g, float* b) {
     *r = ((c >> 16) & 0xFF) / 255.0f;
     *g = ((c >>  8) & 0xFF) / 255.0f;
@@ -84,25 +86,30 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
 
     for (size_t i = 0; i < n; ++i) {
         if (str[i] == '&') {
+            // reads past the end of the string here and the frame throws
+            if (i + 2 >= n) {
+                Font_threw = true;
+                return;
+            }
             color = color_from_code(code_index(str[i + 1]));
             i += 2;
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);
             Tessellator_color(t, r,g,b);
-            if (i >= n) break;
         }
         unsigned char c = str[i];
 
         int ix = (c % 16) * 8;
         int iy = (c / 16) * 8;
 
-        float u0 = ix / 128.0f, u1 = (ix + 8) / 128.0f;
-        float v0 = iy / 128.0f, v1 = (iy + 8) / 128.0f;
+        float off = 7.99f;
+        float u0 = ix / 128.0f, u1 = ((float)ix + off) / 128.0f;
+        float v0 = iy / 128.0f, v1 = ((float)iy + off) / 128.0f;
 
-        Tessellator_vertexUV(t, (float)(x + xo),     (float)(y + 8), 0.0f, u0, v1);
-        Tessellator_vertexUV(t, (float)(x + xo + 8), (float)(y + 8), 0.0f, u1, v1);
-        Tessellator_vertexUV(t, (float)(x + xo + 8), (float) y,      0.0f, u1, v0);
-        Tessellator_vertexUV(t, (float)(x + xo),     (float) y,      0.0f, u0, v0);
+        Tessellator_vertexUV(t, (float)(x + xo),       (float)y + off, 0.0f, u0, v1);
+        Tessellator_vertexUV(t, (float)(x + xo) + off, (float)y + off, 0.0f, u1, v1);
+        Tessellator_vertexUV(t, (float)(x + xo) + off, (float)y,       0.0f, u1, v0);
+        Tessellator_vertexUV(t, (float)(x + xo),       (float)y,       0.0f, u0, v0);
 
         xo += f->charWidth[c];
     }

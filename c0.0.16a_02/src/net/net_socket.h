@@ -18,7 +18,7 @@
 int NetSocket_connect(sock_t* out, const char* host, int port);
 void NetSocket_close(sock_t sock);
 
-// bytes moved, 0 if it would block, -1 on an error or a remote close
+// bytes moved, 0 if it would block or the other end closed, -1 on an error
 int NetSocket_read(sock_t sock, void* buf, int len);
 int NetSocket_write(sock_t sock, const void* buf, int len);
 

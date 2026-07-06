@@ -20,6 +20,8 @@ struct Screen {
     void (*keyPressed)(Screen* self, char eventCharacter, int eventKey);
     void (*buttonClicked)(Screen* self, Button* button);
     void (*tick)(Screen* self);
+    // called once it's the current screen, may be NULL
+    void (*opened)(Screen* self);
     // called when another screen replaces this one, may be NULL
     void (*removed)(Screen* self);
 };

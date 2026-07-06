@@ -2,20 +2,38 @@
 
 #include "packet.h"
 
-const int PacketPayloadLen[PACKET_COUNT] = {
+const int PacketJavaLen[PACKET_COUNT] = {
+    1,
+    0,
+    0,
+    2 + 1024 + 1,
+    2 + 2 + 2,
+    2 + 2 + 2 + 1 + 1,
+    2 + 2 + 2 + 1,
+    1 + 2 + 2 + 2 + 1 + 1,
+    1 + 2 + 2 + 2 + 1 + 1,
+    1 + 1 + 1 + 1 + 1 + 1,
+    1 + 1 + 1 + 1,
+    1 + 1 + 1,
+    1,
+    1,
+    0
+};
+
+const int PacketFullLen[PACKET_COUNT] = {
     1 + 64 + 64,
-    0,               // Ping
-    0,               // LevelInit
-    2 + 1024 + 1,    // LevelChunk
-    2 + 2 + 2,       // LevelFinalize
-    2 + 2 + 2 + 1 + 1, // SetBlock client to server
-    2 + 2 + 2 + 1,   // SetBlock server to client
+    0,
+    0,
+    2 + 1024 + 1,
+    2 + 2 + 2,
+    2 + 2 + 2 + 1 + 1,
+    2 + 2 + 2 + 1,
     1 + 64 + 2 + 2 + 2 + 1 + 1,
-    1 + 2 + 2 + 2 + 1 + 1,      // Teleport
-    1 + 1 + 1 + 1 + 1 + 1,      // MoveAndLook
-    1 + 1 + 1 + 1,   // Move
-    1 + 1 + 1,       // Look
-    1,               // DespawnPlayer
+    1 + 2 + 2 + 2 + 1 + 1,
+    1 + 1 + 1 + 1 + 1 + 1,
+    1 + 1 + 1 + 1,
+    1 + 1 + 1,
+    1,
     1 + 64,
     64
 };

@@ -50,7 +50,6 @@ static double ImprovedNoise_getValue(const Synth* self, double x, double y) {
 
 void ImprovedNoise_init(ImprovedNoise* n, JRandom* random) {
     n->synth.getValue = ImprovedNoise_getValue;
-    printf("New improvednoise!\n");
 
     for (int i = 0; i < 256; ++i) n->p[i] = i;
 

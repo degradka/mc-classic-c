@@ -14,8 +14,8 @@ typedef struct Entity {
     float prevX, prevY, prevZ;
     float motionX, motionY, motionZ;
     float xRotation, yRotation;
-    // how far the last turn moved, the camera takes part of it back until the next tick
-    float xRotI, yRotI;
+    // the rotation at the last tick, turning moves these along with it
+    float xRotO, yRotO;
 
     AABB  boundingBox;
     float boundingBoxWidth;
@@ -31,6 +31,14 @@ void Entity_init(Entity* e, Level* level);
 void Entity_setPosition(Entity* e, float x, float y, float z);
 void Entity_resetPosition(Entity* e);
 void Entity_turn(Entity* e, float dx, float dy);
+// the 4th argument goes in xRot and the 5th in yRot
+void Entity_moveTo(Entity* e, float x, float y, float z, float xRot, float yRot);
+// a position update from the network
+typedef struct {
+    float x, y, z, yRot, xRot;
+    bool hasRot, hasPos;
+} PositionUpdate;
+void Entity_setPosUpdate(Entity* e, const PositionUpdate* u);
 void Entity_onTick(Entity* e);
 void Entity_move(Entity* e, float dx, float dy, float dz);
 void Entity_moveRelative(Entity* e, float x, float z, float speed);

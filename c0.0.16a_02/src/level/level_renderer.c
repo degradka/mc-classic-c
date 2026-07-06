@@ -15,6 +15,7 @@
 #include "../hitresult.h"
 #include "../player.h"
 #include "../character/zombie.h"
+#include "../net/network_player.h"
 #include "../java_sort.h"
 #include <math.h>
 #include <stdio.h>
@@ -126,8 +127,10 @@ void LevelRenderer_init(LevelRenderer* r, int terrainTex) {
 void LevelRenderer_setLevel(LevelRenderer* r, Level* level) {
     if (r->level) r->level->renderer = NULL;
     r->level = level;
-    level->renderer = r;
-    LevelRenderer_allChanged(r);
+    if (level) {
+        level->renderer = r;
+        LevelRenderer_allChanged(r);
+    }
 }
 
 void LevelRenderer_allChanged(LevelRenderer* r) {
@@ -183,6 +186,10 @@ void LevelRenderer_renderEntities(LevelRenderer* r, const Frustum* frustum, floa
         const Zombie* z = &r->level->entities[i];
         if (frustum_isVisible(frustum, &z->base.boundingBox)) Zombie_render(z, a);
     }
+    for (int i = 0; i < r->level->playerCount; ++i) {
+        const NetworkPlayer* p = r->level->players[i];
+        if (frustum_isVisible(frustum, &p->base.boundingBox)) NetworkPlayer_render(p, a);
+    }
 }
 
 // DistanceSorter
@@ -191,9 +198,8 @@ static int distance_cmp(const void* a, const void* b, void* ctx) {
     return Chunk_distanceToSqr((const Chunk*)a, player) < Chunk_distanceToSqr((const Chunk*)b, player) ? -1 : 1;
 }
 
-void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, r->terrainTex);
+// returns how many lists were drawn, the liquid pass draws the same lists again
+int LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
     int total = r->xChunks * r->yChunks * r->zChunks;
 
     float xd = player->e.x - r->lX;
@@ -208,7 +214,20 @@ void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
 
     int count = 0;
     for (int i = 0; i < total; ++i) Chunk_addList(r->chunks[i], r->callLists, &count, layer);
-    if (count > 0) glCallLists(count, GL_UNSIGNED_INT, r->callLists);
+    if (count > 0) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, r->terrainTex);
+        glCallLists(count, GL_UNSIGNED_INT, r->callLists);
+        glDisable(GL_TEXTURE_2D);
+    }
+    r->callListCount = count;
+    return count;
+}
+
+void LevelRenderer_renderAgain(LevelRenderer* r) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, r->terrainTex);
+    glCallLists(r->callListCount, GL_UNSIGNED_INT, r->callLists);
     glDisable(GL_TEXTURE_2D);
 }
 

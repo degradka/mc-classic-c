@@ -6,10 +6,10 @@
 
 enum {
     PACKET_LOGIN          = 0,  // byte protocol, String name, String motd or key
-    PACKET_PING           = 1,  // (no fields), the server sends it now and then
+    PACKET_PING           = 1,
     PACKET_LEVEL_INIT     = 2,
     PACKET_LEVEL_CHUNK    = 3,  // short length, byte[1024], byte percent
-    PACKET_LEVEL_FINALIZE = 4,  // short width, short depth, short height, depth is the vertical one
+    PACKET_LEVEL_FINALIZE = 4,  // short width, short depth, short height
     PACKET_SET_BLOCK_CS   = 5,  // short x, y, z, byte mode, byte type
     PACKET_SET_BLOCK_SC   = 6,  // short x, y, z, byte type
     PACKET_SPAWN_PLAYER   = 7,  // byte id, String name, short x, y, z, byte yaw, byte pitch
@@ -26,7 +26,9 @@ enum {
 #define PACKET_STRING_LEN 64
 #define PACKET_ARRAY_LEN  1024
 
-// payload byte length after the leading id byte, indexed by packet id
-extern const int PacketPayloadLen[PACKET_COUNT];
+// the payload size the read waits for, it forgets to count the strings
+extern const int PacketJavaLen[PACKET_COUNT];
+// the real payload size
+extern const int PacketFullLen[PACKET_COUNT];
 
 #endif
