@@ -25,6 +25,12 @@ struct Tile {
     // picked by the level's random ticks
     bool shouldTick;
 
+    // extra 5 tick rounds a scheduled tick waits, only lava has it
+    int tickDelay;
+
+    // break particle gravity
+    float particleGravity;
+
     // the shape, a full cube by default
     float xx0, yy0, zz0, xx1, yy1, zz1;
 
