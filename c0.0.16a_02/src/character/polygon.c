@@ -14,8 +14,10 @@ void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
 void Polygon_render(const Polygon* p) {
     glColor3f(1.f, 1.f, 1.f);
 
-    const float uDiv = 63.999f;
-    const float vDiv = 31.999f;
+    // real source divides by the exact atlas size, 64.0/32.0; matching it now
+    // instead of the anti-seam epsilon this port had been carrying
+    const float uDiv = 64.0f;
+    const float vDiv = 32.0f;
 
     glTexCoord2f(p->v[3].u / uDiv, p->v[3].v / vDiv); glVertex3f(p->v[3].pos.x, p->v[3].pos.y, p->v[3].pos.z);
     glTexCoord2f(p->v[2].u / uDiv, p->v[2].v / vDiv); glVertex3f(p->v[2].pos.x, p->v[2].pos.y, p->v[2].pos.z);

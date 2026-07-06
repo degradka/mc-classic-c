@@ -957,12 +957,19 @@ static void mineOrPlace(void) {
         int y = hitResult.y + ny;
         int z = hitResult.z + nz;
 
-        // AABB collision check, disallow placing inside player or mobs
+        // AABB collision check, disallow placing inside player, mobs, or
+        // connected network players -- matches Level.isFree(AABB), which
+        // walks the real source's unified entities list; our port keeps
+        // mobs[]/netPlayers[] as separate arrays instead, so both need
+        // checking here to get the same result
         AABB aabb = Level_getTilePickAABB(&level, x, y, z);
         if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
             bool blocked = false;
             for (int i = 0; i < mobCount; ++i) {
                 if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
+            }
+            for (int i = 0; !blocked && i < netPlayerCount; ++i) {
+                if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
             }
             if (!blocked) {
                 if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, selectedTileId);
