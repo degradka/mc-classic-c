@@ -83,7 +83,9 @@ void Zombie_render(const Zombie* z, float partialTicks) {
     glTranslated(0.0, -offY, 0.0);
     glRotated(z->rotation * 180.0 / M_PI + 180.0, 0, 1, 0);
 
-    ZombieModel_render(&sModel, t);
+    // real Zombie always passes 0,0 for head yaw/pitch -- its head never
+    // turns independently of its body, unlike NetworkPlayer's
+    ZombieModel_render(&sModel, (float)t, 0.0f, 0.0f);
 
     glDisable(GL_TEXTURE_2D);
     glPopMatrix();

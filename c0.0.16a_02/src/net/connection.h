@@ -11,16 +11,6 @@
 
 #define NET_READ_BUFFER_SIZE  (256 * 1024)
 #define NET_WRITE_BUFFER_SIZE (32 * 1024)
-#define NET_MAX_REMOTE_PLAYERS 32
-
-// bare id/name/position bookkeeping only. Move queue interpolation and
-// rendering are added once NetworkPlayer exists as its own entity type
-typedef struct {
-    bool  used;
-    int   id;
-    char  name[65];
-    float x, y, z, yaw, pitch;
-} RemotePlayerInfo;
 
 typedef struct {
     sock_t sock;
@@ -36,8 +26,6 @@ typedef struct {
     unsigned char* levelBuf;
     int levelBufLen;
     int levelBufCapacity;
-
-    RemotePlayerInfo remotePlayers[NET_MAX_REMOTE_PLAYERS];
 } NetConnection;
 
 // blocking connect, then sends the Login packet and opens the loading

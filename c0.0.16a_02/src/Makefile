@@ -21,7 +21,7 @@ SRC = minecraft.c player.c timer.c  hitresult.c user.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
       renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c \
       gui/generate_level_screen.c gui/chat_input_screen.c gui/message_screen.c \
-      net/net_socket.c net/packet.c net/connection.c
+      net/net_socket.c net/packet.c net/connection.c net/network_player.c
 
 # comm/socket_connection.c comm/socket_server.c server/client.c
 # server/minecraft_server.c are a faithful port of the multiplayer classes,

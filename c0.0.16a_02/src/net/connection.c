@@ -15,6 +15,12 @@ extern void Minecraft_addChatLine(const char* text);
 extern void Minecraft_networkSetBlock(int x, int y, int z, int type);
 extern void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float pitch);
 extern void Minecraft_openMessageScreen(const char* title, const char* message);
+extern void Minecraft_spawnNetworkPlayer(int id, const char* name, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+extern void Minecraft_teleportNetworkPlayer(int id, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+extern void Minecraft_queueNetworkPlayerMoveLook(int id, int dx, int dy, int dz, float yaw, float pitch);
+extern void Minecraft_queueNetworkPlayerMove(int id, int dx, int dy, int dz);
+extern void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch);
+extern void Minecraft_despawnNetworkPlayer(int id);
 
 /* wire format helpers */
 
@@ -51,13 +57,6 @@ static void readString(const unsigned char* p, char* out, size_t outCapacity) {
 // byte angle to degrees, yaw negated on conversion, matches SpawnPlayer/Teleport decode
 static float angleYaw(signed char b)   { return (-(float)b * 360.0f) / 256.0f; }
 static float anglePitch(signed char b) { return ((float)b * 360.0f) / 256.0f; }
-
-static RemotePlayerInfo* findRemotePlayer(NetConnection* c, int id) {
-    for (int i = 0; i < NET_MAX_REMOTE_PLAYERS; i++) {
-        if (c->remotePlayers[i].used && c->remotePlayers[i].id == id) return &c->remotePlayers[i];
-    }
-    return NULL;
-}
 
 /* connect / disconnect */
 
@@ -188,24 +187,12 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             int sz = (short)readU16(f + 1 + PACKET_STRING_LEN + 4);
             signed char syaw   = (signed char)f[1 + PACKET_STRING_LEN + 6];
             signed char spitch = (signed char)f[1 + PACKET_STRING_LEN + 7];
-            float x = sx / 32.0f, y = sy / 32.0f, z = sz / 32.0f;
             float yaw = angleYaw(syaw), pitch = anglePitch(spitch);
             if (sid >= 0) {
-                // bookkeeping only for now: entity creation/rendering is
-                // NetworkPlayer's job, added separately
-                for (int i = 0; i < NET_MAX_REMOTE_PLAYERS; i++) {
-                    if (!c->remotePlayers[i].used) {
-                        c->remotePlayers[i].used = true;
-                        c->remotePlayers[i].id = sid;
-                        snprintf(c->remotePlayers[i].name, sizeof c->remotePlayers[i].name, "%s", name);
-                        c->remotePlayers[i].x = x; c->remotePlayers[i].y = y; c->remotePlayers[i].z = z;
-                        c->remotePlayers[i].yaw = yaw; c->remotePlayers[i].pitch = pitch;
-                        break;
-                    }
-                }
+                Minecraft_spawnNetworkPlayer(sid, name, sx, sy, sz, yaw, pitch);
             } else {
                 // id < 0: this is the server telling us where we spawn
-                Minecraft_networkTeleportSelf(x, y, z, yaw, pitch);
+                Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, yaw, pitch);
             }
             break;
         }
@@ -214,47 +201,32 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             if (sid >= 0) {
                 int sx = (short)readU16(f + 1), sy = (short)readU16(f + 3), sz = (short)readU16(f + 5);
                 signed char syaw = (signed char)f[7], spitch = (signed char)f[8];
-                RemotePlayerInfo* rp = findRemotePlayer(c, sid);
-                if (rp) {
-                    rp->x = sx / 32.0f; rp->y = sy / 32.0f; rp->z = sz / 32.0f;
-                    rp->yaw = angleYaw(syaw); rp->pitch = anglePitch(spitch);
-                }
+                Minecraft_teleportNetworkPlayer(sid, sx, sy, sz, angleYaw(syaw), anglePitch(spitch));
             }
             break;
         }
         case PACKET_MOVE_LOOK: {
             signed char sid = (signed char)f[0];
-            RemotePlayerInfo* rp = findRemotePlayer(c, sid);
-            if (rp) {
-                signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
-                signed char syaw = (signed char)f[4], spitch = (signed char)f[5];
-                rp->x += dx / 32.0f; rp->y += dy / 32.0f; rp->z += dz / 32.0f;
-                rp->yaw = angleYaw(syaw); rp->pitch = anglePitch(spitch);
-            }
+            signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
+            signed char syaw = (signed char)f[4], spitch = (signed char)f[5];
+            Minecraft_queueNetworkPlayerMoveLook(sid, dx, dy, dz, angleYaw(syaw), anglePitch(spitch));
             break;
         }
         case PACKET_MOVE: {
             signed char sid = (signed char)f[0];
-            RemotePlayerInfo* rp = findRemotePlayer(c, sid);
-            if (rp) {
-                signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
-                rp->x += dx / 32.0f; rp->y += dy / 32.0f; rp->z += dz / 32.0f;
-            }
+            signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
+            Minecraft_queueNetworkPlayerMove(sid, dx, dy, dz);
             break;
         }
         case PACKET_LOOK: {
             signed char sid = (signed char)f[0];
-            RemotePlayerInfo* rp = findRemotePlayer(c, sid);
-            if (rp) {
-                signed char syaw = (signed char)f[1], spitch = (signed char)f[2];
-                rp->yaw = angleYaw(syaw); rp->pitch = anglePitch(spitch);
-            }
+            signed char syaw = (signed char)f[1], spitch = (signed char)f[2];
+            Minecraft_queueNetworkPlayerLook(sid, angleYaw(syaw), anglePitch(spitch));
             break;
         }
         case PACKET_DESPAWN_PLAYER: {
             signed char sid = (signed char)f[0];
-            RemotePlayerInfo* rp = findRemotePlayer(c, sid);
-            if (rp) rp->used = false;
+            Minecraft_despawnNetworkPlayer(sid);
             break;
         }
         case PACKET_MESSAGE: {

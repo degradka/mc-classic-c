@@ -34,16 +34,19 @@ void ZombieModel_init(ZombieModel* m) {
     Cube_setPos(&m->leftLeg, 2, 12, 0);
 }
 
-void ZombieModel_render(ZombieModel* m, double time) {
-    // animate
-    m->head.yRot      = (float)sin(time * 0.83);
-    m->head.xRot      = (float)sin(time) * 0.8f;
-    m->rightArm.xRot  = (float)sin(time * 0.6662 + M_PI) * 2.0f;
-    m->rightArm.zRot  = (float)(sin(time * 0.2312) + 1.0);
-    m->leftArm.xRot   = (float)sin(time * 0.6662) * 2.0f;
-    m->leftArm.zRot   = (float)(sin(time * 0.2812) - 1.0);
-    m->rightLeg.xRot  = (float)sin(time * 0.6662) * 1.4f;
-    m->leftLeg.xRot   = (float)sin(time * 0.6662 + M_PI) * 1.4f;
+void ZombieModel_render(ZombieModel* m, float animStep, float headYaw, float headPitch) {
+    // animate. Head faces headYaw/headPitch directly (degrees to radians,
+    // matching character.a.a's 57.29578 divisor); arm/leg swing is driven by
+    // animStep, which walk distance accumulates and standing still resets
+    // to 0, not by raw elapsed time -- a standing character doesn't fidget
+    m->head.yRot      = headYaw   / 57.29578f;
+    m->head.xRot      = headPitch / 57.29578f;
+    m->rightArm.xRot  = (float)sin(animStep * 0.6662 + M_PI) * 2.0f;
+    m->rightArm.zRot  = (float)(sin(animStep * 0.2312) + 1.0);
+    m->leftArm.xRot   = (float)sin(animStep * 0.6662) * 2.0f;
+    m->leftArm.zRot   = (float)(sin(animStep * 0.2812) - 1.0);
+    m->rightLeg.xRot  = (float)sin(animStep * 0.6662) * 1.4f;
+    m->leftLeg.xRot   = (float)sin(animStep * 0.6662 + M_PI) * 1.4f;
 
     // draw
     Cube_render(&m->head);

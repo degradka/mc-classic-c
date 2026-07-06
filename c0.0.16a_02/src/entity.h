@@ -14,6 +14,9 @@ typedef struct Entity {
     float prevX, prevY, prevZ;
     float motionX, motionY, motionZ;
     float xRotation, yRotation;
+    // matches Entity.xRotO/yRotO: only NetworkPlayer interpolates rotation
+    // for rendering so far, everything else just leaves these unused
+    float prevXRotation, prevYRotation;
 
     AABB   boundingBox;
     float boundingBoxWidth;

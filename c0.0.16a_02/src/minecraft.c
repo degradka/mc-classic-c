@@ -34,8 +34,10 @@
 #include "gui/pause_screen.h"
 #include "gui/chat_input_screen.h"
 #include "gui/message_screen.h"
+#include "net/network_player.h"
 
 #define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
+#define MAX_NET_PLAYERS 32
 
 static GLFWwindow*    window;
 static Level          level;
@@ -47,6 +49,9 @@ static ParticleEngine particleEngine;
 static User           user;
 
 static int mobCount = 0;
+
+static NetworkPlayer netPlayers[MAX_NET_PLAYERS];
+static int netPlayerCount = 0;
 
 static int prevLeft  = GLFW_RELEASE;
 static int prevRight = GLFW_RELEASE;
@@ -202,6 +207,7 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     Level_setDataFromNetwork(&level, w, h, d, blocks);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
     mobCount = 0;
+    netPlayerCount = 0;
     gLoading = false;
 }
 
@@ -216,6 +222,57 @@ void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float p
     Entity_setPosition(&player.e, x, y, z);
     player.e.yRotation = yaw;
     player.e.xRotation = pitch;
+}
+
+static NetworkPlayer* findNetworkPlayer(int id) {
+    for (int i = 0; i < netPlayerCount; i++) {
+        if (netPlayers[i].used && netPlayers[i].id == id) return &netPlayers[i];
+    }
+    return NULL;
+}
+
+// matches SpawnPlayer with id >= 0: a remote player joining
+void Minecraft_spawnNetworkPlayer(int id, const char* name, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
+    NetworkPlayer* existing = findNetworkPlayer(id);
+    if (existing) {
+        // re-spawn for an id already in use: reinitialize in place instead
+        // of stacking a duplicate model at the same slot
+        NetworkPlayer_init(existing, &level, id, name, xRaw, yRaw, zRaw, yaw, pitch);
+        return;
+    }
+    if (netPlayerCount >= MAX_NET_PLAYERS) return;
+    NetworkPlayer_init(&netPlayers[netPlayerCount++], &level, id, name, xRaw, yRaw, zRaw, yaw, pitch);
+}
+
+void Minecraft_teleportNetworkPlayer(int id, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
+    NetworkPlayer* np = findNetworkPlayer(id);
+    if (np) NetworkPlayer_teleport(np, xRaw, yRaw, zRaw, yaw, pitch);
+}
+
+void Minecraft_queueNetworkPlayerMoveLook(int id, int dx, int dy, int dz, float yaw, float pitch) {
+    NetworkPlayer* np = findNetworkPlayer(id);
+    if (np) NetworkPlayer_queueMoveLook(np, dx, dy, dz, yaw, pitch);
+}
+
+void Minecraft_queueNetworkPlayerMove(int id, int dx, int dy, int dz) {
+    NetworkPlayer* np = findNetworkPlayer(id);
+    if (np) NetworkPlayer_queueMove(np, dx, dy, dz);
+}
+
+void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch) {
+    NetworkPlayer* np = findNetworkPlayer(id);
+    if (np) NetworkPlayer_queueLook(np, yaw, pitch);
+}
+
+// matches DespawnPlayer: swap-remove, mirroring how mobs[] is compacted
+void Minecraft_despawnNetworkPlayer(int id) {
+    for (int i = 0; i < netPlayerCount; i++) {
+        if (netPlayers[i].used && netPlayers[i].id == id) {
+            netPlayers[i] = netPlayers[netPlayerCount - 1];
+            netPlayerCount--;
+            return;
+        }
+    }
 }
 
 // matches Minecraft.addChatMessage(): appends to the backlog, dropping the
@@ -524,6 +581,13 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     // c0.0.16a_02: a host argument switches to multiplayer -- the boot level
     // above stays only as a placeholder until LevelFinalize replaces it
     if (gConnectHost[0]) {
+        // matches the real client's Player starting at (0,0,0): its Level is
+        // null at this point in multiplayer, so Entity's constructor leaves
+        // it at the origin and resetPos() no-ops rather than searching a
+        // (nonexistent) spawn point. Our placeholder level's own spawn point
+        // has no relation to the real server's, so keeping it here would
+        // just broadcast a more random wrong position, not a more correct one
+        Entity_setPosition(&p->e, 0.0f, 0.0f, 0.0f);
         if (NetConnection_open(&gConn, gConnectHost, gConnectPort, Minecraft_getUserName())) {
             gConnected = true;
             gLoading = true;
@@ -1018,6 +1082,13 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         }
     }
 
+    for (int i = 0; i < netPlayerCount; ++i) {
+        const NetworkPlayer* np = &netPlayers[i];
+        if (frustum_isVisible(&frustum, &np->base.boundingBox)) {
+            NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
+        }
+    }
+
     ParticleEngine_render(&particleEngine, p, t);
 
     LevelRenderer_renderSurroundingGround(lr);
@@ -1171,7 +1242,14 @@ static void tick(Player* p, GLFWwindow* w) {
     }
 
     // matches f(): drains queued packets, then unconditionally broadcasts
-    // our own position every tick, no dirty check, no rate limiting
+    // our own position every tick, no dirty check, no rate limiting -- even
+    // before our real SpawnPlayer(-1) arrives. The real client's own Player
+    // starts at exactly (0,0,0) in multiplayer (Entity's constructor always
+    // does setPos(0,0,0), and resetPos() is a no-op when level is null,
+    // which it is until LevelFinalize), so other clients genuinely do see a
+    // newly connecting player appear briefly at world origin before
+    // snapping to their real spawn point -- confirmed original quirk, not a
+    // bug, see the matching (0,0,0) reset in the connect branch of init()
     if (gConnected) {
         NetConnection_tick(&gConn);
         if (gConnected) {
@@ -1197,5 +1275,9 @@ static void tick(Player* p, GLFWwindow* w) {
             continue;
         }
         i++;
+    }
+
+    for (int i = 0; i < netPlayerCount; i++) {
+        NetworkPlayer_onTick(&netPlayers[i]);
     }
 }

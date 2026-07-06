@@ -13,6 +13,9 @@ typedef struct {
 } ZombieModel;
 
 void ZombieModel_init  (ZombieModel* m);
-void ZombieModel_render(ZombieModel* m, double time);
+// matches character.a.a(animStep, headYaw, headPitch): shared by Zombie
+// (always passes 0,0 for head yaw/pitch, its head never turns independently)
+// and NetworkPlayer (aims the head at wherever the remote player is looking)
+void ZombieModel_render(ZombieModel* m, float animStep, float headYaw, float headPitch);
 
 #endif

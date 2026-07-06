@@ -10,6 +10,7 @@
 void Entity_init(Entity* e, Level* level) {
     e->level = level;
     e->xRotation = e->yRotation = 0.f;
+    e->prevXRotation = e->prevYRotation = 0.f;
     e->motionX = e->motionY = e->motionZ = 0.0f;
     e->onGround = false;
     e->horizontalCollision = false;
@@ -68,6 +69,8 @@ void Entity_onTick(Entity* e) {
     e->prevX = e->x;
     e->prevY = e->y;
     e->prevZ = e->z;
+    e->prevXRotation = e->xRotation;
+    e->prevYRotation = e->yRotation;
 }
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
