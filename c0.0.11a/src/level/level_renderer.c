@@ -13,6 +13,7 @@
 #include "../timer.h"
 #include "../hitresult.h"
 #include "../player.h"
+#include "../java_sort.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -46,6 +47,8 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
 }
 
 void LevelRenderer_render(const LevelRenderer* r, int layer) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, r->terrainTex);
     frustum_calculate(&frustum);
 
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
@@ -54,6 +57,7 @@ void LevelRenderer_render(const LevelRenderer* r, int layer) {
             Chunk_render(&r->chunks[i], layer);
         }
     }
+    glDisable(GL_TEXTURE_2D);
 }
 
 void LevelRenderer_destroy(LevelRenderer* r) {
@@ -62,15 +66,14 @@ void LevelRenderer_destroy(LevelRenderer* r) {
 
 /* dirty chunk prioritization */
 
-/* dirty chunk prioritization */
 static const Player* gSortPlayer = NULL;
 static long long gSortNow = 0;
 
-static int dirty_cmp(const void* a, const void* b) {
-    const Chunk* c1 = *(const Chunk* const*)a;
-    const Chunk* c2 = *(const Chunk* const*)b;
-
-    if (c1 == c2) return 0;
+// DirtyChunkSorter, never returns 0
+static int dirty_cmp(const void* a, const void* b, void* ctx) {
+    (void)ctx;
+    const Chunk* c1 = (const Chunk*)a;
+    const Chunk* c2 = (const Chunk*)b;
 
     // visible chunks first
     int v1 = frustum_isVisible(&frustum, &c1->boundingBox);
@@ -78,36 +81,34 @@ static int dirty_cmp(const void* a, const void* b) {
     if (v1 && !v2) return -1;
     if (v2 && !v1) return  1;
 
-    // the longer it's been dirty the sooner, compared in steps of 2000
+    // compared in steps of 2000 ms, the most recently dirtied first
     int d1 = (int)((gSortNow - c1->dirtiedTime) / 2000LL);
     int d2 = (int)((gSortNow - c2->dirtiedTime) / 2000LL);
     if (d1 < d2) return -1;
     if (d1 > d2) return  1;
 
     // finally, closer to player first
-    double dist1 = Chunk_distanceToSqr(c1, gSortPlayer);
-    double dist2 = Chunk_distanceToSqr(c2, gSortPlayer);
-    return (dist1 < dist2) ? -1 : 1;
+    return Chunk_distanceToSqr(c1, gSortPlayer) < Chunk_distanceToSqr(c2, gSortPlayer) ? -1 : 1;
 }
 
-int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
+void LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     frustum_calculate(&frustum);
 
     // collect dirty chunk pointers
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
     Chunk** list = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
-    if (!list) return 0;
+    if (!list) return;
 
     int n = 0;
     for (int i = 0; i < total; ++i) {
         if (Chunk_isDirty(&r->chunks[i])) list[n++] = &r->chunks[i];
     }
-    if (n == 0) { free(list); return 0; }
+    if (n == 0) { free(list); return; }
 
     // sort with priorities
     gSortPlayer = player;
     gSortNow    = currentTimeMillis();
-    qsort(list, (size_t)n, sizeof(Chunk*), dirty_cmp);
+    JavaSort_sort((void**)list, n, dirty_cmp, NULL);
 
     // rebuild up to 8 per frame
     int limit = n < 8 ? n : 8;
@@ -117,7 +118,48 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     }
 
     free(list);
-    return limit;
+}
+
+void LevelRenderer_pick(LevelRenderer* r, const Player* player, const Frustum* f) {
+    float rr = 3.0f;
+    AABB box = AABB_grow(&player->e.boundingBox, rr, rr, rr);
+    int x0 = (int)box.minX;
+    int x1 = (int)(box.maxX + 1.0f);
+    int y0 = (int)box.minY;
+    int y1 = (int)(box.maxY + 1.0f);
+    int z0 = (int)box.minZ;
+    int z1 = (int)(box.maxZ + 1.0f);
+
+    glInitNames();
+    glPushName(0);
+    glPushName(0);
+    for (int x = x0; x < x1; x++) {
+        glLoadName(x);
+        glPushName(0);
+        for (int y = y0; y < y1; y++) {
+            glLoadName(y);
+            glPushName(0);
+            for (int z = z0; z < z1; z++) {
+                const Tile* tile = gTiles[Level_getTile(r->level, x, y, z)];
+                AABB tileBox = AABB_create((float)x, (float)y, (float)z, (float)(x + 1), (float)(y + 1), (float)(z + 1));
+                if (tile && frustum_isVisible(f, &tileBox)) {
+                    glLoadName(z);
+                    glPushName(0);
+                    for (int i = 0; i < 6; i++) {
+                        glLoadName(i);
+                        Tessellator_init(&TESSELLATOR);
+                        Face_render(&TESSELLATOR, x, y, z, i);
+                        Tessellator_flush(&TESSELLATOR);
+                    }
+                    glPopName();
+                }
+            }
+            glPopName();
+        }
+        glPopName();
+    }
+    glPopName();
+    glPopName();
 }
 
 // mode 0 pulses additively on all 6 faces
@@ -126,10 +168,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
     if (!h) return;
 
     if (mode == 0) {
-        // --- Destroy highlight: additive, pulsing; draw all 6 faces untextured
+        // destroy highlight: additive, pulsing, draws all 6 faces untextured
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
+        float a = ((float)sin((double)currentTimeMillis() / 100.0) * 0.2f + 0.4f) * 0.5f;
         glColor4f(1.f, 1.f, 1.f, a);
 
         Tessellator_init(&TESSELLATOR);
@@ -142,12 +184,12 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         return;
     }
 
-    // --- Place preview: alpha blend, pulsing tint+alpha on adjacent cell
+    // place preview: alpha blend, pulsing tint and alpha on adjacent cell
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    float br = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.8);
-    float al = (float)(sin((double)currentTimeMillis() / 200.0) * 0.2 + 0.5);
+    float br = (float)sin((double)currentTimeMillis() / 100.0) * 0.2f + 0.8f;
+    float al = (float)sin((double)currentTimeMillis() / 200.0) * 0.2f + 0.5f;
     glColor4f(br, br, br, al);
 
     int nx = 0, ny = 0, nz = 0;
@@ -166,12 +208,11 @@ void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, int mode, int tileI
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, r->terrainTex);
 
-        Tessellator_setIgnoreColor(&TESSELLATOR, 1);
         Tessellator_init(&TESSELLATOR);
+        Tessellator_setIgnoreColor(&TESSELLATOR, 1);
         t->render(t, &TESSELLATOR, r->level, 0, x, y, z);
         t->render(t, &TESSELLATOR, r->level, 1, x, y, z);
         Tessellator_flush(&TESSELLATOR);
-        Tessellator_setIgnoreColor(&TESSELLATOR, 0);
 
         glDisable(GL_TEXTURE_2D);
     }

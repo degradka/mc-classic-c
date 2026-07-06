@@ -17,8 +17,9 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->renderer = NULL;
     level->unprocessed = 0;
 
-    level->blocks = (byte*)malloc((size_t)width * height * depth);
-    level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
+    JRandom_initRandom(&level->random);
+    level->blocks = (byte*)calloc((size_t)width * height * depth, 1);
+    level->lightDepths = (int*)calloc((size_t)width * height, sizeof(int));
     if (!level->blocks || !level->lightDepths) {
         fprintf(stderr, "Failed to allocate level memory\n");
         exit(EXIT_FAILURE);
@@ -99,6 +100,49 @@ void Level_generateMap(Level* level) {
     }
 
     free(first); free(second); free(cliff); free(rock);
+
+    // caves
+    JRandom random;
+    JRandom_initRandom(&random);
+    int count = w * h * d / 256 / 64;
+    for (int i = 0; i < count; i++) {
+        float x = JRandom_nextFloat(&random) * (float)w;
+        float y = JRandom_nextFloat(&random) * (float)d;
+        float z = JRandom_nextFloat(&random) * (float)h;
+        int length = (int)(JRandom_nextFloat(&random) + JRandom_nextFloat(&random) * 150.0f);
+        float dir1 = (float)(JRandom_nextFloat(&random) * M_PI * 2.0);
+        float dira1 = 0.0f;
+        float dir2 = (float)(JRandom_nextFloat(&random) * M_PI * 2.0);
+        float dira2 = 0.0f;
+        for (int l = 0; l < length; l++) {
+            x = (float)(x + sin(dir1) * cos(dir2));
+            z = (float)(z + cos(dir1) * cos(dir2));
+            y = (float)(y + sin(dir2));
+            dir1 += dira1 * 0.2f;
+            dira1 *= 0.9f;
+            dira1 += JRandom_nextFloat(&random) - JRandom_nextFloat(&random);
+            dir2 += dira2 * 0.5f;
+            dir2 *= 0.5f;
+            dira2 *= 0.9f;
+            dira2 += JRandom_nextFloat(&random) - JRandom_nextFloat(&random);
+            float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
+            for (int xx = (int)(x - size); xx <= (int)(x + size); xx++) {
+                for (int yy = (int)(y - size); yy <= (int)(y + size); yy++) {
+                    for (int zz = (int)(z - size); zz <= (int)(z + size); zz++) {
+                        float xd = (float)xx - x;
+                        float yd = (float)yy - y;
+                        float zd = (float)zz - z;
+                        float dd = xd * xd + yd * yd * 2.0f + zd * zd;
+                        if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
+                            xx < w - 1 && yy < d - 1 && zz < h - 1) {
+                            int ii = (yy * h + zz) * w + xx;
+                            if (level->blocks[ii] == 1) level->blocks[ii] = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 bool Level_isLightBlocker(const Level* level, int x, int y, int z) {
@@ -206,11 +250,6 @@ int Level_getTile(const Level* level, int x, int y, int z) {
     return level->blocks[index];
 }
 
-AABB Level_getTilePickAABB(const Level* level, int x, int y, int z) {
-    (void)level;
-    return AABB_create(x, y, z, x+1, y+1, z+1);
-}
-
 bool Level_isLit(const Level* level, int x, int y, int z) {
     return (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) ||
            (y >= level->lightDepths[x + z * level->width]);
@@ -222,9 +261,9 @@ void Level_onTick(Level* level) {
     level->unprocessed -= ticks * 400;
 
     for (int i = 0; i < ticks; ++i) {
-        int x = rand() % level->width;
-        int y = rand() % level->depth;
-        int z = rand() % level->height;
+        int x = JRandom_nextIntN(&level->random, level->width);
+        int y = JRandom_nextIntN(&level->random, level->depth);
+        int z = JRandom_nextIntN(&level->random, level->height);
         int id = Level_getTile(level, x, y, z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (t && t->onTick) t->onTick(t, level, x, y, z);

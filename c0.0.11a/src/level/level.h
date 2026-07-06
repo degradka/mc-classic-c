@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "../phys/aabb.h"
+#include "../jrandom.h"
 #include <math.h>
 
 typedef unsigned char byte;
@@ -21,6 +22,7 @@ typedef struct Level {
     int*  lightDepths;
     LevelRenderer* renderer;
     int unprocessed;
+    JRandom random;
 } Level;
 
 typedef struct {
@@ -47,8 +49,6 @@ void  Level_save(const Level* level);
 
 bool  level_setTile(Level* level, int x, int y, int z, int type);
 int   Level_getTile(const Level* level, int x, int y, int z);
-
-AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);
 
 bool  Level_isLit(const Level* level, int x, int y, int z);
 

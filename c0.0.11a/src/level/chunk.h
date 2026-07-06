@@ -13,7 +13,6 @@ struct Player; typedef struct Player Player;
 
 typedef struct Chunk {
     Level* level;
-    int    texture;
 
     AABB   boundingBox;
 
@@ -24,8 +23,10 @@ typedef struct Chunk {
     bool dirty;
     long long dirtiedTime;
 
-    double x, y, z;
+    float x, y, z;
 } Chunk;
+
+extern int Chunk_updates;
 
 void Chunk_init(Chunk* chunk, Level* level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
 void Chunk_rebuild(Chunk* chunk, int layer);
@@ -33,6 +34,6 @@ void Chunk_render(Chunk* chunk, int layer);
 void Chunk_setDirty(Chunk* chunk);
 
 static inline bool Chunk_isDirty(const Chunk* c) { return c->dirty; }
-double Chunk_distanceToSqr(const Chunk* c, const Player* p);
+float Chunk_distanceToSqr(const Chunk* c, const Player* p);
 
 #endif  // CHUNK_H

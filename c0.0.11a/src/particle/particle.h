@@ -9,6 +9,8 @@
 
 typedef struct {
     Entity base;
+    // its own xd yd zd, Entity_move never zeroes them
+    float  xd, yd, zd;
     int    textureId;
     float  textureUOffset; float  textureVOffset;
     float  size;
@@ -17,12 +19,10 @@ typedef struct {
 } Particle;
 
 void Particle_init(Particle* p, Level* level,
-                   double x, double y, double z,
-                   double motionX, double motionY, double motionZ,
+                   float x, float y, float z,
+                   float motionX, float motionY, float motionZ,
                    int textureId);
-
 void Particle_onTick(Particle* p);
-
 void Particle_render(Particle* p, Tessellator* t, float partialTicks,
                      float cameraX, float cameraY, float cameraZ,
                      float cameraXWithY, float cameraZWithY);

@@ -8,6 +8,5 @@
 #include <stdlib.h>
 
 GLuint loadTexture(const char* path, int filterMode);
-void bind(int id);
 
 #endif  // TEXTURES_H

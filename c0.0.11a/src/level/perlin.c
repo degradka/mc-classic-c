@@ -1,22 +1,24 @@
 // level/perlin.c: simple Perlin like height field
 
 #include "perlin.h"
+#include "../jrandom.h"
 #include <stdlib.h>
 
 #define FUZZINESS 16
 
-static inline int rnd_range(int max2) { return (rand() % max2); }
 
 void Perlin_read(int width, int height, int octave, int* out) {
     int wh = width * height;
-    int* table = (int*)malloc((size_t)wh * sizeof(int));
+    int* table = (int*)calloc((size_t)wh, sizeof(int));
     if (!table) return;
+    JRandom random;
+    JRandom_initRandom(&random);
 
     // seed coarse grid with random values scaled by FUZZINESS
     int step_init = width >> octave;
     for (int y = 0; y < height; y += step_init) {
         for (int x = 0; x < width; x += step_init) {
-            table[x + y * width] = ((rnd_range(256) - 128) * FUZZINESS);
+            table[x + y * width] = (JRandom_nextIntN(&random, 256) - 128) * FUZZINESS;
         }
     }
 
@@ -33,7 +35,7 @@ void Perlin_read(int width, int height, int octave, int* out) {
                 int vy  = table[(x % width) + ((y + step) % height) * width];
                 int vxy = table[((x + step) % width) + ((y + step) % height) * width];
 
-                int mutated = (v + vy + vx + vxy) / 4 + (rnd_range(max * 2) - max);
+                int mutated = (v + vy + vx + vxy) / 4 + JRandom_nextIntN(&random, max * 2) - max;
                 table[(x + half) + (y + half) * width] = mutated;
             }
         }
@@ -43,7 +45,7 @@ void Perlin_read(int width, int height, int octave, int* out) {
             for (int x = 0; x < width; x += step) {
                 int v  = table[x + y * width];
                 int vx = table[((x + step) % width) + y * width];
-                int vy = table[x + ((y + step) % height) * width];
+                int vy = table[x + ((y + step) % width) * width];
 
                 // bitwise wrap, width and height are powers of two
                 int hxpos = table[((x + half) & (width  - 1)) + ((y + half - step) & (height - 1)) * width];
@@ -51,8 +53,8 @@ void Perlin_read(int width, int height, int octave, int* out) {
 
                 int h  = table[(x + half) % width + ((y + half) % height) * width];
 
-                int mutatedX = (v + vx + h + hxpos) / 4 + (rnd_range(max * 2) - max);
-                int mutatedY = (v + vy + h + hypos) / 4 + (rnd_range(max * 2) - max);
+                int mutatedX = (v + vx + h + hxpos) / 4 + JRandom_nextIntN(&random, max * 2) - max;
+                int mutatedY = (v + vy + h + hypos) / 4 + JRandom_nextIntN(&random, max * 2) - max;
 
                 table[(x + half) + y * width] = mutatedX;
                 table[x + (y + half) * width] = mutatedY;

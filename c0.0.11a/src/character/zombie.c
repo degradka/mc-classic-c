@@ -3,20 +3,20 @@
 #include "zombie.h"
 #include "../renderer/textures.h"
 #include "../timer.h"
+#include "../jrandom.h"
 #include <GL/glew.h>
 #include <math.h>
 
 static int texChar = 0;
 
-void Zombie_init(Zombie* z, Level* level, double x, double y, double zpos) {
+void Zombie_init(Zombie* z, Level* level, float x, float y, float zpos) {
     Entity_init(&z->base, level);
-    Entity_setPosition(&z->base, x, y, zpos);
-
     ZombieModel_init(&z->model);
 
-    z->rotation = ((double)rand() / RAND_MAX) * M_PI * 2.0;
-    z->rotationMotionFactor = (((double)rand() / RAND_MAX) + 1.0) * 0.01;
-    z->timeOffset = (float)(((double)rand() / RAND_MAX) * 1239813.0);
+    z->rotationMotionFactor = (float)(JRandom_mathRandom() + 1.0) * 0.01f;
+    Entity_setPosition(&z->base, x, y, zpos);
+    z->timeOffset = (float)JRandom_mathRandom() * 1239813.0f;
+    z->rotation = (float)(JRandom_mathRandom() * M_PI * 2.0);
     z->speed = 1.0f;
 
     if (!texChar) texChar = loadTexture("resources/char.png", GL_NEAREST);
@@ -25,27 +25,26 @@ void Zombie_init(Zombie* z, Level* level, double x, double y, double zpos) {
 void Zombie_onTick(Zombie* z) {
     Entity_onTick(&z->base);
 
+    if (z->base.y < -100.0f) Entity_remove(&z->base);
+
     z->rotation += z->rotationMotionFactor;
-    z->rotationMotionFactor *= 0.99;
-    z->rotationMotionFactor += ((double)rand() / RAND_MAX - (double)rand() / RAND_MAX)
-                             *  (double)rand() / RAND_MAX * (double)rand() / RAND_MAX
-                             *  0.009999999776482582;
+    z->rotationMotionFactor = (float)(z->rotationMotionFactor * 0.99);
+    double r1 = JRandom_mathRandom(), r2 = JRandom_mathRandom();
+    double r3 = JRandom_mathRandom(), r4 = JRandom_mathRandom();
+    z->rotationMotionFactor = (float)(z->rotationMotionFactor + (r1 - r2) * r3 * r4 * 0.07999999821186066);
 
-    const float v = (float)sin(z->rotation);
-    const float f = (float)cos(z->rotation);
+    float xa = (float)sin(z->rotation);
+    float ya = (float)cos(z->rotation);
 
-    if (z->base.onGround && ((double)rand() / RAND_MAX) < 0.08) z->base.motionY = 0.5f;
+    if (z->base.onGround && JRandom_mathRandom() < 0.08) z->base.motionY = 0.5f;
 
-    Entity_moveRelative(&z->base, v, f, z->base.onGround ? 0.1f : 0.02f);
-    z->base.motionY -= 0.08f;
-
+    Entity_moveRelative(&z->base, xa, ya, z->base.onGround ? 0.1f : 0.02f);
+    z->base.motionY = (float)(z->base.motionY - 0.08);
     Entity_move(&z->base, z->base.motionX, z->base.motionY, z->base.motionZ);
 
     z->base.motionX *= 0.91f;
     z->base.motionY *= 0.98f;
     z->base.motionZ *= 0.91f;
-
-    if (z->base.y < -100.0f) Entity_remove(&z->base);
 
     if (z->base.onGround) {
         z->base.motionX *= 0.7f;
@@ -54,28 +53,24 @@ void Zombie_onTick(Zombie* z) {
 }
 
 void Zombie_render(const Zombie* z, float partialTicks) {
-    glPushMatrix();
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texChar);
+    glPushMatrix();
 
-    const double t  = (double)getCurrentTimeInNanoseconds() * 1e-9 * 10.0 * z->speed + z->timeOffset;
-    const double ix = z->base.prevX + (z->base.x - z->base.prevX) * partialTicks;
-    const double iy = z->base.prevY + (z->base.y - z->base.prevY) * partialTicks;
-    const double iz = z->base.prevZ + (z->base.z - z->base.prevZ) * partialTicks;
+    double time = (double)getCurrentTimeInNanoseconds() / 1.0E9 * 10.0 * z->speed + z->timeOffset;
+    float size = 0.058333334f;
+    float yy = (float)(-fabs(sin(time * 0.6662)) * 5.0 - 23.0);
 
-    glTranslated(ix, iy, iz);
-    glScalef(1.f, -1.f, 1.f);
-
-    const float size = 7.0f / 120.0f;
+    glTranslatef(z->base.prevX + (z->base.x - z->base.prevX) * partialTicks,
+                 z->base.prevY + (z->base.y - z->base.prevY) * partialTicks,
+                 z->base.prevZ + (z->base.z - z->base.prevZ) * partialTicks);
+    glScalef(1.0f, -1.0f, 1.0f);
     glScalef(size, size, size);
+    glTranslatef(0.0f, yy, 0.0f);
+    glRotatef(z->rotation * 57.29578f + 180.0f, 0.0f, 1.0f, 0.0f);
 
-    const double offY = fabs(sin(t * 2.0 / 3.0)) * 5.0 + 23.0;
-    glTranslated(0.0, -offY, 0.0);
-    glRotated(z->rotation * 180.0 / M_PI + 180.0, 0, 1, 0);
+    ZombieModel_render(&z->model, (float)time);
 
-    // Render the extracted model
-    ZombieModel_render(&z->model, t);
-
-    glDisable(GL_TEXTURE_2D);
     glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
 }

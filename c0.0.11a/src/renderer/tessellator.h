@@ -29,4 +29,5 @@ void Tessellator_setIgnoreColor(Tessellator* t, int ignore);
 void Tessellator_flush         (Tessellator* t);
 void Tessellator_clear         (Tessellator* t);
 
+
 #endif  // TESSELLATOR_H

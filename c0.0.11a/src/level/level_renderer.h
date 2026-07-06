@@ -4,6 +4,7 @@
 #define LEVELRENDERER_H
 
 #include "../hitresult.h"
+#include "../renderer/frustum.h"
 
 struct Level;     typedef struct Level Level;
 struct Chunk;     typedef struct Chunk Chunk;
@@ -34,6 +35,7 @@ void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
 void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, int mode, int tileId);
 
-int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+void LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
+void LevelRenderer_pick(LevelRenderer* r, const Player* player, const Frustum* frustum);
 
 #endif  // LEVELRENDERER_H

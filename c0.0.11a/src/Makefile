@@ -8,7 +8,7 @@ INCLUDE := -I.
 # debug (default) or release
 BUILD ?= debug
 
-SRC = minecraft.c player.c timer.c  hitresult.c \
+SRC = minecraft.c player.c timer.c  hitresult.c jrandom.c java_sort.c \
       level/chunk.c level/level.c level/level_renderer.c \
       level/tile/tile.c phys/aabb.c entity.c character/zombie.c \
       character/polygon.c character/cube.c level/perlin.c \

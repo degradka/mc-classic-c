@@ -9,32 +9,30 @@ void Player_init(Player* p, Level* level) {
 }
 
 void Player_turn(Player* p, GLFWwindow* window, float dx, float dy) {
+    (void)window;
     Entity_turn(&p->e, dx, dy);
-    // consume mouse deltas by resetting cursor to the origin each frame
-    glfwSetCursorPos(window, 0, 0);
+}
+
+static bool down(GLFWwindow* w, int key) {
+    return glfwGetKey(w, key) == GLFW_PRESS;
 }
 
 void Player_onTick(Player* p, GLFWwindow* window) {
     Entity_onTick(&p->e);
 
-    float forward = 0.0f, strafe = 0.0f;
+    float xa = 0.0f, ya = 0.0f;
 
-    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-        Entity_resetPosition(&p->e);
-    }
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) forward -= 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) forward += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) strafe  -= 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) strafe  += 1.0f;
-
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && p->e.onGround) {
+    if (down(window, GLFW_KEY_R)) Entity_resetPosition(&p->e);
+    if (down(window, GLFW_KEY_UP) || down(window, GLFW_KEY_W)) ya--;
+    if (down(window, GLFW_KEY_DOWN) || down(window, GLFW_KEY_S)) ya++;
+    if (down(window, GLFW_KEY_LEFT) || down(window, GLFW_KEY_A)) xa--;
+    if (down(window, GLFW_KEY_RIGHT) || down(window, GLFW_KEY_D)) xa++;
+    if ((down(window, GLFW_KEY_SPACE) || down(window, GLFW_KEY_LEFT_SUPER)) && p->e.onGround) {
         p->e.motionY = 0.5f;
     }
 
-    Entity_moveRelative(&p->e, strafe, forward, p->e.onGround ? 0.1f : 0.02f);
-
-    p->e.motionY -= 0.08f; // gravity
-
+    Entity_moveRelative(&p->e, xa, ya, p->e.onGround ? 0.1f : 0.02f);
+    p->e.motionY = (float)(p->e.motionY - 0.08);
     Entity_move(&p->e, p->e.motionX, p->e.motionY, p->e.motionZ);
 
     p->e.motionX *= 0.91f;

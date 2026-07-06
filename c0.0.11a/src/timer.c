@@ -34,7 +34,10 @@ long long getCurrentTimeInNanoseconds(void) {
     LARGE_INTEGER now;
     if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&now);
-    return (long long)((now.QuadPart * 1000000000LL) / freq.QuadPart);
+    // split so the multiply can't overflow after a few hours of uptime
+    long long whole     = now.QuadPart / freq.QuadPart;
+    long long remainder = now.QuadPart % freq.QuadPart;
+    return whole * 1000000000LL + (remainder * 1000000000LL) / freq.QuadPart;
 
 #elif defined(__APPLE__)
     static mach_timebase_info_data_t tb = {0};
@@ -76,12 +79,13 @@ void Timer_advanceTime(Timer* timer) {
     long long passedNs = now - timer->lastTime;
     timer->lastTime    = now;
 
-    if (passedNs <= 0)                 passedNs = 1;
+    if (passedNs < 0)                  passedNs = 0;
     if (passedNs > MAX_NS_PER_UPDATE)  passedNs = MAX_NS_PER_UPDATE;
 
-    timer->fps = (float)((double)NS_PER_SECOND / (double)passedNs);
+    // no time passed would divide by zero, it never happens
+    if (passedNs > 0) timer->fps = (float)(NS_PER_SECOND / passedNs);
 
-    timer->passedTime += (float)((double)passedNs * timer->timeScale * timer->ticksPerSecond / (double)NS_PER_SECOND);
+    timer->passedTime += (float)passedNs * timer->timeScale * timer->ticksPerSecond / 1.0E9f;
     timer->ticks = (int)timer->passedTime;
     if (timer->ticks > MAX_TICKS_PER_UPDATE) timer->ticks = MAX_TICKS_PER_UPDATE;
 
