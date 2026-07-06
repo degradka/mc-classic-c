@@ -1,8 +1,14 @@
 // minecraft.c: entry point, window and GL init, camera, picking, main loop
 
+// must come before any header that might drag in <windows.h> (GLEW does on
+// Windows), or its old winsock.h beats winsock2.h to the punch and the
+// build fails with redefinition errors
+#include "net/connection.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include <math.h>
 #include <float.h>
 
@@ -26,6 +32,8 @@
 #include "gui/font.h"
 #include "gui/screen.h"
 #include "gui/pause_screen.h"
+#include "gui/chat_input_screen.h"
+#include "gui/message_screen.h"
 
 #define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
 
@@ -49,6 +57,7 @@ static int prevG    = GLFW_RELEASE;
 static int prevY    = GLFW_RELEASE;
 static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
+static int prevT    = GLFW_RELEASE;
 
 // c0.0.14a_08: hotbar expanded from 6 individually wired keys to a real 9
 // slot bar (rock, dirt, stonebrick, wood, sapling, log, leaves, sand,
@@ -60,6 +69,24 @@ static int gLastMineTick = 0;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
 static int gYMouseAxis = 1;            // toggled by Y key, 1 or negative 1
+
+// c0.0.16a_02: chat backlog, max 8 lines, each aged out after 10 real
+// seconds (200 ticks at 20 TPS). Populated by incoming Message packets once
+// networking exists; empty and inert until then.
+#define CHAT_BACKLOG_MAX 8
+typedef struct {
+    char text[96];
+    int  age;
+} ChatLine;
+static ChatLine chatLines[CHAT_BACKLOG_MAX];
+static int chatLineCount = 0;
+
+static bool gConnected = false;        // true once a server connection's Login packet went out
+static bool gLoading   = false;        // true from connect attempt until LevelFinalize installs a level
+static NetConnection gConn;
+static char gConnectHost[256] = "";
+static int  gConnectPort = 25565;
+static char gConnectUsername[64] = ""; // empty = fall back to "guest"
 
 static int texTerrain = 0;
 static int texDirt = 0;
@@ -88,6 +115,7 @@ static int prevScreenClick = GLFW_RELEASE;
 
 static void tick(Player* player, GLFWwindow* window);
 static void computeGuiMouse(int* xm, int* ym);
+void Minecraft_setScreen(Screen* screen);
 
 /* input and GL state helpers */
 
@@ -96,15 +124,12 @@ static void computeGuiMouse(int* xm, int* ym);
 static void releaseMouseAndOpenPause(void) {
     if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) return; // already released
 
-    Player_releaseAllKeys(&player);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-
     int fbw, fbh;
     glfwGetFramebufferSize(window, &fbw, &fbh);
     int screenWidth  = fbw * 240 / fbh;
     int screenHeight = 240;
     PauseScreen_init(&gPauseScreen, &gFont, screenWidth, screenHeight);
-    activeScreen = (Screen*)&gPauseScreen;
+    Minecraft_setScreen((Screen*)&gPauseScreen);
 }
 
 // matches Minecraft.grabMouse(): grabs cursor again and closes any open screen
@@ -119,15 +144,90 @@ void Minecraft_closeScreenAndGrabMouse(void) {
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
 }
 
-void Minecraft_generateNewLevel(void) {
-    // c0.0.13a_03 regenerates at the same 256x256x64 size as the boot map,
-    // matching Minecraft.c() (no more separate 32x512x64 regenerate preset)
+// c0.0.16a_02: PauseScreen no longer regenerates directly, it opens a size
+// picker (Small/Normal/Huge) first, which calls this with 0/1/2. Size is
+// 128 << sizePreset per axis, depth always 64 (Normal, preset 1, is the same
+// 256x256x64 the boot map already used since c0.0.13a_03).
+void Minecraft_generateNewLevelSized(int sizePreset) {
+    int size = 128 << sizePreset;
+
     LevelRenderer_destroy(&levelRenderer);
-    Level_resize(&level, 256, 256, 64);
+    Level_resize(&level, size, size, 64);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
 
     Entity_resetPosition(&player.e);
     mobCount = 0;
+}
+
+// matches Minecraft.setScreen(): any screen release mouse look, letting the
+// player click and read text normally instead of aiming the camera. Chat
+// used to skip this, leaving the camera live behind the text box.
+void Minecraft_setScreen(Screen* screen) {
+    if (!screen) {
+        Minecraft_closeScreenAndGrabMouse();
+        return;
+    }
+    activeScreen = screen;
+    Player_releaseAllKeys(&player);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+}
+
+// c0.0.16a_02: sends a chat message packet (sender id -1) over the network
+// connection. No-op in singleplayer, deliberately: the real client
+// dereferences the connection here without a null check, which crashes with
+// a NullPointerException if you send a message with no server connected.
+// Not reproducing that.
+void Minecraft_sendChat(const char* text) {
+    if (!gConnected) return;
+    NetConnection_sendMessage(&gConn, text);
+}
+
+// matches net.c's use of Minecraft's generic 2 line message screen for both
+// connect failure and mid session disconnects
+void Minecraft_openMessageScreen(const char* title, const char* message) {
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    int screenWidth  = fbw * 240 / fbh;
+    int screenHeight = 240;
+    MessageScreen_open(&gFont, screenWidth, screenHeight, title, message);
+    gConnected = false;
+    gLoading = false;
+}
+
+// matches LevelFinalize's handling: installs the freshly gunzipped level and
+// swaps in a fresh LevelRenderer sized for it, then leaves loading mode --
+// spawn position arrives separately as a SpawnPlayer packet
+void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
+    LevelRenderer_destroy(&levelRenderer);
+    Level_setDataFromNetwork(&level, w, h, d, blocks);
+    LevelRenderer_init(&levelRenderer, &level, texTerrain);
+    mobCount = 0;
+    gLoading = false;
+}
+
+// matches SetBlock server to client: applies directly, no local echo back
+void Minecraft_networkSetBlock(int x, int y, int z, int type) {
+    level_setTile(&level, x, y, z, type);
+}
+
+// matches SpawnPlayer with id < 0: the server telling us where our own
+// player belongs, once the level transfer finishes
+void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float pitch) {
+    Entity_setPosition(&player.e, x, y, z);
+    player.e.yRotation = yaw;
+    player.e.xRotation = pitch;
+}
+
+// matches Minecraft.addChatMessage(): appends to the backlog, dropping the
+// oldest line first once already at the 8 line cap
+void Minecraft_addChatLine(const char* text) {
+    if (chatLineCount == CHAT_BACKLOG_MAX) {
+        memmove(&chatLines[0], &chatLines[1], sizeof(ChatLine) * (CHAT_BACKLOG_MAX - 1));
+        chatLineCount--;
+    }
+    ChatLine* line = &chatLines[chatLineCount++];
+    snprintf(line->text, sizeof line->text, "%s", text);
+    line->age = 0;
 }
 
 // matches Minecraft.beginLevelLoading(): sets up the 2D ortho projection
@@ -227,19 +327,33 @@ const char* Minecraft_getUserName(void) {
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)w; (void)scancode; (void)mods;
-    if (action != GLFW_PRESS) return;
 
     // c0.0.13a_03: while a screen is up, keys go to it instead of gameplay,
     // matching Screen.updateEvents() dispatching every key press to
-    // keyPressed() (whose new default handles Escape by closing the screen)
+    // keyPressed() (whose new default handles Escape by closing the screen).
+    // c0.0.16a_02: text entry screens need REPEAT too, so backspace keeps
+    // deleting while held, matching GLFW's own key repeat.
     if (activeScreen) {
+        if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
         if (activeScreen->keyPressed) activeScreen->keyPressed(activeScreen, 0, key);
         return;
     }
 
+    if (action != GLFW_PRESS) return;
     if (key == GLFW_KEY_ESCAPE) {
         releaseMouseAndOpenPause();
     }
+}
+
+// c0.0.16a_02: GLFW splits typed text from raw key codes, unlike the real
+// source's single combined keyPressed(char, key) event, so printable
+// characters for text entry screens (chat) come through here instead,
+// dispatched with key 0 as a sentinel meaning "this is a character, not a
+// special key"
+static void charCallback(GLFWwindow* w, unsigned int codepoint) {
+    (void)w;
+    if (!activeScreen || !activeScreen->keyPressed) return;
+    if (codepoint < 128) activeScreen->keyPressed(activeScreen, (char)codepoint, 0);
 }
 
 // c0.0.14a_08: mouse wheel now cycles the hotbar selection
@@ -333,9 +447,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.14a_08", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.16a_02", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.14a_08", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.16a_02", NULL, NULL);
     }
 
     if (!window) {
@@ -378,12 +492,17 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
     glfwSetKeyCallback(window, keyCallback);
     glfwSetScrollCallback(window, scrollCallback);
+    glfwSetCharCallback(window, charCallback);
 
     Tile_registerAll();
 
     // c0.0.13a_03 defaults to "anonymous" instead of "noname" when no
-    // session is set, matching Minecraft.run()'s fallback level owner name
-    User_init(&user, "anonymous");
+    // session is set, matching Minecraft.run()'s fallback level owner name.
+    // c0.0.16a_02: the connect path takes an optional username argument,
+    // falling back to "guest" instead of "anonymous" if none is given --
+    // both fallbacks exist because we have no real login session either way
+    const char* connectName = gConnectUsername[0] ? gConnectUsername : "guest";
+    User_init(&user, gConnectHost[0] ? connectName : "anonymous");
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
@@ -402,11 +521,22 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     Timer_init(&timer, 20.0f);
 
+    // c0.0.16a_02: a host argument switches to multiplayer -- the boot level
+    // above stays only as a placeholder until LevelFinalize replaces it
+    if (gConnectHost[0]) {
+        if (NetConnection_open(&gConn, gConnectHost, gConnectPort, Minecraft_getUserName())) {
+            gConnected = true;
+            gLoading = true;
+        }
+    }
+
     return 1;
 }
 
 static void destroy(Level* lvl) {
-    Level_save(lvl);
+    // don't let a downloaded server level overwrite the local singleplayer save
+    if (!gConnected) Level_save(lvl);
+    if (gConnected) NetConnection_close(&gConn);
     Level_destroy(lvl);
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -491,7 +621,7 @@ static void drawGui(float partialTicks) {
     glPopMatrix();
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.14a_08", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.16a_02", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -513,6 +643,13 @@ static void drawGui(float partialTicks) {
     Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 1), 0.0f);
     Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 1), 0.0f);
     Tessellator_end(&hudTess);
+
+    // chat backlog, newest line just above the hotbar, older lines stacked
+    // upward in 8px rows
+    for (int i = 0; i < chatLineCount; i++) {
+        int y = screenHeight - 4 - (chatLineCount << 3) + (i << 3) - 16;
+        Font_drawShadow(&gFont, &hudTess, chatLines[i].text, 2, y, 0xFFFFFF);
+    }
 
     if (activeScreen) {
         int xm, ym;
@@ -647,9 +784,10 @@ static void handleGameplayKeys(GLFWwindow* w) {
         prevNumKeys[i] = k;
     }
 
-    // G = spawn zombie at player
+    // G = spawn zombie at player. c0.0.16a_02 disables this debug key whenever
+    // connected to a server
     int g = glfwGetKey(w, GLFW_KEY_G);
-    if (g == GLFW_PRESS && prevG == GLFW_RELEASE && mobCount < MAX_MOBS) {
+    if (g == GLFW_PRESS && prevG == GLFW_RELEASE && !gConnected && mobCount < MAX_MOBS) {
         Zombie_init(&mobs[mobCount++], &level, player.e.x, player.e.y, player.e.z);
     }
     prevG = g;
@@ -667,6 +805,15 @@ static void handleGameplayKeys(GLFWwindow* w) {
         LevelRenderer_toggleDrawDistance(&levelRenderer);
     }
     prevF = kF;
+
+    // c0.0.16a_02: T opens chat. Minecraft_setScreen releases the held
+    // movement keys itself, same as any other screen opening.
+    int kT = glfwGetKey(w, GLFW_KEY_T);
+    if (kT == GLFW_PRESS && prevT == GLFW_RELEASE) {
+        int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
+        ChatInputScreen_open(&gFont, fbw * 240 / fbh, 240);
+    }
+    prevT = kT;
 }
 
 static void mineOrPlace(void);
@@ -726,6 +873,9 @@ static void mineOrPlace(void) {
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
         if (t && changed) {
+            // type field is the currently selected tile even on destroy,
+            // matching the real source -- the server ignores it for mode 0
+            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, selectedTileId);
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
         }
     } else {
@@ -751,6 +901,7 @@ static void mineOrPlace(void) {
                 if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
             }
             if (!blocked) {
+                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, selectedTileId);
                 level_setTile(&level, x, y, z, selectedTileId);
             }
         }
@@ -790,6 +941,20 @@ static void handleScreenClicks(GLFWwindow* w) {
     // gameplay resumes, and immediately fires a destroy or place action.
     prevLeft  = left;
     prevRight = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT);
+}
+
+// same reasoning as handleScreenClicks' prevLeft/prevRight sync above, but
+// for handleGameplayKeys' trackers: Enter still held down from sending a
+// chat message read as a fresh press the frame gameplay polling resumes,
+// setting the spawn point right after chat closes.
+static void syncGameplayKeyEdges(GLFWwindow* w) {
+    prevR     = glfwGetKey(w, GLFW_KEY_R);
+    prevEnter = glfwGetKey(w, GLFW_KEY_ENTER);
+    for (int i = 0; i < 9; ++i) prevNumKeys[i] = glfwGetKey(w, GLFW_KEY_1 + i);
+    prevG = glfwGetKey(w, GLFW_KEY_G);
+    prevY = glfwGetKey(w, GLFW_KEY_Y);
+    prevF = glfwGetKey(w, GLFW_KEY_F);
+    prevT = glfwGetKey(w, GLFW_KEY_T);
 }
 
 /* frame */
@@ -919,28 +1084,46 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
     long long last = currentTimeMillis();
 
     while (!glfwWindowShouldClose(window)) {
+        // captured before glfwPollEvents, since a key callback (Enter, Esc)
+        // can close activeScreen right there, and gameplay key polling must
+        // not run the same frame a screen closed, or the key still physically
+        // held down reads as a fresh press, e.g. closing chat with Enter also
+        // setting the spawn point
+        bool screenWasActive = activeScreen != NULL;
+
         glfwPollEvents();
 
         Timer_advanceTime(&timer);
         for (int i = 0; i < timer.ticks; ++i) tick(p, window);
 
-        pick(timer.partialTicks);
+        // while connecting/downloading a level, skip world interaction and
+        // the normal render entirely -- the loading screen is drawn
+        // synchronously from inside tick()'s packet handling instead,
+        // matching the real source's separate !isLoading render gate
+        if (!gLoading) {
+            pick(timer.partialTicks);
 
-        if (!activeScreen) {
-            handleBlockClicks(window);
-            handleGameplayKeys(window);
-            Player_pollKeys(p, window);
-        } else {
-            handleScreenClicks(window);
-            // handleScreenClicks's button callback can close the screen,
-            // setting activeScreen to null mid frame, so recheck before use.
-            if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
+            if (!screenWasActive) {
+                handleBlockClicks(window);
+                handleGameplayKeys(window);
+                // handleGameplayKeys can open a screen mid frame (T for chat),
+                // so recheck before polling raw key state back into the player,
+                // otherwise the still held movement key gets re-armed the same
+                // frame Player_releaseAllKeys just cleared it
+                if (!activeScreen) Player_pollKeys(p, window);
+            } else {
+                handleScreenClicks(window);
+                syncGameplayKeyEdges(window);
+                // handleScreenClicks's button callback can close the screen,
+                // setting activeScreen to null mid frame, so recheck before use.
+                if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
+            }
+
+            int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
+            gChunkUpdatesAccum += built;
+
+            render(lvl, lr, p, window, timer.partialTicks);
         }
-
-        int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
-        gChunkUpdatesAccum += built;
-
-        render(lvl, lr, p, window, timer.partialTicks);
 
         frames++;
         while (currentTimeMillis() >= last + 1000LL) {
@@ -958,7 +1141,17 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
     destroy(lvl);
 }
 
-int main(void) {
+// c0.0.16a_02: the real client picks singleplayer vs multiplayer from an
+// applet host parameter set once at launch. Porting that as command line
+// args to the exe instead: mc_client.exe [host] [port] [username],
+// no args = singleplayer, username defaults to "guest" if omitted
+int main(int argc, char** argv) {
+    if (argc >= 2) {
+        snprintf(gConnectHost, sizeof gConnectHost, "%s", argv[1]);
+        if (argc >= 3) gConnectPort = atoi(argv[2]);
+        if (argc >= 4) snprintf(gConnectUsername, sizeof gConnectUsername, "%s", argv[3]);
+    }
+
     run(&level, &levelRenderer, &player);
     return EXIT_SUCCESS;
 }
@@ -967,10 +1160,31 @@ static void tick(Player* p, GLFWwindow* w) {
     (void)w;
 
     gTickCount++;
+
+    // chat lines age out 10 real seconds (200 ticks at 20 TPS) after arriving
+    for (int i = 0; i < chatLineCount; i++) {
+        if (chatLines[i].age++ >= (int)(timer.ticksPerSecond * 10.0f)) {
+            memmove(&chatLines[i], &chatLines[i + 1], sizeof(ChatLine) * (chatLineCount - i - 1));
+            chatLineCount--;
+            i--;
+        }
+    }
+
+    // matches f(): drains queued packets, then unconditionally broadcasts
+    // our own position every tick, no dirty check, no rate limiting
+    if (gConnected) {
+        NetConnection_tick(&gConn);
+        if (gConnected) {
+            NetConnection_sendTeleportSelf(&gConn, p->e.x, p->e.y, p->e.z, p->e.yRotation, p->e.xRotation);
+        }
+    }
+
     LevelRenderer_tick(&levelRenderer); // scrolls the new cloud layer
 
-    // random tile ticks (grass growth/decay lives here)
-    Level_onTick(&level);
+    // c0.0.16a_02: the server is authoritative for block state in
+    // multiplayer, so the client never runs its own random tile ticks
+    // (grass growth/decay) while connected
+    if (!gConnected) Level_onTick(&level);
 
     ParticleEngine_onTick(&particleEngine);
 

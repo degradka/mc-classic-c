@@ -16,10 +16,12 @@ typedef unsigned char byte;
 struct LevelRenderer; typedef struct LevelRenderer LevelRenderer;
 
 // a pending liquid/gravity-tile reaction scheduled for a future tick, see
-// Level_addToTickNextTick
+// Level_addToTickNextTick. delay is extra 5-tick drain cycles to wait before
+// firing (c0.0.16a_02, lava only, see Tile.tickDelay).
 typedef struct {
     int x, y, z;
     int tileId;
+    int delay;
 } TickEntry;
 
 typedef struct Level {
@@ -62,6 +64,7 @@ void  Level_destroy(Level* level);
 // regenerates. Caller must rebuild the LevelRenderer afterward since its
 // chunk grid is sized for the old dimensions.
 void  Level_resize(Level* level, int width, int height, int depth);
+void  Level_setDataFromNetwork(Level* level, int width, int height, int depth, const byte* blocks);
 
 bool  Level_isTile(const Level* level, int x, int y, int z);
 bool  Level_isSolidTile(const Level* level, int x, int y, int z);

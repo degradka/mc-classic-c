@@ -4,6 +4,7 @@
 #define SCREEN_H
 
 #include "font.h"
+#include "button.h"
 
 typedef struct Screen Screen;
 
@@ -28,5 +29,12 @@ void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col);
 void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsigned int col2);
 void Screen_drawCenteredString(Screen* s, const char* str, int x, int y, unsigned int color);
 void Screen_drawString(Screen* s, const char* str, int x, int y, unsigned int color);
+
+// draws a button list the same way for every screen that has one: invisible
+// buttons are skipped entirely, disabled ones get a bordered grey look,
+// enabled ones get a black backing box plus hover/normal fill and text
+void Screen_renderButtons(Screen* self, Button* buttons, int count, int xMouse, int yMouse);
+// returns the clicked button's id, or -1 if the click didn't land on one
+int  Screen_buttonClickedAt(Button* buttons, int count, int x, int y);
 
 #endif

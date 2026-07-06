@@ -76,6 +76,41 @@ void Level_resize(Level* level, int width, int height, int depth) {
     level->renderer = renderer;
 }
 
+// installs a level received over the network: raw decompressed block bytes,
+// no save metadata and no generation. Spawn position isn't part of this
+// transfer either, it arrives after as a separate SpawnPlayer packet, so
+// the caller must not rely on xSpawn/ySpawn/zSpawn until that lands
+void Level_setDataFromNetwork(Level* level, int width, int height, int depth, const byte* blocks) {
+    LevelRenderer* renderer = level->renderer;
+    level->renderer = NULL;
+
+    free(level->blocks);
+    free(level->lightDepths);
+
+    level->width = width;
+    level->height = height;
+    level->depth = depth;
+    level->unprocessed = 0;
+    level->xSpawn = level->ySpawn = level->zSpawn = 0;
+    level->rotSpawn = 0.0f;
+    free(level->tickList);
+    level->tickList = NULL;
+    level->tickListSize = level->tickListCapacity = 0;
+
+    size_t total = (size_t)width * height * depth;
+    level->blocks = (byte*)malloc(total);
+    level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
+    if (!level->blocks || !level->lightDepths) {
+        fprintf(stderr, "Failed to allocate level memory\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(level->blocks, blocks, total);
+
+    calcLightDepths(level, 0, 0, width, height);
+
+    level->renderer = renderer;
+}
+
 void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
     for (int x = minX; x < minX + maxX; x++) {
         for (int z = minZ; z < minZ + maxZ; z++) {
@@ -473,13 +508,18 @@ void Level_swap(Level* level, int x1, int y1, int z1, int x2, int y2, int z2) {
     }
 }
 
-void Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId) {
+static void pushTickEntry(Level* level, TickEntry entry) {
     if (level->tickListSize == level->tickListCapacity) {
         level->tickListCapacity = level->tickListCapacity ? level->tickListCapacity * 2 : 16;
         level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
     }
-    TickEntry* e = &level->tickList[level->tickListSize++];
-    e->x = x; e->y = y; e->z = z; e->tileId = tileId;
+    level->tickList[level->tickListSize++] = entry;
+}
+
+void Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId) {
+    TickEntry e = { x, y, z, tileId, 0 };
+    if (tileId > 0 && tileId < 256 && gTiles[tileId]) e.delay = gTiles[tileId]->tickDelay;
+    pushTickEntry(level, e);
 }
 
 void Level_onTick(Level* level) {
@@ -488,9 +528,16 @@ void Level_onTick(Level* level) {
     if (level->tickCount % 5 == 0 && level->tickListSize > 0) {
         int n = level->tickListSize;
         // drain the queue snapshot from the front, matching the Java
-        // ArrayList.remove(0) fifo drain of everything queued so far
+        // ArrayList.remove(0) fifo drain of everything queued so far. An
+        // entry still delayed (lava) gets decremented and pushed back to
+        // the tail instead of firing.
         for (int i = 0; i < n; ++i) {
             TickEntry e = level->tickList[i];
+            if (e.delay > 0) {
+                e.delay--;
+                pushTickEntry(level, e);
+                continue;
+            }
             if (e.x < 0 || e.y < 0 || e.z < 0 || e.x >= level->width || e.y >= level->depth || e.z >= level->height) continue;
             int current = Level_getTile(level, e.x, e.y, e.z);
             if (current == e.tileId && current > 0) {

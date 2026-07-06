@@ -85,3 +85,39 @@ void Screen_drawCenteredString(Screen* s, const char* str, int x, int y, unsigne
 void Screen_drawString(Screen* s, const char* str, int x, int y, unsigned int color) {
     Font_drawShadow(s->font, &TESSELLATOR, str, x, y, (int)color);
 }
+
+void Screen_renderButtons(Screen* self, Button* buttons, int count, int xMouse, int yMouse) {
+    for (int i = 0; i < count; ++i) {
+        Button* b = &buttons[i];
+        if (!b->visible) continue;
+
+        if (!b->enabled) {
+            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF8080A0u);
+            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF909090u);
+            Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFA0A0A0u);
+            continue;
+        }
+
+        Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF000000u);
+        int hovered = (xMouse >= b->x && yMouse >= b->y && xMouse < b->x + b->w && yMouse < b->y + b->h);
+        if (hovered) {
+            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFFA0A0A0u);
+            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF8080A0u);
+            Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0x00FFFFA0u);
+        } else {
+            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF707070u);
+            Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0x00E0E0E0u);
+        }
+    }
+}
+
+// the real click dispatch only checks visibility, not enabled, so a greyed
+// out button still fires its click handler if something is drawn there
+int Screen_buttonClickedAt(Button* buttons, int count, int x, int y) {
+    for (int i = 0; i < count; ++i) {
+        Button* b = &buttons[i];
+        if (!b->visible) continue;
+        if (x >= b->x && y >= b->y && x < b->x + b->w && y < b->y + b->h) return b->id;
+    }
+    return -1;
+}

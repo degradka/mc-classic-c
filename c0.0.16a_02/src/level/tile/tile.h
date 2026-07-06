@@ -24,6 +24,16 @@ struct Tile {
     // variant ids, and how many tiles a spread can travel before stopping.
     int tileId, calmTileId, spreadSpeed;
 
+    // c0.0.16a_02: how many extra 5 tick drains a scheduled reaction waits
+    // before firing, on top of the tick it was queued on. 0 for every tile
+    // except lava, which waits 5 (25 ticks), letting it fall/spread visibly
+    // slower than water even though both use the same tick queue now.
+    int tickDelay;
+
+    // c0.0.16a_02: scales a destroyed tile's particle gravity (-0.04/tick
+    // base). 1.0 for every tile except Leaves, which falls at 0.4x.
+    float particleGravity;
+
     // Render shape, in block local coordinates. Default is a full cube
     // (0,0,0) to (1,1,1). Liquids crop the top so the surface sits slightly
     // below a full block.

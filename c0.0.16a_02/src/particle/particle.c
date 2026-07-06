@@ -8,10 +8,11 @@ static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
 
 void Particle_init(Particle* p, Level* level,
                    float x, float y, float z,
-                   float mx, float my, float mz, int textureId)
+                   float mx, float my, float mz, const Tile* tile)
 {
     Entity_init(&p->base, level);
-    p->textureId = textureId;
+    p->textureId = tile->textureId;
+    p->gravity = tile->particleGravity;
 
     // size & bbox
     p->base.boundingBoxWidth  = 0.2f;
@@ -57,8 +58,8 @@ void Particle_onTick(Particle* p) {
         Entity_remove(&p->base);
     }
 
-    // gravity
-    p->base.motionY -= 0.04f;
+    // gravity, scaled per source tile since c0.0.16a_02
+    p->base.motionY -= 0.04f * p->gravity;
 
     // move
     Entity_move(&p->base, p->base.motionX, p->base.motionY, p->base.motionZ);

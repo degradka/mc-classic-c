@@ -181,6 +181,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
+    t->tickDelay = 0;
+    t->particleGravity = 1.0f;
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
@@ -494,6 +496,12 @@ void Tile_registerAll(void) {
     TILE_CALM_WATER.tileId = TILE_WATER.id; TILE_CALM_WATER.calmTileId = TILE_CALM_WATER.id; TILE_CALM_WATER.spreadSpeed = 8;
     TILE_CALM_LAVA.tileId  = TILE_LAVA.id;  TILE_CALM_LAVA.calmTileId  = TILE_CALM_LAVA.id;  TILE_CALM_LAVA.spreadSpeed  = 2;
 
+    // c0.0.16a_02: lava's scheduled reactions wait 5 extra 5 tick drains (25
+    // ticks) before firing, so it visibly lags behind water on the same
+    // tick queue instead of resolving at the same rate
+    TILE_LAVA.tickDelay      = 5;
+    TILE_CALM_LAVA.tickDelay = 5;
+
     TILE_WATER.onTick = Liquid_tick;
     TILE_LAVA.onTick  = Liquid_tick;
     // calm variants don't tick (setTicking(false) in the original)
@@ -516,6 +524,7 @@ void Tile_registerAll(void) {
 
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
+    TILE_LEAVES.particleGravity = 0.4f; // c0.0.16a_02: leaf break particles fall slower
 }
 
 /* untextured single face helper for hit highlight */
@@ -574,7 +583,7 @@ void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleE
         float mz = tz - z - 0.5f;
 
         Particle p;
-        Particle_init(&p, lvl, tx, ty, tz, mx, my, mz, self->textureId);
+        Particle_init(&p, lvl, tx, ty, tz, mx, my, mz, self);
         ParticleEngine_add(engine, &p);
     }
 }
