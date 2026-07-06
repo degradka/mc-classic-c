@@ -42,9 +42,9 @@ void Font_init(Font* f, const char* path) {
         return;
     }
 
-    // compute character widths for the first 128 characters
+    // compute character widths for all 256 characters
     // each cell is 8x8, laid out in a 16x16 grid on a 128x128 image
-    for (int i = 0; i < 128; ++i) {
+    for (int i = 0; i < 256; ++i) {
         int xt = i % 16;
         int yt = i / 16;
         int x = 0;
@@ -56,9 +56,12 @@ void Font_init(Font* f, const char* path) {
             for (int y = 0; y < 8 && emptyColumn; ++y) {
                 int yPixel = yt * 8 + y;
                 int idx = (yPixel * w + xPixel) * 4; // RGBA
-                // treat as “ink” if alpha > 128
-                unsigned char a = img[idx + 3];
-                if (a > 128) emptyColumn = 0;
+                // matches the real source exactly: treat as "ink" if the
+                // pixel's blue channel exceeds 128, not alpha. These happen
+                // to agree for this version's font image, but don't in
+                // general (confirmed to diverge for c0.0.17a's default.png)
+                unsigned char blue = img[idx + 2];
+                if (blue > 128) emptyColumn = 0;
             }
         }
         if (i == 32) x = 4; // space = half width

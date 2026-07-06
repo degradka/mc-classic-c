@@ -551,7 +551,9 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 }
 
 float Level_getBrightness(const Level* level, int x, int y, int z) {
-    return Level_isLit(level, x, y, z) ? 1.0f : 0.5f;
+    // matches the paired c0.0.16a_02 client's real value, confirmed directly
+    // against server1.2's own decompiled Level.getBrightness
+    return Level_isLit(level, x, y, z) ? 1.0f : 0.6f;
 }
 
 int Level_getHighestTile(const Level* level, int x, int z) {

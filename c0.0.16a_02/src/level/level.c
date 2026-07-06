@@ -431,8 +431,8 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 }
 
 float Level_getBrightness(const Level* level, int x, int y, int z) {
-    // real value changed from 0.5f in c0.0.14a_08 to 0.6f here, confirmed against
-    // both versions' actual decompiled Level.getBrightness, not just our own ports
+    // real value changed from 0.5f in c0.0.14a_08 to 0.6f here, confirmed
+    // against both versions' actual decompiled Level.getBrightness
     return Level_isLit(level, x, y, z) ? 1.0f : 0.6f;
 }
 

@@ -267,7 +267,7 @@ static void growBeaches(Level* level, const int* heightmap) {
 }
 
 // New in c0.0.14a_08: real tree generation, replacing the previously
-// treeless world gen entirely. Random walk site search, 4-5 block trunks,
+// treeless world gen entirely. Random walk site search, 4-6 block trunks,
 // a 3x3 leaf canopy that drops its 4 diagonal corners only on the very top
 // layer for a "+" shaped cap.
 static void plantTrees(Level* level, const int* heightmap) {
@@ -287,7 +287,7 @@ static void plantTrees(Level* level, const int* heightmap) {
                 if (x < 0 || z < 0 || x >= w || z >= h) continue;
 
                 int baseY = heightmap[x + z * w] + 1; // heightmap already absolute here
-                int trunkHeight = rand() % 2 + 4;
+                int trunkHeight = rand() % 3 + 4; // confirmed against real Java, not 2 + 4
 
                 int canPlace = 1;
                 for (int ly = baseY; ly <= baseY + 1 + trunkHeight && canPlace; ++ly) {

@@ -958,8 +958,8 @@ static void mineOrPlace(void) {
         int z = hitResult.z + nz;
 
         // AABB collision check, disallow placing inside player, mobs, or
-        // connected network players -- matches Level.isFree(AABB), which
-        // walks the real source's unified entities list; our port keeps
+        // connected network players. Matches Level.isFree(AABB), which walks
+        // the real source's unified entities list. This port keeps
         // mobs[]/netPlayers[] as separate arrays instead, so both need
         // checking here to get the same result
         AABB aabb = Level_getTilePickAABB(&level, x, y, z);
