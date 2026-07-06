@@ -62,6 +62,24 @@ Released May 28 2009 and the last release of Early Classic before multiplayer be
 * Enter sets the world's spawn point instead of saving the level
 * Mob cap raised from 100 to 256
 
+### c0.0.16a_02
+
+Released June 7 2009, the final version of the Multiplayer Test series, paired with the dedicated server 1.2. This skips the whole intermediate 0.0.15a series, so the diff against c0.0.14a_08 covers everything that accumulated across those skipped versions, not just one version's worth of change. The real client is applet only with no standalone launcher jar.
+
+* Multiplayer: connect to a server, see other players walk around with a name tag overhead, chat, and break/place blocks together
+* Chat: press T to open a chat line, Enter sends it, Escape cancels, and incoming messages show above the hotbar for 10 seconds
+* Generate new level now asks for a size (Small, Normal, Huge) instead of always generating the same 256x256x64 world
+* G (spawn zombie debug key) is disabled while connected to a server
+* Connect failure and mid session disconnects show a plain "Connection lost" style screen instead of just hanging
+
+Multiplayer is a command line switch rather than an in-game menu, matching how the real applet only ever read a server address once at launch:
+
+```
+minecraft.exe [host] [port] [username]
+```
+
+No arguments starts singleplayer as before. `username` is optional and defaults to `guest` when connecting.
+
 ## Building
 
 ### Windows
@@ -104,9 +122,16 @@ make
 
 The `resources/` folder from the same version needs to sit next to the built binary.
 
+## Running the dedicated server
+
+`server/server1.2/` is a from-scratch port of the official dedicated server, paired with the c0.0.16a_02 client above. It builds the same way as the client (`cd server/server1.2/src/ && make`), but the built `minecraft-server.exe`/`minecraft-server` should be copied up one level, into `server/server1.2/`, and run from there rather than from `src/` — that's where `server.properties`, `admins.txt`, `banned.txt`, and `banned-ip.txt` live, and the server reads/writes all of them (plus its `server_level.dat` save) relative to whatever directory it's actually launched from.
+
+On Windows the built exe needs `zlib1.dll` next to it (the same one the client uses) — nothing else, since the server has no rendering and uses native Win32 threads instead of `libwinpthread-1.dll`.
+
 ## References
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
 * [Java Edition Classic 0.0.13a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a)
 * [Java Edition Classic 0.0.13a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.13a_03)
 * [Java Edition Classic 0.0.14a_08](https://minecraft.wiki/w/Java_Edition_Classic_0.0.14a_08)
+* [Java Edition Classic 0.0.16a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.16a_02)
