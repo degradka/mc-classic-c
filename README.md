@@ -12,10 +12,12 @@ Sequel to [mc-preclassic-c](https://github.com/degradka/mc-preclassic-c).
 - [c0.0.14a_08](c0.0.14a_08/)
 - [c0.0.16a_02](c0.0.16a_02/)
 - [c0.0.17a](c0.0.17a/)
+- [c0.0.18a_02](c0.0.18a_02/)
 
 Dedicated servers:
 - [server 1.2](server/server1.2/)
 - [server 1.3](server/server1.3/)
+- [server 1.4.1](server/server1.4.1/)
 
 Multiplayer works from c0.0.16a_02 on: start a server from its folder, then
 `./src/minecraft.exe [host] [port] [name]`.
