@@ -90,6 +90,13 @@ Released June 10 2009, paired with the dedicated server 1.3. The real client is 
 * Pause menu now disables Generate new level too while connected to a server, on top of Save/Load already being disabled
 * Draw distance (F) now cycles backward when held with Shift, instead of only ever cycling forward
 
+### c0.0.18a_02
+
+Released June 14 2009 as a bugfix pass over 0.0.18a (June 13 2009), paired with the dedicated server 1.4.1. A much smaller update than the previous two versions.
+
+* Chat can now send `\`, `@`, `|`, and `$`, on top of the existing allowed characters
+* Server admins can use `/teleport <name>` to warp to another connected player
+
 ## Building
 
 ### Windows
@@ -140,6 +147,8 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 
 `server/server1.3/` is the same idea, paired with the c0.0.17a client instead, and follows the identical build/run/DLL layout. It adds a couple of gameplay-relevant checks the original 1.2 didn't have: placing or breaking a block more than 8 blocks away gets you kicked for cheating, and only a specific set of "safe" tiles (stone brick, wood, log, leaves, sand, gravel, rock, dirt, bush) can be placed by hand at all. The real server's login name verification (checking a connecting player's name against minecraft.net's session servers) is intentionally not implemented here, same reasoning as the networked level save/load noted above for c0.0.13a_03 — there's no live session server to check against, so any username is accepted.
 
+`server/server1.4.1/` pairs with the c0.0.18a_02 client, same build/run/DLL layout again. It adds `/teleport <name>` for admins, rejects usernames and chat messages containing control characters, and logs to a `server.log` file next to the console output.
+
 ## References
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
@@ -148,3 +157,4 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.14a_08](https://minecraft.wiki/w/Java_Edition_Classic_0.0.14a_08)
 * [Java Edition Classic 0.0.16a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.16a_02)
 * [Java Edition Classic 0.0.17a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.17a)
+* [Java Edition Classic 0.0.18a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.18a_02)
