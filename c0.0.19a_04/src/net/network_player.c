@@ -78,6 +78,10 @@ void NetworkPlayer_free(NetworkPlayer* np) {
 void NetworkPlayer_onTick(NetworkPlayer* np) {
     Entity_onTick(&np->base);
     np->animStepO = np->animStep;
+    np->yBodyRotO = np->yBodyRot;
+    np->base.yRotO = np->base.yRotation;
+    np->base.xRotO = np->base.xRotation;
+    np->tickCount++;
 
     // one move a tick, up to 5 more while more than 10 are waiting
     int n = 5;
@@ -92,24 +96,19 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
 
     float xd = np->base.x - np->base.prevX;
     float zd = np->base.z - np->base.prevZ;
-    np->yBodyRotO = np->yBodyRot;
     float dist = (float)sqrt(xd * xd + zd * zd);
     float target = np->yBodyRot;
     float step = 0.0f;
-    if (dist == 0.0f) {
-        np->animStep = 0.0f;
-    } else {
+    np->oRun = np->run;
+    float moving = 0.0f;
+    if (dist != 0.0f) {
+        moving = 1.0f;
         step = dist * 3.0f;
         target = -((float)atan2(zd, xd) * 180.0f / (float)M_PI + 90.0f);
     }
+    np->run += (moving - np->run) * 0.3f;
 
     float d = target - np->yBodyRot;
-    while (d < -180.0f) d += 360.0f;
-    while (d >= 180.0f) d -= 360.0f;
-    np->yBodyRot += d * 0.1f;
-
-    // the body also turns a tenth of the way to the head
-    d = np->base.yRotation - np->yBodyRot;
     while (d < -180.0f) d += 360.0f;
     while (d >= 180.0f) d -= 360.0f;
     np->yBodyRot += d * 0.1f;
@@ -121,6 +120,7 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
     if (d < -75.0f) d = -75.0f;
     if (d >= 75.0f) d = 75.0f;
     np->yBodyRot = np->base.yRotation - d;
+    np->yBodyRot += d * 0.1f;
     if (backwards) step = -step;
 
     while (np->base.yRotation - np->base.yRotO < -180.0f) np->base.yRotO -= 360.0f;
@@ -133,21 +133,29 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
     np->animStep += step;
 }
 
-void NetworkPlayer_render(const NetworkPlayer* np, float a) {
+// the old rotations get wrapped here too, in render
+void NetworkPlayer_render(NetworkPlayer* np, float a) {
+    float run = np->oRun + (np->run - np->oRun) * a;
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texChar);
 
+    while (np->yBodyRotO - np->yBodyRot < -180.0f) np->yBodyRotO += 360.0f;
+    while (np->yBodyRotO - np->yBodyRot >= 180.0f) np->yBodyRotO -= 360.0f;
     float bodyYRot = np->yBodyRotO + (np->yBodyRot - np->yBodyRotO) * a;
+    while (np->base.xRotO - np->base.xRotation < -180.0f) np->base.xRotO += 360.0f;
+    while (np->base.xRotO - np->base.xRotation >= 180.0f) np->base.xRotO -= 360.0f;
+    while (np->base.yRotO - np->base.yRotation < -180.0f) np->base.yRotO += 360.0f;
+    while (np->base.yRotO - np->base.yRotation >= 180.0f) np->base.yRotO -= 360.0f;
     float headYRot = np->base.yRotO + (np->base.yRotation - np->base.yRotO) * a;
     float headXRot = np->base.xRotO + (np->base.xRotation - np->base.xRotO) * a;
-    headYRot -= bodyYRot;
+    headYRot = -(headYRot - bodyYRot);
 
     glPushMatrix();
     float anim = np->animStepO + (np->animStep - np->animStepO) * a;
     float br = Entity_getBrightness(&np->base);
     glColor3f(br, br, br);
     float size = 0.0625f;
-    float yy = (float)(-fabs(sin((double)anim * 0.6662)) * 5.0 - 23.0);
+    float yy = (float)(-fabs(cos((double)anim * 0.6662)) * 5.0 * (double)run - 23.0);
     float x = np->base.prevX + (np->base.x - np->base.prevX) * a;
     float y = np->base.prevY + (np->base.y - np->base.prevY) * a;
     float z = np->base.prevZ + (np->base.z - np->base.prevZ) * a;
@@ -157,7 +165,8 @@ void NetworkPlayer_render(const NetworkPlayer* np, float a) {
     glTranslatef(0.0f, yy, 0.0f);
     glRotatef(bodyYRot, 0.0f, 1.0f, 0.0f);
     glDisable(GL_ALPHA_TEST);
-    ZombieModel_render(&sModel, anim, headYRot, headXRot);
+    glScalef(-1.0f, 1.0f, 1.0f);
+    ZombieModel_render(&sModel, anim, run, (float)np->tickCount + a, headYRot, headXRot);
     glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
@@ -181,9 +190,22 @@ void NetworkPlayer_render(const NetworkPlayer* np, float a) {
     glDisable(GL_TEXTURE_2D);
 }
 
+// the halfway step turns the short way round
+static void halfway(const NetworkPlayer* np, float yRot, float xRot, float* yOut, float* xOut) {
+    float xd = xRot - np->base.xRotation;
+    float yd = yRot - np->base.yRotation;
+    while (yd >= 180.0f) yd -= 360.0f;
+    while (yd < -180.0f) yd += 360.0f;
+    while (xd >= 180.0f) xd -= 360.0f;
+    while (xd < -180.0f) xd += 360.0f;
+    *yOut = np->base.yRotation + yd * 0.5f;
+    *xOut = np->base.xRotation + xd * 0.5f;
+}
+
 void NetworkPlayer_teleport(NetworkPlayer* np, int x, int y, int z, float yRot, float xRot) {
-    push(np, posRot((float)(np->xp + x) / 64.0f, (float)(np->yp + y) / 64.0f, (float)(np->zp + z) / 64.0f,
-                    (np->base.yRotation + yRot) / 2.0f, (np->base.xRotation + xRot) / 2.0f));
+    float hy, hx;
+    halfway(np, yRot, xRot, &hy, &hx);
+    push(np, posRot((float)(np->xp + x) / 64.0f, (float)(np->yp + y) / 64.0f, (float)(np->zp + z) / 64.0f, hy, hx));
     np->xp = x;
     np->yp = y;
     np->zp = z;
@@ -191,9 +213,10 @@ void NetworkPlayer_teleport(NetworkPlayer* np, int x, int y, int z, float yRot, 
 }
 
 void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yRot, float xRot) {
+    float hy, hx;
+    halfway(np, yRot, xRot, &hy, &hx);
     push(np, posRot(((float)np->xp + (float)dx / 2.0f) / 32.0f, ((float)np->yp + (float)dy / 2.0f) / 32.0f,
-                    ((float)np->zp + (float)dz / 2.0f) / 32.0f,
-                    (np->base.yRotation + yRot) / 2.0f, (np->base.xRotation + xRot) / 2.0f));
+                    ((float)np->zp + (float)dz / 2.0f) / 32.0f, hy, hx));
     np->xp += dx;
     np->yp += dy;
     np->zp += dz;
@@ -210,6 +233,8 @@ void NetworkPlayer_queueMove(NetworkPlayer* np, int dx, int dy, int dz) {
 }
 
 void NetworkPlayer_queueLook(NetworkPlayer* np, float yRot, float xRot) {
-    push(np, rotOnly((np->base.yRotation + yRot) / 2.0f, (np->base.xRotation + xRot) / 2.0f));
+    float hy, hx;
+    halfway(np, yRot, xRot, &hy, &hx);
+    push(np, rotOnly(hy, hx));
     push(np, rotOnly(yRot, xRot));
 }

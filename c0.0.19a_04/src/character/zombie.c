@@ -71,7 +71,7 @@ void Zombie_render(const Zombie* z, float partialTicks) {
     glTranslatef(0.0f, yy, 0.0f);
     glRotatef(z->rotation * 57.29578f + 180.0f, 0.0f, 1.0f, 0.0f);
 
-    ZombieModel_render(&z->model, (float)time, 0.0f, 0.0f);
+    ZombieModel_render(&z->model, (float)time, 1.0f, 0.0f, 0.0f, 0.0f);
 
     glPopMatrix();
     glDisable(GL_TEXTURE_2D);

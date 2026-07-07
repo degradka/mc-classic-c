@@ -47,6 +47,9 @@ typedef struct Level {
     // the length of the array behind the entity list, level.dat keeps it
     int listCapacity;
 
+    // a server's level, the local tile updates are off
+    bool networkMode;
+
     int xSpawn, ySpawn, zSpawn;
     float rotSpawn;
 
@@ -83,6 +86,11 @@ void  Level_saveNull(const char* path);
 
 bool  level_setTile(Level* level, int x, int y, int z, int type);
 bool  Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type);
+// the same without the network mode check, for the server's changes and our own clicks
+bool  Level_netSetTile(Level* level, int x, int y, int z, int type);
+bool  Level_netSetTileNoNeighborChange(Level* level, int x, int y, int z, int type);
+void  Level_updateNeighborsAt(Level* level, int x, int y, int z, int type);
+bool  Level_isWater(const Level* level, int x, int y, int z);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 void  Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1);
 int   Level_getTile(const Level* level, int x, int y, int z);

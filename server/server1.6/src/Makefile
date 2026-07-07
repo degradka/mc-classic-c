@@ -7,7 +7,7 @@ INCLUDE := -I.
 
 BUILD ?= debug
 
-SRC = main.c server.c player.c player_list.c properties.c log.c \
+SRC = main.c server.c console.c player.c player_list.c properties.c log.c \
       jexc.c jstring.c jfile.c jgzip.c jmd5.c jtime.c jrandom.c \
       level/level.c level/level_io.c level/javaser.c level/tile/tile.c \
       level/levelgen/level_gen.c \

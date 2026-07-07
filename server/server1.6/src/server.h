@@ -46,6 +46,7 @@ typedef struct MinecraftServer {
     bool verifyNames;
     // what the name check hashes with, minecraft.net got it with the heartbeat
     JStr salt;
+    int maxConnections;
 } MinecraftServer;
 
 // false with the exception's toString when the port can't be opened
@@ -63,6 +64,8 @@ void Server_unban(MinecraftServer* s, const JStr* name);
 void Server_banIp(MinecraftServer* s, const JStr* name);
 void Server_save(MinecraftServer* s, bool quiet);
 Player* Server_findPlayer(MinecraftServer* s, const JStr* name);
+// an admin command without its slash, from a player or the console (NULL)
+void Server_command(MinecraftServer* s, Player* p, const JStr* command);
 // md5 of the salt and the name in hex, what a client from minecraft.net sends as its key
 void Server_nameKey(const MinecraftServer* s, const JStr* name, JStr* out);
 

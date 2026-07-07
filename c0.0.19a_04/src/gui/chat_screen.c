@@ -11,7 +11,7 @@ extern void Minecraft_setKeyRepeat(bool on);
 extern const char* Minecraft_getUserName(void);
 
 static const char* ALLOWED =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.:-_'*!\\\"#%/()=+?[]{}<>@|$";
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.:-_'*!\\\"#%/()=+?[]{}<>@|$;";
 
 static void ChatScreen_render(Screen* self, int xm, int ym) {
     (void)xm; (void)ym;

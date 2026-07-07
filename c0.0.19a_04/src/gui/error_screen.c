@@ -7,7 +7,6 @@ static void ErrorScreen_render(Screen* self, int xm, int ym) {
     ErrorScreen* s = (ErrorScreen*)self;
     Screen_fillGradient(0, 0, self->width, self->height, 0xFF402020u, 0xFF501010u);
     Screen_drawCenteredString(self, s->title, self->width / 2, 90, 0xFFFFFF);
-    if (s->nullMessage) return;
     Screen_drawCenteredString(self, s->message, self->width / 2, 110, 0xFFFFFF);
     Screen_render(self, xm, ym);
 }
@@ -22,6 +21,5 @@ void ErrorScreen_init(ErrorScreen* s, Font* font, int width, int height, const c
     s->screen.render = ErrorScreen_render;
     s->screen.keyPressed = ErrorScreen_keyPressed;
     snprintf(s->title, sizeof s->title, "%s", title);
-    s->nullMessage = message == NULL;
-    snprintf(s->message, sizeof s->message, "%s", message ? message : "");
+    snprintf(s->message, sizeof s->message, "%s", message);
 }

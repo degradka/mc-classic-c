@@ -17,12 +17,12 @@ extern void Minecraft_beginLevelLoading(const char* title);
 extern void Minecraft_levelLoadUpdate(const char* status);
 
 static const JField LEVEL_FIELDS[] = {
-    { 'J', "createTime", NULL }, { 'I', "depth", NULL }, { 'I', "height", NULL },
+    { 'J', "createTime", NULL }, { 'I', "depth", NULL }, { 'I', "height", NULL }, { 'Z', "networkMode", NULL },
     { 'F', "rotSpawn", NULL }, { 'I', "tickCount", NULL }, { 'I', "unprocessed", NULL }, { 'I', "width", NULL },
     { 'I', "xSpawn", NULL }, { 'I', "ySpawn", NULL }, { 'I', "zSpawn", NULL }, { '[', "blocks", "[B" },
     { 'L', "creator", "Ljava/lang/String;" }, { 'L', "entities", "Ljava/util/ArrayList;" }, { 'L', "name", "Ljava/lang/String;" }
 };
-static const JDesc LEVEL_DESC = { LV, 0, 2, 14, LEVEL_FIELDS, NULL };
+static const JDesc LEVEL_DESC = { LV, 0, 2, 15, LEVEL_FIELDS, NULL };
 static const JField LIST_FIELDS[] = { { 'I', "size", NULL } };
 static const JDesc LIST_DESC = { "java.util.ArrayList", 8683452581122892189LL, 3, 1, LIST_FIELDS, NULL };
 static const JField ENTITY_FIELDS[] = {
@@ -100,6 +100,7 @@ static bool writeLevel(JWriter* w, const Level* level) {
     JW_i8(w, level->createTime);
     JW_i4(w, level->depth);
     JW_i4(w, level->height);
+    JW_u1(w, level->networkMode);
     JW_f4(w, level->rotSpawn);
     JW_i4(w, level->tickCount);
     JW_i4(w, level->unprocessed);
@@ -180,6 +181,8 @@ static bool loadV2(Level* level, const uint8_t* p, size_t len) {
     level->createTime = JNode_int(root, LV, "createTime");
     level->tickCount = (int)JNode_int(root, LV, "tickCount");
     level->unprocessed = (int)JNode_int(root, LV, "unprocessed");
+    // a server level's networkMode is never turned off, a world saved after multiplayer would never change again
+    level->networkMode = false;
     level->name[0] = level->creator[0] = '\0';
     nodeString(JNode_obj(root, LV, "name"), level->name, sizeof level->name);
     nodeString(JNode_obj(root, LV, "creator"), level->creator, sizeof level->creator);

@@ -29,15 +29,22 @@ void ZombieModel_init(ZombieModel* m) {
 }
 
 // the head angles come in degrees
-void ZombieModel_render(const ZombieModel* m, float time, float headYRot, float headXRot) {
+// swing scales the walk, idle sways the arms a little
+void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot) {
+    Cube* rightArm = (Cube*)&m->rightArm;
+    Cube* leftArm  = (Cube*)&m->leftArm;
     ((Cube*)&m->head)->yRot      = headYRot / 57.29578f;
     ((Cube*)&m->head)->xRot      = headXRot / 57.29578f;
-    ((Cube*)&m->rightArm)->xRot  = (float)sin(time * 0.6662 + M_PI) * 2.0f;
-    ((Cube*)&m->rightArm)->zRot  = (float)(sin(time * 0.2312) + 1.0);
-    ((Cube*)&m->leftArm)->xRot   = (float)sin(time * 0.6662) * 2.0f;
-    ((Cube*)&m->leftArm)->zRot   = (float)(sin(time * 0.2812) - 1.0);
-    ((Cube*)&m->rightLeg)->xRot  = (float)sin(time * 0.6662) * 1.4f;
-    ((Cube*)&m->leftLeg)->xRot   = (float)sin(time * 0.6662 + M_PI) * 1.4f;
+    rightArm->xRot = (float)cos((double)time * 0.6662 + M_PI) * 2.0f * swing;
+    rightArm->zRot = (float)(cos((double)time * 0.2312) + 1.0) * swing;
+    leftArm->xRot  = (float)cos((double)time * 0.6662) * 2.0f * swing;
+    leftArm->zRot  = (float)(cos((double)time * 0.2812) - 1.0) * swing;
+    ((Cube*)&m->rightLeg)->xRot  = (float)cos((double)time * 0.6662) * 1.4f * swing;
+    ((Cube*)&m->leftLeg)->xRot   = (float)cos((double)time * 0.6662 + M_PI) * 1.4f * swing;
+    rightArm->zRot += (float)cos((double)idle * 0.09) * 0.05f + 0.05f;
+    leftArm->zRot  -= (float)cos((double)idle * 0.09) * 0.05f + 0.05f;
+    rightArm->xRot += (float)sin((double)idle * 0.067) * 0.05f;
+    leftArm->xRot  -= (float)sin((double)idle * 0.067) * 0.05f;
 
     Cube_render(&m->head);
     Cube_render(&m->body);

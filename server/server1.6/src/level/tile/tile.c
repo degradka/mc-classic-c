@@ -5,7 +5,7 @@
 #include "../../jexc.h"
 #include <string.h>
 
-static Tile tiles[19];
+static Tile tiles[21];
 static const Tile* registry[256];
 bool Tile_shouldTick[256];
 
@@ -75,11 +75,22 @@ static void Liquid_onPlace(const Tile* t, Level* level, int x, int y, int z) {
     Level_addToTickNextTick(level, x, y, z, t->flowing);
 }
 
+// water can't come within 2 blocks of a sponge
+static bool Liquid_canFlow(const Tile* t, Level* level, int x, int y, int z) {
+    if (t->liquid != LIQUID_WATER) return true;
+    for (int i = x - 2; i <= x + 2; ++i)
+    for (int j = y - 2; j <= y + 2; ++j)
+    for (int k = z - 2; k <= z + 2; ++k) {
+        if (Level_getTile(level, i, j, k) == TILE_SPONGE) return false;
+    }
+    return true;
+}
+
 // always false, so a liquid that spread sideways still goes calm
 static bool Liquid_spread(const Tile* t, Level* level, int x, int y, int z) {
-    if (Level_getTile(level, x, y, z) == 0 && Level_setTile(level, x, y, z, t->flowing)) {
-        Level_addToTickNextTick(level, x, y, z, t->flowing);
-    }
+    if (Level_getTile(level, x, y, z) != 0) return false;
+    if (!Liquid_canFlow(t, level, x, y, z)) return false;
+    if (Level_setTile(level, x, y, z, t->flowing)) Level_addToTickNextTick(level, x, y, z, t->flowing);
     return false;
 }
 
@@ -87,7 +98,7 @@ static void Liquid_tick(const Tile* t, Level* level, int x, int y, int z, JRando
     (void)random;
     bool changed = false;
     // water keeps falling while it can be placed, lava stops after one
-    while (Level_getTile(level, x, --y, z) == 0) {
+    while (Level_getTile(level, x, --y, z) == 0 && Liquid_canFlow(t, level, x, y, z)) {
         bool placed = Level_setTile(level, x, y, z, t->flowing);
         if (placed) changed = true;
         if (!placed || t->liquid == LIQUID_LAVA) break;
@@ -151,6 +162,25 @@ static void liquid(int id, int type, bool calm) {
     }
 }
 
+// soaks up the water around it, and lets it flow back in when it's gone
+static void Sponge_onAdded(const Tile* t, Level* level, int x, int y, int z) {
+    (void)t;
+    for (int i = x - 2; i <= x + 2; ++i)
+    for (int j = y - 2; j <= y + 2; ++j)
+    for (int k = z - 2; k <= z + 2; ++k) {
+        if (Level_isWater(level, i, j, k)) Level_setTileNoNeighborChange(level, i, j, k, 0);
+    }
+}
+
+static void Sponge_onRemoved(const Tile* t, Level* level, int x, int y, int z) {
+    (void)t;
+    for (int i = x - 2; i <= x + 2; ++i)
+    for (int j = y - 2; j <= y + 2; ++j)
+    for (int k = z - 2; k <= z + 2; ++k) {
+        Level_updateNeighborsAt(level, i, j, k, Level_getTile(level, i, j, k));
+    }
+}
+
 void Tile_registerAll(void) {
     memset(registry, 0, sizeof registry);
     memset(Tile_shouldTick, 0, sizeof Tile_shouldTick);
@@ -182,4 +212,10 @@ void Tile_registerAll(void) {
     Tile* leaves = add(TILE_LEAVES);
     leaves->blocksLight = false;
     leaves->solid = false;
+    Tile* sponge = add(TILE_SPONGE);
+    sponge->onAdded = Sponge_onAdded;
+    sponge->onRemoved = Sponge_onRemoved;
+    Tile* glass = add(TILE_GLASS);
+    glass->blocksLight = false;
+    glass->solid = false;
 }

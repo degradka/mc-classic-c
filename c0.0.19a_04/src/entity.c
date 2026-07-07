@@ -72,12 +72,10 @@ void Entity_moveTo(Entity* e, float x, float y, float z, float yRot, float xRot)
 void Entity_setPosUpdate(Entity* e, const PositionUpdate* u) {
     if (u->hasPos) Entity_setPosition(e, u->x, u->y, u->z);
     else Entity_setPosition(e, e->x, e->y, e->z);
-    float yRot = u->hasRot ? u->yRot : e->yRotation;
-    float xRot = u->hasRot ? u->xRot : e->xRotation;
-    while (e->yRotO - yRot < -180.0f) e->yRotO += 360.0f;
-    while (e->yRotO - yRot >= 180.0f) e->yRotO -= 360.0f;
-    e->yRotation = yRot;
-    e->xRotation = xRot;
+    if (u->hasRot) {
+        e->yRotation = u->yRot;
+        e->xRotation = u->xRot;
+    }
 }
 
 void Entity_onTick(Entity* e) {

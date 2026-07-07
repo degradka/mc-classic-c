@@ -6,42 +6,12 @@
 #include <stdio.h>
 #include <time.h>
 
-#if defined(_WIN32)
-  #include <windows.h>
-#else
-  #include <signal.h>
-  #include <unistd.h>
-#endif
 
 static FILE* logFile;
 
-// ctrl+c flushes the file on the way out
-#if defined(_WIN32)
-static BOOL WINAPI onClose(DWORD type) {
-    (void)type;
-    if (logFile) fflush(logFile);
-    ExitProcess(130);
-    return TRUE;
-}
-#else
-static void onSignal(int sig) {
-    if (logFile) fflush(logFile);
-    _exit(128 + sig);
-}
-#endif
-
 void Log_openFile(void) {
     logFile = fopen("server.log", "wb");
-    if (logFile) {
-        setvbuf(logFile, NULL, _IOFBF, 8192);
-#if defined(_WIN32)
-        SetConsoleCtrlHandler(onClose, TRUE);
-#else
-        signal(SIGINT, onSignal);
-        signal(SIGTERM, onSignal);
-#endif
-        return;
-    }
+    if (logFile) return;
     char exception[512];
     jfile_notFound("server.log", exception, sizeof exception);
     Log_warning("Failed to open file server.log for writing: %s", exception);
@@ -55,7 +25,10 @@ static void line(const char* mark, const char* fmt, va_list args) {
     vsnprintf(text, sizeof text, fmt, args);
     fprintf(stderr, "%s  %s  %s\n", mark, stamp, text);
     fflush(stderr);
-    if (logFile) fprintf(logFile, "%s  %s  %s\n", mark, stamp, text);
+    if (logFile) {
+        fprintf(logFile, "%s  %s  %s\n", mark, stamp, text);
+        fflush(logFile);
+    }
 }
 
 void Log_info(const char* fmt, ...) {

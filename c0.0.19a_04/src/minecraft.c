@@ -29,6 +29,7 @@
 #include "timer.h"
 #include "hitresult.h"
 #include "java_hashmap.h"
+#include "renderer/texture_fx.h"
 #include "gui/font.h"
 #include "gui/screen.h"
 #include "gui/pause_screen.h"
@@ -52,6 +53,11 @@ static int paintTexture = 1;
 static int palette[9];
 
 static int texTerrain = 0;
+static int texGui = 0;
+
+// lava then water, each steps once when it registers
+static TextureFX lavaFX, waterFX;
+static TextureFX* textureFX[2] = { &lavaFX, &waterFX };
 static int texDirt = 0;
 
 static Tessellator hudTess;
@@ -95,6 +101,8 @@ static char mppass[64] = "--";
 
 static NetConnection connection;
 static bool networked = false;
+// our position only goes out once the level is here
+static bool levelReceived = false;
 // true while connecting and while the server level downloads, nothing is rendered then
 static bool downloading = false;
 // id to NetworkPlayer map, the players stay alive while the map or the level holds them
@@ -102,7 +110,7 @@ static JHashMap netPlayers;
 
 // newest first
 #define MAX_CHAT_LINES 50
-typedef struct { char text[72]; bool isNull; int age; } ChatLine;
+typedef struct { char text[72]; int age; } ChatLine;
 static ChatLine chatLines[MAX_CHAT_LINES + 1];
 static int chatLineCount = 0;
 
@@ -394,12 +402,14 @@ void Minecraft_installNetworkLevel(int w, int d, int h, unsigned char* blocks) {
     dropLevel();
     Level_init(&level);
     Level_setData(&level, w, d, h, blocks);
+    level.networkMode = true;
     setLevel(true);
     downloading = false;
+    levelReceived = true;
 }
 
 void Minecraft_networkSetBlock(int x, int y, int z, int type) {
-    if (hasLevel) level_setTile(&level, x, y, z, type);
+    if (hasLevel) Level_netSetTile(&level, x, y, z, type);
 }
 
 // the spawn rotation gets 320 where the move gets 360
@@ -416,10 +426,6 @@ void Minecraft_networkSelfTeleport(int x, int y, int z, int yaw, int pitch) {
                   (float)(yaw * 360) / 256.0f, (float)(pitch * 360) / 256.0f);
 }
 
-// the network error, the connection is already closed
-void Minecraft_networkException(void) {
-    Minecraft_showErrorScreen("Disconnected!", NULL);
-}
 
 // false where it throws, the spawn goes in the map before the missing level is touched
 bool Minecraft_spawnNetworkPlayer(int id, const char* name, int x, int y, int z, float yRot, float xRot) {
@@ -464,11 +470,9 @@ bool Minecraft_despawnNetworkPlayer(int id) {
     return true;
 }
 
-// a null line is kept, the font draws nothing for it
 void Minecraft_addChatLine(const char* text) {
     memmove(&chatLines[1], &chatLines[0], sizeof(ChatLine) * (size_t)chatLineCount);
-    snprintf(chatLines[0].text, sizeof chatLines[0].text, "%s", text ? text : "");
-    chatLines[0].isNull = text == NULL;
+    snprintf(chatLines[0].text, sizeof chatLines[0].text, "%s", text);
     chatLines[0].age = 0;
     chatLineCount++;
     if (chatLineCount > MAX_CHAT_LINES) chatLineCount = MAX_CHAT_LINES;
@@ -527,9 +531,9 @@ static int init(void) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
 
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.18a_02", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.19a_04", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.18a_02", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.19a_04", NULL, NULL);
     }
 
     if (!window) {
@@ -564,11 +568,16 @@ static int init(void) {
     glMatrixMode(GL_MODELVIEW);
 
     Tile_registerAll();
-    int p[9] = { TILE_ROCK.id, TILE_DIRT.id, TILE_STONEBRICK.id, TILE_WOOD.id, TILE_BUSH.id,
-                 TILE_LOG.id, TILE_LEAVES.id, TILE_SAND.id, TILE_GRAVEL.id };
+    int p[9] = { TILE_ROCK.id, TILE_DIRT.id, TILE_SPONGE.id, TILE_WOOD.id, TILE_BUSH.id,
+                 TILE_LOG.id, TILE_LEAVES.id, TILE_GLASS.id, TILE_GRAVEL.id };
+    LavaFX_init(&lavaFX, TILE_LAVA.textureId);
+    lavaFX.step(&lavaFX);
+    WaterFX_init(&waterFX, TILE_WATER.textureId);
+    waterFX.step(&waterFX);
     memcpy(palette, p, sizeof(palette));
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
+    texGui     = loadTexture("resources/gui.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.png");
 
@@ -656,7 +665,7 @@ static void setupPickCamera(float a, int x, int y, int width, int height) {
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     gluPickMatrix((float)x, (float)y, 5.0f, 5.0f, viewport);
-    gluPerspective(70.0f, (float)width / (float)height, 0.05f, 1024.0f);
+    gluPerspective(70.0f, (float)width / (float)height, 0.2f, 10.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     moveCameraToPlayer(a);
@@ -775,7 +784,7 @@ static void handleMouseClick(void) {
     }
     const Tile* oldTile = gTiles[Level_getTile(&level, x, y, z)];
     if (editMode == 0) {
-        bool changed = level_setTile(&level, x, y, z, 0);
+        bool changed = Level_netSetTile(&level, x, y, z, 0);
         if (oldTile && changed) {
             if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, paintTexture);
             Tile_onDestroy(oldTile, &level, x, y, z, &particleEngine);
@@ -790,7 +799,7 @@ static void handleMouseClick(void) {
         if (AABB_intersects(&player.e.boundingBox, &aabb) || !Level_isFree(&level, &aabb)) return;
     }
     if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, paintTexture);
-    level_setTile(&level, x, y, z, paintTexture);
+    Level_netSetTile(&level, x, y, z, paintTexture);
     tile->onPlace(tile, &level, x, y, z);
 }
 
@@ -807,7 +816,7 @@ static void screenUpdateEvents(Screen* s) {
             if (mouseEvents[e].key != GLFW_MOUSE_BUTTON_LEFT) continue;
             for (int i = 0; i < s->buttonCount; i++) {
                 Button* b = &s->buttons[i];
-                if (xm < b->x || ym < b->y || xm >= b->x + b->w || ym >= b->y + b->h) continue;
+                if (!b->enabled || xm < b->x || ym < b->y || xm >= b->x + b->w || ym >= b->y + b->h) continue;
                 if (s->buttonClicked) s->buttonClicked(s, b);
             }
         }
@@ -826,6 +835,13 @@ static void screenUpdateEvents(Screen* s) {
 static void tick(void) {
     for (int i = 0; i < chatLineCount; i++) chatLines[i].age++;
 
+    glBindTexture(GL_TEXTURE_2D, texTerrain);
+    for (int i = 0; i < 2; i++) {
+        TextureFX* fx = textureFX[i];
+        fx->step(fx);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, fx->tex % 16 << 4, fx->tex / 16 << 4, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, fx->pixels);
+    }
+
     if (networked) {
         if (!NetConnection_isOpen(&connection)) {
             Minecraft_beginLevelLoading("Connecting..");
@@ -840,7 +856,7 @@ static void tick(void) {
                 clientError();
                 return;
             }
-            NetConnection_sendPosition(&connection, player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation);
+            if (levelReceived) NetConnection_sendPosition(&connection, player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation);
         }
         // the connect finishes here, after the tick has drawn "Connecting.."
         // a connect left running alongside the loop stalls some drivers for seconds
@@ -980,28 +996,58 @@ static void setupGuiCamera(void) {
     glTranslatef(0.0f, 0.0f, -200.0f);
 }
 
-// false where drawing a missing chat line throws
+// a piece of gui.png, the texture u always starts at 0
+static void blitGui(int x, int y, int v, int w) {
+    float us = 0.00390625f;
+    float vs = 0.015625f;
+    Tessellator_begin(&hudTess);
+    Tessellator_vertexUV(&hudTess, (float)x, (float)(y + 22), -90.0f, 0.0f, (float)(v + 22) * vs);
+    Tessellator_vertexUV(&hudTess, (float)(x + w), (float)(y + 22), -90.0f, (float)(w + 0) * us, (float)(v + 22) * vs);
+    Tessellator_vertexUV(&hudTess, (float)(x + w), (float)y, -90.0f, (float)(w + 0) * us, (float)v * vs);
+    Tessellator_vertexUV(&hudTess, (float)x, (float)y, -90.0f, 0.0f, (float)v * vs);
+    Tessellator_end(&hudTess);
+}
+
 static bool drawGui(void) {
     int sw, sh;
     guiSize(&sw, &sh);
     setupGuiCamera();
 
-    glPushMatrix();
-    glTranslatef((float)(sw - 16), 16.0f, -50.0f);
-    glScalef(16.0f, 16.0f, 16.0f);
-    glRotatef(-30.0f, 1.0f, 0.0f, 0.0f);
-    glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
-    glTranslatef(-1.5f, 0.5f, 0.5f);
-    glScalef(-1.0f, -1.0f, -1.0f);
-    glBindTexture(GL_TEXTURE_2D, texTerrain);
+    glBindTexture(GL_TEXTURE_2D, texGui);
     glEnable(GL_TEXTURE_2D);
-    Tessellator_begin(&hudTess);
-    gTiles[paintTexture]->render(gTiles[paintTexture], &hudTess, &level, 0, -2, 0, 0);
-    Tessellator_end(&hudTess);
-    glDisable(GL_TEXTURE_2D);
-    glPopMatrix();
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glEnable(GL_BLEND);
+    blitGui(sw / 2 - 91, sh - 22, 0, 182);
+    int selected = 0;
+    for (int k = 0; k < 9; ++k) {
+        if (palette[k] == paintTexture) {
+            selected = k;
+            break;
+        }
+    }
+    blitGui(sw / 2 - 91 - 1 + selected * 20, sh - 22 - 1, 22, 24);
+    glDisable(GL_BLEND);
 
-    Font_drawShadow(&gFont, &hudTess, "0.0.18a_02", 2, 2, 0xFFFFFF);
+    for (int k = 0; k < 9; ++k) {
+        const Tile* tile = gTiles[palette[k]];
+        glPushMatrix();
+        glTranslatef((float)(sw / 2 - 90 + k * 20), (float)(sh - 16), -50.0f);
+        glScalef(10.0f, 10.0f, 10.0f);
+        glTranslatef(1.0f, 0.5f, 0.0f);
+        glRotatef(-30.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+        glTranslatef(-1.5f, 0.5f, 0.5f);
+        glScalef(-1.0f, -1.0f, -1.0f);
+        glBindTexture(GL_TEXTURE_2D, texTerrain);
+        glEnable(GL_TEXTURE_2D);
+        Tessellator_begin(&hudTess);
+        tile->render(tile, &hudTess, &level, 0, -2, 0, 0);
+        Tessellator_end(&hudTess);
+        glDisable(GL_TEXTURE_2D);
+        glPopMatrix();
+    }
+
+    Font_drawShadow(&gFont, &hudTess, "0.0.19a_04", 2, 2, 0xFFFFFF);
     Font_drawShadow(&gFont, &hudTess, fpsString, 2, 12, 0xFFFFFF);
     // 10 lines for 10 seconds each, the chat screen shows 20 of any age
     int maxLines = 10;
@@ -1009,7 +1055,6 @@ static bool drawGui(void) {
     if (chatOpen) maxLines = 20;
     for (int i = 0; i < chatLineCount && i < maxLines; i++) {
         if (chatLines[i].age >= 200 && !chatOpen) continue;
-        if (chatLines[i].isNull) continue;
         Font_drawShadow(&gFont, &hudTess, chatLines[i].text, 2, sh - 8 - (i << 3) - 16, 0xFFFFFF);
     }
 
@@ -1127,6 +1172,7 @@ static bool renderLevel(float a, int width, int height) {
     int liquidLists = LevelRenderer_render(&levelRenderer, &player, 1);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (liquidLists > 0) LevelRenderer_renderAgain(&levelRenderer);
+    glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glDisable(GL_LIGHTING);
     glDisable(GL_FOG);
@@ -1190,6 +1236,7 @@ static bool render(float a) {
     }
 
     if (Font_threw) return false;
+    Display_sync(100);
     glfwSwapBuffers(window);
     // pumps the window messages
     glfwPollEvents();

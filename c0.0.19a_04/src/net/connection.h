@@ -23,8 +23,6 @@ typedef struct {
     bool   connected;
     // the login went out, packets get handled from now on
     bool   loggedIn;
-    // a close that couldn't flush everything, the next write throws
-    bool   unflushed;
     char   username[65];
     char   mppass[65];
 

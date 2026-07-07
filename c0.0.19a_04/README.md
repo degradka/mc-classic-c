@@ -1,13 +1,22 @@
-# Classic 0.0.18a_02
+# Classic 0.0.19a_04
 
 [Back to all versions](../README.md)
 
-Released June 14, 2009. 0.0.18a is folded in here.
+Released June 20, 2009. 0.0.19a to 0.0.19a_03 are folded in here.
 
 ## What changed
 
-- Chat can send `\`, `@`, `|` and `$` too
-- The server can move you around, that's what its new /teleport uses
+- New tiles
+  - Glass
+  - Sponge, dries the water in a 5x5x5 around it, the water comes back when it's gone
+- A hotbar at the bottom of the screen
+- Water and lava are animated
+- Other players sway their arms while standing and swing them as fast as they walk
+- Zombies come out inside out (their model is built the other way round), like the original
+- The frame rate is capped at 100
+- Chat can send `;` too
+- Caves are more broken up and the shores are smaller and steeper
+- Sponge and glass replace stone brick and sand in the 9 tiles
 
 ## How it was ported
 
@@ -18,10 +27,12 @@ Released June 14, 2009. 0.0.18a is folded in here.
 - It's a normal window, not an applet
 - The applet got the server from the web page, here it's the command line: `minecraft.exe [host] [port] [username]`
 - Save level.. and Load level.. need you to be logged in on minecraft.net, which is gone, so they're always greyed out
+- After playing on a server the original saves that level in its network mode and never turns it off, so the next
+  single player start can't change anything. Here a loaded level always starts out of network mode
 
 ## Multiplayer
 
-Pairs with [server 1.4.1](../server/server1.4.1/). Start the server, then from this version's folder:
+Pairs with [server 1.6](../server/server1.6/). Start the server, then from this version's folder:
 ```bash
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```
@@ -45,7 +56,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.0.18a_02/src
+cd mc-classic-c/c0.0.19a_04/src
 make
 ```
 
@@ -68,5 +79,8 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.0.18a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.18a_02)
-- [minecraft.wiki: Java Edition Classic 0.0.18a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.18a)
+- [minecraft.wiki: Java Edition Classic 0.0.19a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_04)
+- [minecraft.wiki: Java Edition Classic 0.0.19a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a)
+- [minecraft.wiki: Java Edition Classic 0.0.19a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_01)
+- [minecraft.wiki: Java Edition Classic 0.0.19a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_02)
+- [minecraft.wiki: Java Edition Classic 0.0.19a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_03)

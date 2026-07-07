@@ -16,7 +16,6 @@ extern void Minecraft_installNetworkLevel(int w, int d, int h, unsigned char* bl
 extern void Minecraft_addChatLine(const char* text);
 extern void Minecraft_networkSetBlock(int x, int y, int z, int type);
 extern void Minecraft_showErrorScreen(const char* title, const char* message);
-extern void Minecraft_networkException(void);
 extern bool Minecraft_networkSelfSpawn(int x, int y, int z, int yaw, int pitch);
 extern void Minecraft_networkSelfTeleport(int x, int y, int z, int yaw, int pitch);
 extern bool Minecraft_spawnNetworkPlayer(int id, const char* name, int x, int y, int z, float yRot, float xRot);
@@ -82,7 +81,7 @@ int NetConnection_finishConnect(NetConnection* c) {
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 4);
+    writeByte(c, 5);
     writeString(c, c->username);
     writeString(c, c->mppass);
     c->loggedIn = true;
@@ -95,31 +94,11 @@ bool NetConnection_isOpen(const NetConnection* c) {
 
 void NetConnection_close(NetConnection* c) {
     if (!c->connected) return;
-    if (c->writeLen > 0) {
-        int n = NetSocket_write((sock_t)c->sock, c->writeBuf, c->writeLen);
-        c->unflushed = n != c->writeLen;
-    }
+    if (c->writeLen > 0) NetSocket_write((sock_t)c->sock, c->writeBuf, c->writeLen);
     NetSocket_close((sock_t)c->sock);
     c->connected = false;
     free(c->levelBuf);
     c->levelBuf = NULL;
-}
-
-// the string read ran out of bytes: it closes, puts up a disconnect screen with a null message,
-// then the packet goes on with null fields
-static NetResult underflow(NetConnection* c, int id, const unsigned char* f) {
-    NetConnection_close(c);
-    Minecraft_networkException();
-    if (id == PACKET_MESSAGE) {
-        if ((signed char)f[0] < 0) Minecraft_addChatLine("&enull");
-        else Minecraft_addChatLine(NULL);
-    } else if (id == PACKET_DISCONNECT) {
-        Minecraft_showErrorScreen("Connection lost", NULL);
-    } else {
-        // the login and spawn packets unbox a null and throw
-        return NET_THROW;
-    }
-    return c->unflushed ? NET_THROW : NET_OK;
 }
 
 static void appendLevelBytes(NetConnection* c, const unsigned char* data, int len) {
@@ -284,8 +263,7 @@ NetResult NetConnection_tick(NetConnection* c) {
         // the packet table is indexed with a signed byte, anything unknown throws
         if (id >= PACKET_COUNT) return NET_THROW;
         int available = c->readLen - pos;
-        if (available < PacketJavaLen[id] + 1) break;
-        if (available < PacketFullLen[id] + 1) return underflow(c, id, c->readBuf + pos + 1);
+        if (available < PacketFullLen[id] + 1) break;
         if (!handle(c, id, c->readBuf + pos + 1)) return NET_THROW;
         pos += PacketFullLen[id] + 1;
         if (!c->connected) break;

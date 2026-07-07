@@ -200,6 +200,14 @@ static void Tile_default_onPlace(const Tile* self, Level* lvl, int x, int y, int
     (void)self; (void)lvl; (void)x; (void)y; (void)z;
 }
 
+static void Tile_default_onAdded(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self; (void)lvl; (void)x; (void)y; (void)z;
+}
+
+static void Tile_default_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self; (void)lvl; (void)x; (void)y; (void)z;
+}
+
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
@@ -219,6 +227,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->mayPick     = Tile_default_mayPick;
     t->neighborChanged = Tile_default_neighborChanged;
     t->onPlace = Tile_default_onPlace;
+    t->onAdded = Tile_default_onAdded;
+    t->onRemoved = Tile_default_onRemoved;
     t->shouldRenderFace = Tile_default_shouldRenderFace;
     t->renderFace = Tile_default_renderFace;
 
@@ -243,6 +253,8 @@ Tile TILE_IRON_ORE;
 Tile TILE_COAL_ORE;
 Tile TILE_LOG;
 Tile TILE_LEAVES;
+Tile TILE_SPONGE;
+Tile TILE_GLASS;
 
 static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
@@ -320,9 +332,21 @@ static void Liquid_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
     Level_addToTickNextTick(lvl, x, y, z, self->tileId);
 }
 
+// water doesn't go within 2 of a sponge
+static bool Liquid_canFlowTo(const Tile* self, const Level* lvl, int x, int y, int z) {
+    if (self->liquidType != LIQUID_WATER) return true;
+    for (int i = x - 2; i <= x + 2; i++)
+    for (int j = y - 2; j <= y + 2; j++)
+    for (int k = z - 2; k <= z + 2; k++) {
+        if (Level_getTile(lvl, i, j, k) == TILE_SPONGE.id) return false;
+    }
+    return true;
+}
+
 // always says nothing changed, it only schedules the new tile
 static bool Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z) {
     if (Level_getTile(lvl, x, y, z) == 0) {
+        if (!Liquid_canFlowTo(self, lvl, x, y, z)) return false;
         if (level_setTile(lvl, x, y, z, self->tileId)) Level_addToTickNextTick(lvl, x, y, z, self->tileId);
     }
     return false;
@@ -331,7 +355,7 @@ static bool Liquid_checkWater(const Tile* self, Level* lvl, int x, int y, int z)
 // falls through air, lava only one block, then spreads to the 4 sides
 static void Liquid_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     bool hasChanged = false;
-    while (Level_getTile(lvl, x, --y, z) == 0) {
+    while (Level_getTile(lvl, x, --y, z) == 0 && Liquid_canFlowTo(self, lvl, x, y, z)) {
         bool change = level_setTile(lvl, x, y, z, self->tileId);
         if (change) hasChanged = true;
         if (!change || self->liquidType == LIQUID_LAVA) break;
@@ -417,8 +441,14 @@ static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
     t->liquidType = liquidType;
     t->tileId = calm ? id - 1 : id;
     t->calmTileId = calm ? id : id + 1;
-    t->yy0 = -0.1f;
-    t->yy1 = 0.9f;
+    float f = 0.01f;
+    float f2 = 0.1f;
+    t->xx0 = 0.0f - f;
+    t->yy0 = 0.0f - f2 - f;
+    t->zz0 = 0.0f - f;
+    t->xx1 = f + 1.0f;
+    t->yy1 = 1.0f - f2 + f;
+    t->zz1 = f + 1.0f;
     t->shouldTick = !calm;
     t->isSolid = Liquid_isSolid;
     t->getAABB = Liquid_getAABB;
@@ -430,6 +460,35 @@ static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
     t->neighborChanged = calm ? CalmLiquid_neighborChanged : Liquid_neighborChanged;
     t->getBrightness = Liquid_getBrightness;
     if (liquidType == LIQUID_LAVA) t->tickDelay = 5;
+}
+
+// drying the water around it skips the neighbor updates
+static void Sponge_onAdded(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    for (int i = x - 2; i <= x + 2; i++)
+    for (int j = y - 2; j <= y + 2; j++)
+    for (int k = z - 2; k <= z + 2; k++) {
+        if (Level_isWater(lvl, i, j, k)) Level_setTileNoNeighborChange(lvl, i, j, k, 0);
+    }
+}
+
+// every tile around it hears about its neighbors, so the water comes back
+static void Sponge_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    for (int i = x - 2; i <= x + 2; i++)
+    for (int j = y - 2; j <= y + 2; j++)
+    for (int k = z - 2; k <= z + 2; k++) {
+        Level_updateNeighborsAt(lvl, i, j, k, Level_getTile(lvl, i, j, k));
+    }
+}
+
+static int Glass_isSolid(const Tile* self)     { (void)self; return 0; }
+static int Glass_blocksLight(const Tile* self) { (void)self; return 0; }
+
+// no faces between two glass tiles
+static int Glass_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+    if (Level_getTile(lvl, x, y, z) == self->id) return 0;
+    return Tile_default_shouldRenderFace(self, lvl, x, y, z, layer, face);
 }
 
 static bool Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
@@ -491,6 +550,8 @@ void Tile_registerAll(void) {
     registerTile(&TILE_COAL_ORE,   16, 34, NULL);
     registerTile(&TILE_LOG,        17, 20, Log_getTexture);
     registerTile(&TILE_LEAVES,     18, 22, NULL);
+    registerTile(&TILE_SPONGE,     19, 48, NULL);
+    registerTile(&TILE_GLASS,      20, 49, NULL);
 
     TILE_GRASS.shouldTick = true;
     TILE_GRASS.onTick     = Grass_onTick;
@@ -510,6 +571,14 @@ void Tile_registerAll(void) {
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
     TILE_LEAVES.gravity     = 0.4f;
+
+    TILE_SPONGE.gravity   = 0.9f;
+    TILE_SPONGE.onAdded   = Sponge_onAdded;
+    TILE_SPONGE.onRemoved = Sponge_onRemoved;
+
+    TILE_GLASS.isSolid          = Glass_isSolid;
+    TILE_GLASS.blocksLight      = Glass_blocksLight;
+    TILE_GLASS.shouldRenderFace = Glass_shouldRenderFace;
 }
 
 // highlight face, only drawn when the player is on its side

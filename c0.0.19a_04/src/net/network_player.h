@@ -14,6 +14,9 @@ typedef struct NetworkPlayer {
 
     float animStep, animStepO;
     float yBodyRot, yBodyRotO;
+    // eases to 1 while moving, scales the walk swing
+    float run, oRun;
+    int tickCount;
 
     // position in 1/32 blocks, the deltas add up on these
     int xp, yp, zp;
@@ -26,7 +29,7 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* nam
                         int x, int y, int z, float yRot, float xRot);
 void NetworkPlayer_free(NetworkPlayer* np);
 void NetworkPlayer_onTick(NetworkPlayer* np);
-void NetworkPlayer_render(const NetworkPlayer* np, float a);
+void NetworkPlayer_render(NetworkPlayer* np, float a);
 
 void NetworkPlayer_teleport(NetworkPlayer* np, int x, int y, int z, float yRot, float xRot);
 void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yRot, float xRot);

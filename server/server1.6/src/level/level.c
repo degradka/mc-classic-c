@@ -90,7 +90,7 @@ static void neighborChanged(Level* level, int x, int y, int z, int type) {
     if (t && t->neighborChanged) t->neighborChanged(t, level, x, y, z, type);
 }
 
-static void updateNeighborsAt(Level* level, int x, int y, int z, int type) {
+void Level_updateNeighborsAt(Level* level, int x, int y, int z, int type) {
     neighborChanged(level, x - 1, y, z, type);
     neighborChanged(level, x + 1, y, z, type);
     neighborChanged(level, x, y - 1, z, type);
@@ -100,15 +100,17 @@ static void updateNeighborsAt(Level* level, int x, int y, int z, int type) {
 }
 
 void Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1) {
+    if (level->networkMode) return;
     int a = Level_getTile(level, x0, y0, z0);
     int b = Level_getTile(level, x1, y1, z1);
     Level_setTileNoNeighborChange(level, x0, y0, z0, b);
     Level_setTileNoNeighborChange(level, x1, y1, z1, a);
-    updateNeighborsAt(level, x0, y0, z0, b);
-    updateNeighborsAt(level, x1, y1, z1, a);
+    Level_updateNeighborsAt(level, x0, y0, z0, b);
+    Level_updateNeighborsAt(level, x1, y1, z1, a);
 }
 
 bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type) {
+    if (level->networkMode) return false;
     if (!inBounds(level, x, y, z)) return false;
     int i = indexOf(level, x, y, z);
     if (type == level->blocks[i]) return false;
@@ -117,15 +119,25 @@ bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type) 
         (float)y >= Level_getGroundLevel(level) && (float)y < Level_getWaterLevel(level)) {
         type = TILE_WATER;
     }
+    int old = level->blocks[i];
     level->blocks[i] = (int8_t)type;
+    if (old != 0) {
+        const Tile* t = Tile_req(old);
+        if (t->onRemoved) t->onRemoved(t, level, x, y, z);
+    }
+    if (type != 0) {
+        const Tile* t = Tile_req(type);
+        if (t->onAdded) t->onAdded(t, level, x, y, z);
+    }
     Level_calcLightDepths(level, x, z, 1, 1);
     if (level->listener) level->listener(level->listenerCtx, x, y, z);
     return true;
 }
 
 bool Level_setTile(Level* level, int x, int y, int z, int type) {
+    if (level->networkMode) return false;
     if (!Level_setTileNoNeighborChange(level, x, y, z, type)) return false;
-    updateNeighborsAt(level, x, y, z, type);
+    Level_updateNeighborsAt(level, x, y, z, type);
     return true;
 }
 
@@ -144,7 +156,13 @@ bool Level_isLit(const Level* level, int x, int y, int z) {
 
 int Level_getTile(const Level* level, int x, int y, int z) {
     if (!inBounds(level, x, y, z)) return 0;
-    return level->blocks[indexOf(level, x, y, z)];
+    // unsigned here, the ticks and neighbor updates still read the signed byte
+    return level->blocks[indexOf(level, x, y, z)] & 0xFF;
+}
+
+bool Level_isWater(const Level* level, int x, int y, int z) {
+    int id = Level_getTile(level, x, y, z);
+    return id > 0 && Tile_req(id)->liquid == LIQUID_WATER;
 }
 
 static void pushTick(Level* level, NextTick t) {
@@ -212,6 +230,7 @@ float Level_getWaterLevel(const Level* level) {
 }
 
 void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
+    if (level->networkMode) return;
     NextTick t = { x, y, z, id, 0 };
     if (id > 0) t.delay = Tile_req(id)->tickDelay;
     pushTick(level, t);

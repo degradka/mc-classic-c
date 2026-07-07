@@ -1,6 +1,6 @@
 // log.h: the console lines, a level mark, HH:mm:ss and the message on stderr
 // fine messages are below the logger's level and never show
-// the same lines go to server.log, buffered in 8KB so a killed server loses the tail
+// the same lines go to server.log, flushed after every one
 
 #ifndef LOG_H
 #define LOG_H

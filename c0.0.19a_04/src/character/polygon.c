@@ -15,8 +15,9 @@ void Polygon_render(const Polygon* p) {
     const float uDiv = 64.0f;
     const float vDiv = 32.0f;
 
-    glTexCoord2f(p->v[3].u / uDiv, p->v[3].v / vDiv); glVertex3f(p->v[3].pos.x, p->v[3].pos.y, p->v[3].pos.z);
-    glTexCoord2f(p->v[2].u / uDiv, p->v[2].v / vDiv); glVertex3f(p->v[2].pos.x, p->v[2].pos.y, p->v[2].pos.z);
-    glTexCoord2f(p->v[1].u / uDiv, p->v[1].v / vDiv); glVertex3f(p->v[1].pos.x, p->v[1].pos.y, p->v[1].pos.z);
-    glTexCoord2f(p->v[0].u / uDiv, p->v[0].v / vDiv); glVertex3f(p->v[0].pos.x, p->v[0].pos.y, p->v[0].pos.z);
+    // 19a goes through the corners the other way round, so the faces flip
+    for (int i = 0; i < 4; i++) {
+        glTexCoord2f(p->v[i].u / uDiv, p->v[i].v / vDiv);
+        glVertex3f(p->v[i].pos.x, p->v[i].pos.y, p->v[i].pos.z);
+    }
 }

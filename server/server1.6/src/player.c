@@ -45,6 +45,7 @@ static void freeQueue(Player* p) {
 
 void Player_free(Player* p) {
     freeQueue(p);
+    free(p->actions);
     for (LevelBuffer* b = p->buffers; b;) {
         LevelBuffer* next = b->next;
         free(b->data);
@@ -151,7 +152,7 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     if (other) Player_kick(other, "You logged in from another computer.");
     char who[512], n[JSTR_MAX * 3];
     Log_info("%s logged in as %s", Player_toString(p, who, sizeof who), jstr_c(&name, n, sizeof n));
-    if (protocol != 4) {
+    if (protocol != 5) {
         Player_kick(p, "Wrong protocol version.");
         return;
     }
@@ -161,18 +162,49 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     }
     p->loggedIn = true;
     jstr_copy(&p->name, &name);
-    PacketValue reply[3] = { { .i = 4 }, { .s = &p->server->serverName }, { .s = &p->server->motd } };
+    PacketValue reply[3] = { { .i = 5 }, { .s = &p->server->serverName }, { .s = &p->server->motd } };
     sendDirect(p, PACKET_LOGIN, reply);
     startLevelJob(p);
     PlayerList_add(&p->server->playerList, &name);
 }
 
 // what a client may place, anything else is a cheat
-static const int PLACEABLE[9] = { TILE_ROCK, TILE_DIRT, TILE_STONEBRICK, TILE_WOOD, TILE_BUSH, TILE_LOG, TILE_LEAVES, TILE_SAND, TILE_GRAVEL };
+static const int PLACEABLE[9] = { TILE_ROCK, TILE_DIRT, TILE_SPONGE, TILE_WOOD, TILE_BUSH, TILE_LOG, TILE_LEAVES, TILE_GLASS, TILE_GRAVEL };
 
-static void handlePlace(Player* p, const PacketValue* v, const bool* present) {
-    for (int i = 0; i < 5; ++i) if (!present[i]) jthrowNull();
-    int x = v[0].i, y = v[1].i, z = v[2].i, mode = v[3].i, type = v[4].i;
+static void broadcastText(MinecraftServer* s, const JStr* text) {
+    PacketValue v[2] = { { .i = -1 }, { .s = text } };
+    Server_broadcast(s, PACKET_MESSAGE, v);
+}
+
+static void queueAction(Player* p, int id, const PacketValue* v, const bool* present) {
+    if (p->actionCount > 400) {
+        cheat(p, "Too much lag");
+        return;
+    }
+    if (p->actionHead + p->actionCount == p->actionCap) {
+        if (p->actionHead > 0) {
+            memmove(p->actions, p->actions + p->actionHead, (size_t)p->actionCount * sizeof(PendingAction));
+            p->actionHead = 0;
+        } else {
+            p->actionCap = p->actionCap ? p->actionCap * 2 : 64;
+            p->actions = (PendingAction*)realloc(p->actions, (size_t)p->actionCap * sizeof(PendingAction));
+        }
+    }
+    PendingAction* a = &p->actions[p->actionHead + p->actionCount++];
+    a->id = id;
+    for (int i = 0; i < 6; ++i) {
+        a->values[i] = v[i].i;
+        a->present[i] = i < (int)strlen(PACKETS[id].fields) && present[i];
+    }
+}
+
+static void place(Player* p, const PendingAction* a) {
+    for (int i = 0; i < 5; ++i) if (!a->present[i]) jthrowNull();
+    int x = a->values[0], y = a->values[1], z = a->values[2], mode = a->values[3], type = a->values[4];
+    if (++p->clicks == 100) {
+        cheat(p, "Too much clicking!");
+        return;
+    }
     Level* level = p->server->level;
     // from the eyes of the last position the others were sent
     float dx = (float)x - (float)p->x / 32.0f;
@@ -207,103 +239,15 @@ static void handlePlace(Player* p, const PacketValue* v, const bool* present) {
     }
 }
 
-static void broadcastText(MinecraftServer* s, const JStr* text) {
-    PacketValue v[2] = { { .i = -1 }, { .s = text } };
-    Server_broadcast(s, PACKET_MESSAGE, v);
-}
-
-static void handleCommand(Player* p, const JStr* message) {
-    MinecraftServer* s = p->server;
-    if (!PlayerList_contains(&s->admins, &p->name)) {
-        Player_message(p, "You're not a server admin!");
-        return;
-    }
-    static JStr parts[128], cmd, rest;
-    int count = jstr_splitSpace(message, parts, 128);
-    jstr_copy(&cmd, &parts[0]);
-    jstr_toLower(&cmd);
-    const JStr* arg = count > 1 ? &parts[1] : NULL;
-    if (jstr_eqc(&cmd, "/ban")) {
-        if (!arg) jthrowIndex(1);
-        Server_ban(s, arg);
-    } else if (jstr_eqc(&cmd, "/kick")) {
-        if (!arg) jthrowIndex(1);
-        Server_kick(s, arg);
-    } else if (jstr_eqc(&cmd, "/banip")) {
-        if (!arg) jthrowIndex(1);
-        Server_banIp(s, arg);
-    } else if (jstr_eqc(&cmd, "/unban")) {
-        if (!arg) jthrowIndex(1);
-        Server_unban(s, arg);
-    } else if (jstr_eqc(&cmd, "/op")) {
-        if (!arg) jthrowIndex(1);
-        Server_op(s, arg);
-    } else if (jstr_eqc(&cmd, "/deop")) {
-        if (!arg) jthrowIndex(1);
-        Server_deop(s, arg);
-    } else if (jstr_eqc(&cmd, "/setspawn")) {
-        Level* level = s->level;
-        level->xSpawn = p->x / 32;
-        level->ySpawn = p->y / 32;
-        level->zSpawn = p->z / 32;
-        level->rotSpawn = (float)(p->yaw * 320 / 256);
-    } else if (jstr_eqc(&cmd, "/broadcast")) {
-        jstr_substring(&rest, message, 11);
-        jstr_trim(&rest);
-        broadcastText(s, &rest);
-    } else if (jstr_eqc(&cmd, "/say")) {
-        jstr_substring(&rest, message, 5);
-        jstr_trim(&rest);
-        broadcastText(s, &rest);
-    } else if (jstr_eqc(&cmd, "/teleport")) {
-        if (!arg) jthrowIndex(1);
-        Player* o = Server_findPlayer(s, arg);
-        if (o) {
-            PacketValue v[6] = { { .i = -1 }, { .i = o->x }, { .i = o->y }, { .i = o->z }, { .i = o->yaw }, { .i = o->pitch } };
-            sendDirect(p, PACKET_TELEPORT, v);
-        } else {
-            Player_message(p, "No such player");
-        }
-    } else {
-        Player_message(p, "Unknown command!");
-    }
-}
-
-static void handleMessage(Player* p, const PacketValue* v, const bool* present) {
-    if (!present[1]) jthrowNull();
-    static JStr message;
-    jstr_copy(&message, v[1].s);
-    jstr_trim(&message);
-    if (message.n <= 0) return;
-    jstr_trim(&message);
-    // a kick for every bad char, and the message still goes through
-    for (int i = 0; i < message.n; ++i) {
-        if (message.c[i] >= ' ' && message.c[i] <= 0x7F) continue;
-        cheat(p, "Bad chat message!");
-    }
-    if (jstr_startsWithc(&message, "/")) {
-        handleCommand(p, &message);
-        return;
-    }
-    char n[JSTR_MAX * 3], m[JSTR_MAX * 3];
-    Log_info("%s says: %s", jstr_c(&p->name, n, sizeof n), jstr_c(&message, m, sizeof m));
-    static JStr text;
-    jstr_copy(&text, &p->name);
-    jstr_catc(&text, ": ");
-    jstr_cat(&text, &message);
-    PacketValue out[2] = { { .i = p->id }, { .s = &text } };
-    Server_broadcast(p->server, PACKET_MESSAGE, out);
-}
-
-static void handleTeleport(Player* p, const PacketValue* v, const bool* present) {
-    if (!present[0]) jthrowNull();
-    for (int i = 5; i >= 1; --i) if (!present[i]) jthrowNull();
-    int pitch = v[5].i, yaw = v[4].i, z = v[3].i, y = v[2].i, x = v[1].i;
-    // every other one, and only if something changed
+// true when the tick may go on to the next queued action, a move to a new spot ends it
+static bool move(Player* p, const PendingAction* a) {
+    for (int i = 0; i < 6; ++i) if (!a->present[i]) jthrowNull();
+    int x = a->values[1], y = a->values[2], z = a->values[3], yaw = a->values[4], pitch = a->values[5];
+    if (x == p->x && y == p->y && z == p->z && yaw == p->yaw && pitch == p->pitch) return true;
+    bool samePlace = x == p->x && y == p->y && z == p->z;
     int moves = p->moves;
     p->moves = (int)((unsigned)moves + 1u);
-    if (moves % 2 != 0) return;
-    if (x == p->x && y == p->y && z == p->z && yaw == p->yaw && pitch == p->pitch) return;
+    if (moves % 2 != 0) return samePlace;
     int dx = x - p->x, dy = y - p->y, dz = z - p->z;
     if (dx >= 128 || dx < -128 || dy >= 128 || dy < -128 || dz >= 128 || dz < -128 || p->moves % 20 <= 1) {
         p->x = x;
@@ -313,39 +257,85 @@ static void handleTeleport(Player* p, const PacketValue* v, const bool* present)
         p->pitch = pitch;
         PacketValue o[6] = { { .i = p->id }, { .i = x }, { .i = y }, { .i = z }, { .i = yaw }, { .i = pitch } };
         Server_broadcastExcept(p->server, p, PACKET_TELEPORT, o);
-        return;
+        return false;
     }
-    if (x == p->x && y == p->y && z == p->z) {
+    if (samePlace) {
         p->yaw = yaw;
         p->pitch = pitch;
         PacketValue o[3] = { { .i = p->id }, { .i = yaw }, { .i = pitch } };
         Server_broadcastExcept(p->server, p, PACKET_LOOK, o);
-        return;
-    }
-    if (yaw == p->yaw && pitch == p->pitch) {
+    } else if (yaw == p->yaw && pitch == p->pitch) {
         p->x = x;
         p->y = y;
         p->z = z;
         PacketValue o[4] = { { .i = p->id }, { .i = dx }, { .i = dy }, { .i = dz } };
         Server_broadcastExcept(p->server, p, PACKET_MOVE, o);
+    } else {
+        p->x = x;
+        p->y = y;
+        p->z = z;
+        p->yaw = yaw;
+        p->pitch = pitch;
+        PacketValue o[6] = { { .i = p->id }, { .i = dx }, { .i = dy }, { .i = dz }, { .i = yaw }, { .i = pitch } };
+        Server_broadcastExcept(p->server, p, PACKET_MOVE_LOOK, o);
+    }
+    return samePlace;
+}
+
+static void chat(Player* p, const JStr* text) {
+    static JStr message;
+    jstr_copy(&message, text);
+    jstr_trim(&message);
+    p->chatter += (message.n + 15) << 2;
+    if (p->chatter > 600) {
+        p->chatter = 760;
+        Player_message(p, "Too much chatter! Muted for eight seconds.");
+        char n[JSTR_MAX * 3];
+        Log_info("Muting %s for chatting too much", jstr_c(&p->name, n, sizeof n));
         return;
     }
-    p->x = x;
-    p->y = y;
-    p->z = z;
-    p->yaw = yaw;
-    p->pitch = pitch;
-    PacketValue o[6] = { { .i = p->id }, { .i = dx }, { .i = dy }, { .i = dz }, { .i = yaw }, { .i = pitch } };
-    Server_broadcastExcept(p->server, p, PACKET_MOVE_LOOK, o);
+    for (int i = 0; i < message.n; ++i) {
+        if (message.c[i] >= ' ' && message.c[i] <= 0x7F) continue;
+        cheat(p, "Bad chat message!");
+        return;
+    }
+    if (jstr_startsWithc(&message, "/")) {
+        if (!PlayerList_contains(&p->server->admins, &p->name)) {
+            Player_message(p, "You're not a server admin!");
+            return;
+        }
+        static JStr command;
+        jstr_substring(&command, &message, 1);
+        Server_command(p->server, p, &command);
+        return;
+    }
+    char n[JSTR_MAX * 3], m[JSTR_MAX * 3];
+    Log_info("%s says: %s", jstr_c(&p->name, n, sizeof n), jstr_c(&message, m, sizeof m));
+    static JStr out;
+    jstr_copy(&out, &p->name);
+    jstr_catc(&out, ": ");
+    jstr_cat(&out, &message);
+    PacketValue v[2] = { { .i = p->id }, { .s = &out } };
+    Server_broadcast(p->server, PACKET_MESSAGE, v);
 }
 
 void Player_handle(Player* p, int id, const PacketValue* values, const bool* present) {
-    if (id == PACKET_LOGIN) handleLogin(p, values, present);
-    else if (id == PACKET_PING) return;
-    else if (!p->loggedIn || !p->spawned) return;
-    else if (id == PACKET_PLACE) handlePlace(p, values, present);
-    else if (id == PACKET_MESSAGE) handleMessage(p, values, present);
-    else if (id == PACKET_TELEPORT) handleTeleport(p, values, present);
+    if (p->kicked) return;
+    if (id == PACKET_LOGIN) {
+        handleLogin(p, values, present);
+        return;
+    }
+    if (id == PACKET_PING) return;
+    if (!p->loggedIn || !p->spawned) return;
+    if (id == PACKET_PLACE || id == PACKET_TELEPORT) {
+        queueAction(p, id, values, present);
+    } else if (id == PACKET_MESSAGE) {
+        if (!present[1]) jthrowNull();
+        static JStr message;
+        jstr_copy(&message, values[1].s);
+        jstr_trim(&message);
+        if (message.n > 0) chat(p, &message);
+    }
 }
 
 void Player_kick(Player* p, const char* reason) {
@@ -356,6 +346,7 @@ void Player_kick(Player* p, const char* reason) {
     char who[512];
     Log_info("Kicking %s: %s", Player_toString(p, who, sizeof who), reason);
     Server_closeLater(p->server, p->conn);
+    p->kicked = true;
 }
 
 void Player_message(Player* p, const char* text) {
@@ -371,6 +362,26 @@ static void sendSpawn(Player* p, const Player* o) {
 }
 
 void Player_tick(Player* p) {
+    if (p->clicks >= 2) p->clicks -= 2;
+    if (p->chatter > 0) {
+        p->chatter--;
+        if (p->chatter == 600) {
+            Player_message(p, "You can now talk again.");
+            p->chatter = 300;
+        }
+    }
+    bool more = true;
+    while (p->actionCount > 0 && more) {
+        PendingAction a = p->actions[p->actionHead++];
+        p->actionCount--;
+        if (!a.present[0]) jthrowNull();
+        if (a.id == PACKET_PLACE) {
+            place(p, &a);
+            more = true;
+        } else {
+            more = move(p, &a);
+        }
+    }
     if (!p->loggedIn && jtime_millis() - p->connectTime > 5000) {
         Player_kick(p, "You need to log in!");
         return;
@@ -456,6 +467,7 @@ void Player_onException(Player* p, const Jcatch* e) {
     } else {
         Log_warning("%s:%s", who, e->text);
         Log_warning("Exception handling %s!", who);
+        Log_stackTrace(e->text);
     }
     JStr left;
     jstr_copy(&left, &p->name);

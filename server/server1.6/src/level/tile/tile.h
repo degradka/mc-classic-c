@@ -1,4 +1,4 @@
-// level/tile/tile.h: the server's tiles, ids 0 to 18, logic only
+// level/tile/tile.h: the server's tiles, ids 0 to 20, logic only
 
 #ifndef TILE_H
 #define TILE_H
@@ -24,12 +24,15 @@ struct Tile {
     void (*tick)(const Tile* t, struct Level* level, int x, int y, int z, JRandom* random);
     void (*neighborChanged)(const Tile* t, struct Level* level, int x, int y, int z, int type);
     void (*onPlace)(const Tile* t, struct Level* level, int x, int y, int z);
+    // when the level puts it in or takes it out, the sponge uses them
+    void (*onAdded)(const Tile* t, struct Level* level, int x, int y, int z);
+    void (*onRemoved)(const Tile* t, struct Level* level, int x, int y, int z);
 };
 
 enum {
     TILE_ROCK = 1, TILE_GRASS, TILE_DIRT, TILE_STONEBRICK, TILE_WOOD, TILE_BUSH, TILE_UNBREAKABLE,
     TILE_WATER, TILE_CALM_WATER, TILE_LAVA, TILE_CALM_LAVA, TILE_SAND, TILE_GRAVEL,
-    TILE_GOLD_ORE, TILE_IRON_ORE, TILE_COAL_ORE, TILE_LOG, TILE_LEAVES
+    TILE_GOLD_ORE, TILE_IRON_ORE, TILE_COAL_ORE, TILE_LOG, TILE_LEAVES, TILE_SPONGE, TILE_GLASS
 };
 
 // which tiles the random ticks reach

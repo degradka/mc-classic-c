@@ -103,7 +103,7 @@ static Level* loadV2(const uint8_t* p, size_t len) {
                  "java.io.InvalidClassException: local class incompatible: stream classdesc serialVersionUID = %lld, local class serialVersionUID = 0",
                  (long long)c->suid);
     } else if (!fieldType(c, "createTime", 'J', NULL) || !fieldType(c, "depth", 'I', NULL) || !fieldType(c, "height", 'I', NULL) ||
-               !fieldType(c, "rotSpawn", 'F', NULL) || !fieldType(c, "tickCount", 'I', NULL) || !fieldType(c, "unprocessed", 'I', NULL) ||
+               !fieldType(c, "networkMode", 'Z', NULL) || !fieldType(c, "rotSpawn", 'F', NULL) || !fieldType(c, "tickCount", 'I', NULL) || !fieldType(c, "unprocessed", 'I', NULL) ||
                !fieldType(c, "width", 'I', NULL) || !fieldType(c, "xSpawn", 'I', NULL) || !fieldType(c, "ySpawn", 'I', NULL) ||
                !fieldType(c, "zSpawn", 'I', NULL) || !fieldType(c, "blocks", '[', "[B") ||
                !fieldType(c, "creator", 'L', "Ljava/lang/String;") || !fieldType(c, "entities", 'L', "Ljava/util/ArrayList;") ||
@@ -144,6 +144,7 @@ static Level* loadV2(const uint8_t* p, size_t len) {
     level->ySpawn = (int)JNode_int(root, LV, "ySpawn");
     level->zSpawn = (int)JNode_int(root, LV, "zSpawn");
     level->rotSpawn = JNode_float(root, LV, "rotSpawn");
+    level->networkMode = JNode_int(root, LV, "networkMode") != 0;
     level->tickCount = (int)JNode_int(root, LV, "tickCount");
     level->unprocessed = (int)JNode_int(root, LV, "unprocessed");
     // ArrayList.readObject keeps the saved array length, a missing list gets a new one
@@ -177,12 +178,12 @@ Level* LevelIO_load(const uint8_t* data, int len) {
 /* save */
 
 static const JField LEVEL_FIELDS[] = {
-    { 'J', "createTime", NULL }, { 'I', "depth", NULL }, { 'I', "height", NULL }, { 'F', "rotSpawn", NULL },
+    { 'J', "createTime", NULL }, { 'I', "depth", NULL }, { 'I', "height", NULL }, { 'Z', "networkMode", NULL }, { 'F', "rotSpawn", NULL },
     { 'I', "tickCount", NULL }, { 'I', "unprocessed", NULL }, { 'I', "width", NULL }, { 'I', "xSpawn", NULL },
     { 'I', "ySpawn", NULL }, { 'I', "zSpawn", NULL }, { '[', "blocks", "[B" }, { 'L', "creator", "Ljava/lang/String;" },
     { 'L', "entities", "Ljava/util/ArrayList;" }, { 'L', "name", "Ljava/lang/String;" }
 };
-static const JDesc LEVEL_DESC = { LV, 0, 2, 14, LEVEL_FIELDS, NULL };
+static const JDesc LEVEL_DESC = { LV, 0, 2, 15, LEVEL_FIELDS, NULL };
 static const JField ARRAY_LIST_FIELDS[] = { { 'I', "size", NULL } };
 static const JDesc ARRAY_LIST_DESC = { "java.util.ArrayList", 8683452581122892189LL, 3, 1, ARRAY_LIST_FIELDS, NULL };
 
@@ -221,6 +222,7 @@ void LevelIO_save(const Level* level, void* file) {
     JW_i8(&w, level->createTime);
     JW_i4(&w, level->depth);
     JW_i4(&w, level->height);
+    JW_u1(&w, level->networkMode ? 1 : 0);
     JW_f4(&w, level->rotSpawn);
     JW_i4(&w, level->tickCount);
     JW_i4(&w, level->unprocessed);

@@ -46,7 +46,7 @@ static int* raise(Gen* g) {
             double c = p5.synth.getValue(&p5.synth, x, z) / 8.0;
             if (c > 0.0) h2 = h1;
             double h = (h1 > h2 ? h1 : h2) / 2.0;
-            if (h < 0.0) h /= 2.0;
+            if (h < 0.0) h *= 0.8;
             heightmap[x + z * g->width] = (int)h;
         }
     }
@@ -129,14 +129,19 @@ static void carveTunnels(Gen* g) {
             dir2 *= 0.5f;
             dira2 *= 0.9f;
             dira2 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
+            // 3 in 10 steps carve nothing, the rest carve a little off the path
+            if (JRandom_nextFloat(&genRandom) < 0.3f) continue;
+            float cx = x + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
+            float cy = y + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
+            float cz = z + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
             float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
 
-            for (int xx = (int)(x - size); xx <= (int)(x + size); ++xx)
-            for (int yy = (int)(y - size); yy <= (int)(y + size); ++yy)
-            for (int zz = (int)(z - size); zz <= (int)(z + size); ++zz) {
-                float xd = (float)xx - x;
-                float yd = (float)yy - y;
-                float zd = (float)zz - z;
+            for (int xx = (int)(cx - size); xx <= (int)(cx + size); ++xx)
+            for (int yy = (int)(cy - size); yy <= (int)(cy + size); ++yy)
+            for (int zz = (int)(cz - size); zz <= (int)(cz + size); ++zz) {
+                float xd = (float)xx - cx;
+                float yd = (float)yy - cy;
+                float zd = (float)zz - cz;
                 float dd = xd * xd + yd * yd * 2.0f + zd * zd;
                 if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
                     xx < g->width - 1 && yy < g->depth - 1 && zz < g->height - 1) {

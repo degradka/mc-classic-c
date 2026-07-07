@@ -19,6 +19,13 @@ typedef struct {
     JStr* strings[7];
 } QueuedPacket;
 
+// a place or move packet, they wait for the tick
+typedef struct {
+    int id;
+    int values[6];
+    bool present[6];
+} PendingAction;
+
 // a gzipped level from the send thread, kept until the player goes
 typedef struct LevelBuffer {
     struct LevelBuffer* next;
@@ -41,6 +48,13 @@ typedef struct Player {
     int x, y, z, pitch, yaw;
     int moves;
     int64_t connectTime;
+    // kicked, everything it sends after that is ignored
+    bool kicked;
+    // chat flood and click counters, both cool down every tick
+    int chatter;
+    int clicks;
+    PendingAction* actions;
+    int actionHead, actionCount, actionCap;
     LevelBuffer* volatile level;
     LevelBuffer* volatile buffers;
     volatile int threads;

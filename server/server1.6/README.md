@@ -1,24 +1,24 @@
-# Dedicated server 1.4.1
+# Dedicated server 1.6
 
 [Back to all versions](../../README.md)
 
-Released June 14, 2009, for the 0.0.18a_02 client.
+Released June 19, 2009, for the 0.0.19a_04 client.
 
 ## What changed
 
-- /teleport <name> moves the admin to that player
-- Names and chat outside plain ascii kick with "Cheat detected" (a bad chat message still gets through, like the original)
-- Packets other than the login and ping are ignored until the player has the level
-- Blocks outside the level can't be placed
-- The log also goes to `server.log`
+- Commands can be typed into the server console too, without the `/`
+- Chat is rate limited, spamming mutes you for a while
+- Glass and sponge can be placed, sponges dry the water around them
+- `max-connections` in `server.properties` sets how many connections one ip can have, 3 by default
+- Block changes and movement are handled once a game tick instead of as they arrive, with kicks for
+  "Too much lag" (over 400 waiting) and "Too much clicking!"
+- Cobblestone and sand can't be placed any more
+- Admin commands are logged as "<name> admins: <command>", one without a name no longer drops the admin
+- `server.log` is written after every line
 
 ## How it was ported
 
 - Ported from the decompiled server jar, which is obfuscated like the clients
-
-## Quirks kept from the original
-
-- A chat line with a control character kicks the player, but the line still goes through, the server forgets to stop after the kick
 
 ## Differences from the original
 
@@ -27,20 +27,22 @@ Released June 14, 2009, for the 0.0.18a_02 client.
 - `verify-names` is off by default (the original had it on). It checks the key minecraft.net gave each player,
   and without minecraft.net nobody has one. It still works like the original if you turn it on
 
+Like the original, `max-connections` is read from `server.properties` but always saved back as 3.
+
 ## Playing on it
 
-Works with the [c0.0.18a_02](../../c0.0.18a_02/) client here and with the original Java one. Start the server, then the client from its folder:
+Works with the [c0.0.19a_04](../../c0.0.19a_04/) client here and with the original Java one. Start the server, then the client from its folder:
 ```bash
-cd mc-classic-c/c0.0.18a_02
+cd mc-classic-c/c0.0.19a_04
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```
 
 ## Files
 
 These are located in the folder the server runs from:
-- `server.properties`: `server-name`, `motd`, `port`, `max-players`, `public`, `verify-names`
+- `server.properties`: `server-name`, `motd`, `port`, `max-players`, `public`, `verify-names`, `max-connections`
 - `admins.txt`, `banned.txt`, `banned-ip.txt`, `players.txt`: one name or ip per line
-- `server.log`: the log, written in 8KB pieces like the original, the rest when you stop it with ctrl+c
+- `server.log`: the log
 - `server_level.dat`: the level, saved every minute or so
 
 ## Building and running
@@ -59,7 +61,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/server/server1.4.1/src
+cd mc-classic-c/server/server1.6/src
 make
 ```
 
@@ -76,4 +78,4 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic server 1.4.1](https://minecraft.wiki/w/Java_Edition_Classic_server_1.4.1)
+- [minecraft.wiki: Java Edition Classic server 1.6](https://minecraft.wiki/w/Java_Edition_Classic_server_1.6)

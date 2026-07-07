@@ -48,6 +48,9 @@ struct Tile {
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
     // after the player places it
     void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
+    // the level calls these when it puts the tile in or takes it out
+    void (*onAdded)(const Tile* self, Level* lvl, int x, int y, int z);
+    void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
 
     int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
     // the light a face gets from the tile in front of it
@@ -77,6 +80,8 @@ extern Tile TILE_IRON_ORE;   // id=15
 extern Tile TILE_COAL_ORE;   // id=16
 extern Tile TILE_LOG;        // id=17
 extern Tile TILE_LEAVES;     // id=18
+extern Tile TILE_SPONGE;     // id=19
+extern Tile TILE_GLASS;      // id=20
 
 void Tile_registerAll(void);
 

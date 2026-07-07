@@ -3,19 +3,19 @@
 #include "packet.h"
 
 const PacketType PACKETS[PACKET_COUNT] = {
-    { "BTT", 1 },
+    { "BTT", 1 + 64 + 64 },
     { "", 0 },
     { "", 0 },
     { "SAB", 2 + 1024 + 1 },
     { "SSS", 6 },
     { "SSSBB", 8 },
     { "SSSB", 7 },
-    { "BTSSSBB", 9 },
+    { "BTSSSBB", 1 + 64 + 8 },
     { "BSSSBB", 9 },
     { "BBBBBB", 6 },
     { "BBBB", 4 },
     { "BBB", 3 },
     { "B", 1 },
-    { "BT", 1 },
-    { "T", 0 }
+    { "BT", 1 + 64 },
+    { "T", 64 }
 };

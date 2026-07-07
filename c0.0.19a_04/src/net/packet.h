@@ -26,9 +26,7 @@ enum {
 #define PACKET_STRING_LEN 64
 #define PACKET_ARRAY_LEN  1024
 
-// the payload size the read waits for, it forgets to count the strings
-extern const int PacketJavaLen[PACKET_COUNT];
-// the real payload size
+// the payload size, 19a counts the strings now so a packet is only read once it's all here
 extern const int PacketFullLen[PACKET_COUNT];
 
 #endif

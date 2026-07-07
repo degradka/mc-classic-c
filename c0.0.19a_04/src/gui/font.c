@@ -85,13 +85,16 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
     size_t n = strlen(s);
 
     for (size_t i = 0; i < n; ++i) {
-        if (str[i] == '&') {
-            // reads past the end of the string here and the frame throws
+        // a lone & at the end is drawn, an unknown code is white
+        if (str[i] == '&' && n > i + 1) {
+            // a code with nothing after it still reads past the end and the frame throws
             if (i + 2 >= n) {
                 Font_threw = true;
                 return;
             }
-            color = color_from_code(code_index(str[i + 1]));
+            int cc = code_index(str[i + 1]);
+            if (cc < 0) cc = 15;
+            color = color_from_code(cc);
             i += 2;
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);

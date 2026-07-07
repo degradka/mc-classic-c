@@ -25,7 +25,7 @@ GLuint loadTexture(const char* path, int filterMode) {
     unsigned char* img = stbi_load(path, &w, &h, &ch, STBI_rgb_alpha);
     if (!img) { fprintf(stderr, "Failed to load texture %s\n", path); return 0; }
 
-    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGBA, w, h, GL_RGBA, GL_UNSIGNED_BYTE, img);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, img);
 
     stbi_image_free(img);
     return (int)tex;

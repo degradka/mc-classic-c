@@ -7,6 +7,8 @@
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
+  #include <mmsystem.h>
+  #include <stdbool.h>
 #elif defined(__APPLE__)
   #include <mach/mach_time.h>
   #include <time.h>
@@ -14,18 +16,16 @@
   #include <time.h>
 #endif
 
-#define NS_PER_SECOND        1000000000LL
-#define MAX_NS_PER_UPDATE    1000000000LL
-#define MAX_TICKS_PER_UPDATE 100
-
 void Timer_init(Timer* timer, float ticksPerSecond) {
-    timer->ticksPerSecond = ticksPerSecond;
-    timer->timeScale      = 1.0f;
-    timer->fps            = 0.0f;
-    timer->passedTime     = 0.0f;
-    timer->ticks          = 0;
-    timer->partialTicks   = 0.0f;
-    timer->lastTime       = getCurrentTimeInNanoseconds();
+    timer->ticksPerSecond     = ticksPerSecond;
+    timer->lastHRTime         = 0.0;
+    timer->ticks              = 0;
+    timer->partialTicks       = 0.0f;
+    timer->timeScale          = 1.0f;
+    timer->passedTime         = 0.0f;
+    timer->lastSyncSysClock   = currentTimeMillis();
+    timer->lastSyncHRClock    = getCurrentTimeInNanoseconds() / 1000000LL;
+    timer->timeSyncAdjustment = 1.0;
 }
 
 long long getCurrentTimeInNanoseconds(void) {
@@ -74,21 +74,56 @@ long long currentTimeMillis(void) {
 #endif
 }
 
+// the clock counts milliseconds on windows
 void Timer_advanceTime(Timer* timer) {
-    long long now      = getCurrentTimeInNanoseconds();
-    long long passedNs = now - timer->lastTime;
-    timer->lastTime    = now;
+    long long now = currentTimeMillis();
+    long long passed = now - timer->lastSyncSysClock;
+    if (passed > 1000LL) {
+        long long hr = getCurrentTimeInNanoseconds() / 1000000LL;
+        long long hrPassed = hr - timer->lastSyncHRClock;
+        timer->timeSyncAdjustment = (double)passed / (double)hrPassed;
+        timer->lastSyncSysClock = now;
+        timer->lastSyncHRClock = hr;
+    }
+    if (passed < 0LL) timer->lastSyncSysClock = now;
 
-    if (passedNs < 0)                  passedNs = 0;
-    if (passedNs > MAX_NS_PER_UPDATE)  passedNs = MAX_NS_PER_UPDATE;
+    double hrTime = (double)(getCurrentTimeInNanoseconds() / 1000000LL) / 1000.0;
+    double delta = (hrTime - timer->lastHRTime) * timer->timeSyncAdjustment;
+    timer->lastHRTime = hrTime;
+    if (delta < 0.0) delta = 0.0;
+    if (delta > 1.0) delta = 1.0;
 
-    // no time passed would divide by zero, it never happens
-    if (passedNs > 0) timer->fps = (float)(NS_PER_SECOND / passedNs);
-
-    timer->passedTime += (float)passedNs * timer->timeScale * timer->ticksPerSecond / 1.0E9f;
+    timer->passedTime = (float)((double)timer->passedTime + delta * (double)timer->timeScale * (double)timer->ticksPerSecond);
     timer->ticks = (int)timer->passedTime;
-    if (timer->ticks > MAX_TICKS_PER_UPDATE) timer->ticks = MAX_TICKS_PER_UPDATE;
-
-    timer->passedTime -= timer->ticks;
+    if (timer->ticks > 100) timer->ticks = 100;
+    timer->passedTime -= (float)timer->ticks;
     timer->partialTicks = timer->passedTime;
+}
+
+static long long syncThen = 0;
+static long long syncLate = 0;
+
+void Display_sync(int fps) {
+#if defined(_WIN32)
+    // short sleeps turn on the 1ms windows timer, without it Sleep(1) takes ~15ms
+    static bool fineTimer = false;
+    if (!fineTimer) {
+        timeBeginPeriod(1);
+        fineTimer = true;
+    }
+#endif
+    long long gapTo = 1000LL / fps + syncThen;
+    long long now = getCurrentTimeInNanoseconds() / 1000000LL;
+    while (gapTo > now + syncLate) {
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        struct timespec ts = { 0, 1000000L };
+        nanosleep(&ts, NULL);
+#endif
+        now = getCurrentTimeInNanoseconds() / 1000000LL;
+    }
+    if (gapTo < now) syncLate = now - gapTo;
+    else syncLate = 0;
+    syncThen = now;
 }

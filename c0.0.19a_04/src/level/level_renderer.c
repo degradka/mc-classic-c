@@ -190,7 +190,7 @@ void LevelRenderer_renderEntities(LevelRenderer* r, const Frustum* frustum, floa
         if (frustum_isVisible(frustum, &z->base.boundingBox)) Zombie_render(z, a);
     }
     for (int i = 0; i < r->level->playerCount; ++i) {
-        const NetworkPlayer* p = r->level->players[i];
+        NetworkPlayer* p = r->level->players[i];
         if (frustum_isVisible(frustum, &p->base.boundingBox)) NetworkPlayer_render(p, a);
     }
 }

@@ -26,6 +26,8 @@ typedef struct Level {
     int unprocessed;
     int tickCount;
     int entitiesCapacity;
+    // saved with the level, the server never turns it on but a level that has it changes nothing
+    bool networkMode;
 
     // the server once it's listening, it sends every change on
     void (*listener)(void* ctx, int x, int y, int z);
@@ -47,6 +49,8 @@ bool Level_isLightBlocker(Level* level, int x, int y, int z);
 void Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1);
 bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type);
 bool Level_setTile(Level* level, int x, int y, int z, int type);
+void Level_updateNeighborsAt(Level* level, int x, int y, int z, int type);
+bool Level_isWater(const Level* level, int x, int y, int z);
 bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 bool Level_isLit(const Level* level, int x, int y, int z);
 int  Level_getTile(const Level* level, int x, int y, int z);

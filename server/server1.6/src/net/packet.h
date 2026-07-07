@@ -1,6 +1,6 @@
 // net/packet.h: the packet table, an id byte then big endian fields
 // B byte, S short, T a 64 byte space padded utf-8 string, A a 1024 byte array
-// the size checked before reading leaves the strings out, so a short packet underflows
+// the size checked before reading counts everything, strings too
 
 #ifndef NET_PACKET_H
 #define NET_PACKET_H

@@ -2,6 +2,7 @@
 
 #include "server.h"
 #include "jfile.h"
+#include "console.h"
 #include "jmd5.h"
 #include "jrandom.h"
 #include "jtime.h"
@@ -119,6 +120,11 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     s->verifyNames = jstr_eqIgnoreCase(&v, &t);
     if (s->maxPlayers < 1) s->maxPlayers = 1;
     if (s->maxPlayers > 32) s->maxPlayers = 32;
+    Properties_get(p, "max-connections", "3", &v);
+    if (!parseInt(&v, &s->maxConnections)) {
+        Log_warning("server.properties is broken! Delete it or fix it!");
+        exit(0);
+    }
     Properties_set(p, "server-name", &s->serverName);
     Properties_set(p, "motd", &s->motd);
     setInt(p, "max-players", s->maxPlayers);
@@ -127,9 +133,14 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     Properties_set(p, "public", &v);
     jstr_set(&v, s->verifyNames ? "true" : "false");
     Properties_set(p, "verify-names", &v);
+    // 3 goes back whatever the file said
+    jstr_set(&v, "3");
+    Properties_set(p, "max-connections", &v);
     if (!Properties_store(p, "server.properties", "Minecraft server properties")) Log_warning("Failed to save server.properties!");
 
-    return NetSocket_listen(s->port, &s->listenSock, exception, size);
+    if (!NetSocket_listen(s->port, &s->listenSock, exception, size)) return false;
+    Console_start();
+    return true;
 }
 
 /* connections */
@@ -216,7 +227,7 @@ static void acceptAll(MinecraftServer* s) {
             for (int i = 0; i < s->playerCount; ++i) {
                 if (jstr_eq(&s->players[i]->conn->address, &conn->address)) ++same;
             }
-            if (same >= 3) {
+            if (same >= s->maxConnections) {
                 char why[64];
                 snprintf(why, sizeof why, "but is already connected %d times.", same);
                 refuse(s, conn, "Too many connection!", why);
@@ -276,15 +287,8 @@ static void readPackets(SocketConnection* conn) {
 }
 
 static void network(MinecraftServer* s) {
-    for (int i = 0; i < s->playerCount; ++i) {
-        Jcatch e;
-        JTRY(e) {
-            Player_tick(s->players[i]);
-            JEND(e);
-        } else {
-            Player_onException(s->players[i], &e);
-        }
-    }
+    static JStr line;
+    while (Console_poll(&line)) Server_command(s, NULL, &line);
     acceptAll(s);
     for (int i = 0; i < s->connCount; ++i) {
         SocketConnection* conn = s->conns[i];
@@ -306,6 +310,15 @@ static void network(MinecraftServer* s) {
 /* ticking */
 
 static void tick(MinecraftServer* s) {
+    for (int i = 0; i < s->playerCount; ++i) {
+        Jcatch e;
+        JTRY(e) {
+            Player_tick(s->players[i]);
+            JEND(e);
+        } else {
+            Player_onException(s->players[i], &e);
+        }
+    }
     Level_tick(s->level);
     for (int i = 0; i < s->closingCount; ++i) {
         PendingClose* c = &s->closing[i];
@@ -361,9 +374,8 @@ void Server_run(MinecraftServer* s) {
                 lastTick += tickNanos;
                 tick(s);
                 if (ticks % 1200 == 0) {
-                    Log_info("Saving level");
-                    Log_info("Load: %d/%d", s->playerCount, s->maxPlayers);
                     Server_save(s, false);
+                    Log_info("Level saved! Load: %d/%d", s->playerCount, s->maxPlayers);
                 }
                 // the heartbeat to minecraft.net every 900 ticks is left out, the list is gone
                 ++ticks;
@@ -455,6 +467,71 @@ void Server_banIp(MinecraftServer* s, const JStr* name) {
         found = true;
     }
     if (found) announce(s, &names, " got ip banned!");
+}
+
+static bool is(const JStr* word, const char* name) {
+    JStr lower;
+    jstr_copy(&lower, word);
+    jstr_toLower(&lower);
+    return jstr_eqc(&lower, name);
+}
+
+static void tailBroadcast(MinecraftServer* s, const JStr* command, int skip) {
+    JStr rest;
+    jstr_substring(&rest, command, skip);
+    jstr_trim(&rest);
+    PacketValue v[2] = { { .i = -1 }, { .s = &rest } };
+    Server_broadcast(s, PACKET_MESSAGE, v);
+}
+
+void Server_command(MinecraftServer* s, Player* p, const JStr* command) {
+    char who[JSTR_MAX * 3], c[JSTR_MAX * 3];
+    if (p) jstr_c(&p->name, who, sizeof who);
+    else snprintf(who, sizeof who, "[console]");
+    Log_info("%s admins: %s", who, jstr_c(command, c, sizeof c));
+    static JStr parts[128];
+    int count = jstr_splitSpace(command, parts, 128);
+    const JStr* arg = &parts[1];
+    if (is(&parts[0], "ban") && count > 1) {
+        Server_ban(s, arg);
+    } else if (is(&parts[0], "kick") && count > 1) {
+        Server_kick(s, arg);
+    } else if (is(&parts[0], "banip") && count > 1) {
+        Server_banIp(s, arg);
+    } else if (is(&parts[0], "unban") && count > 1) {
+        PlayerList_remove(&s->banned, arg);
+    } else if (is(&parts[0], "op") && count > 1) {
+        Server_op(s, arg);
+    } else if (is(&parts[0], "deop") && count > 1) {
+        Server_deop(s, arg);
+    } else if (is(&parts[0], "setspawn")) {
+        if (p) {
+            s->level->xSpawn = p->x / 32;
+            s->level->ySpawn = p->y / 32;
+            s->level->zSpawn = p->z / 32;
+            s->level->rotSpawn = (float)(p->yaw * 320 / 256);
+        } else {
+            Log_info("Can't set spawn from console!");
+        }
+    } else if (is(&parts[0], "broadcast") && count > 1) {
+        tailBroadcast(s, command, 10);
+    } else if (is(&parts[0], "say") && count > 1) {
+        tailBroadcast(s, command, 4);
+    } else if (is(&parts[0], "teleport") && count > 1) {
+        if (!p) {
+            Log_info("Can't teleport from console!");
+            return;
+        }
+        Player* o = Server_findPlayer(s, arg);
+        if (o) {
+            PacketValue v[6] = { { .i = -1 }, { .i = o->x }, { .i = o->y }, { .i = o->z }, { .i = o->yaw }, { .i = o->pitch } };
+            Conn_send(p->conn, PACKET_TELEPORT, v);
+        } else {
+            Player_message(p, "No such player");
+        }
+    } else if (p) {
+        Player_message(p, "Unknown command!");
+    }
 }
 
 Player* Server_findPlayer(MinecraftServer* s, const JStr* name) {

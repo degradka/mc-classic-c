@@ -368,7 +368,7 @@ static void neighborChanged(Level* level, int x, int y, int z, int type) {
     if (t) t->neighborChanged(t, level, x, y, z, type);
 }
 
-static void updateNeighborsAt(Level* level, int x, int y, int z, int type) {
+void Level_updateNeighborsAt(Level* level, int x, int y, int z, int type) {
     neighborChanged(level, x - 1, y, z, type);
     neighborChanged(level, x + 1, y, z, type);
     neighborChanged(level, x, y - 1, z, type);
@@ -379,6 +379,12 @@ static void updateNeighborsAt(Level* level, int x, int y, int z, int type) {
 
 // air at the map edge between the ground and the water level turns into water
 bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type) {
+    if (level->networkMode) return false;
+    return Level_netSetTileNoNeighborChange(level, x, y, z, type);
+}
+
+// the old tile hears it's gone, then the new one that it's there
+bool Level_netSetTileNoNeighborChange(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
     int index = (y * level->height + z) * level->width + x;
     if (type == level->blocks[index]) return false;
@@ -386,27 +392,45 @@ bool Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type) 
         (float)y >= Level_getGroundLevel(level) && (float)y < Level_getWaterLevel(level)) {
         type = TILE_WATER.id;
     }
+    int old = level->blocks[index];
     level->blocks[index] = (byte)type;
+    if (old != 0) gTiles[old]->onRemoved(gTiles[old], level, x, y, z);
+    if (type != 0) gTiles[type]->onAdded(gTiles[type], level, x, y, z);
     calcLightDepths(level, x, z, 1, 1);
     if (level->renderer) levelRenderer_tileChanged(level->renderer, x, y, z);
     return true;
 }
 
 void Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1) {
+    if (level->networkMode) return;
     int a = Level_getTile(level, x0, y0, z0);
     int b = Level_getTile(level, x1, y1, z1);
     Level_setTileNoNeighborChange(level, x0, y0, z0, b);
     Level_setTileNoNeighborChange(level, x1, y1, z1, a);
-    updateNeighborsAt(level, x0, y0, z0, b);
-    updateNeighborsAt(level, x1, y1, z1, a);
+    Level_updateNeighborsAt(level, x0, y0, z0, b);
+    Level_updateNeighborsAt(level, x1, y1, z1, a);
 }
 
 bool level_setTile(Level* level, int x, int y, int z, int type) {
+    if (level->networkMode) return false;
     if (Level_setTileNoNeighborChange(level, x, y, z, type)) {
-        updateNeighborsAt(level, x, y, z, type);
+        Level_updateNeighborsAt(level, x, y, z, type);
         return true;
     }
     return false;
+}
+
+bool Level_netSetTile(Level* level, int x, int y, int z, int type) {
+    if (Level_netSetTileNoNeighborChange(level, x, y, z, type)) {
+        Level_updateNeighborsAt(level, x, y, z, type);
+        return true;
+    }
+    return false;
+}
+
+bool Level_isWater(const Level* level, int x, int y, int z) {
+    int id = Level_getTile(level, x, y, z);
+    return id > 0 && gTiles[id]->liquidType == LIQUID_WATER;
 }
 
 bool Level_setTileNoUpdate(Level* level, int x, int y, int z, int type) {
@@ -473,6 +497,7 @@ bool Level_isFree(const Level* level, const AABB* box) {
 }
 
 void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
+    if (level->networkMode) return;
     if (level->tickListSize == level->tickListCapacity) {
         level->tickListCapacity = level->tickListCapacity ? level->tickListCapacity * 2 : 256;
         level->tickList = (TickEntry*)realloc(level->tickList, (size_t)level->tickListCapacity * sizeof(TickEntry));
