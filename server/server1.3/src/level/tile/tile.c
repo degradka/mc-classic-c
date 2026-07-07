@@ -274,8 +274,8 @@ void Tile_registerAll(void) {
     registerTile(&TILE_IRON_ORE,   15, 33);
     registerTile(&TILE_COAL_ORE,   16, 34);
     // server1.2's own tile id 17 is a plain single-texture tile, unlike the
-    // client's per-face TILE_LOG (see PORTING_SCOPE.md) -- matches the real
-    // server, not a copy-paste oversight
+    // client's per-face TILE_LOG, matching the real server, not a
+    // copy-paste oversight
     registerTile(&TILE_LOG,        17,  0);
     registerTile(&TILE_LEAVES,     18, 22);
 

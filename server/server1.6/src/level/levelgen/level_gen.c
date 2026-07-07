@@ -49,7 +49,12 @@ static int* raiseHeightmap(int width, int height) {
             double d18 = plain.synth.getValue(&plain.synth, x, y) / 8.0;
             if (d18 > 0.0) d16 = d14;
             double d20 = (d14 > d16 ? d14 : d16) / 2.0;
-            if (d20 < 0.0) d20 = d20 / 2.0;
+            // server1.6: was d20/2.0. Confirmed via bytecode diff but this
+            // is client-only in effect since the shoreline size change
+            // itself doesn't apply server-side, porting the literal
+            // constant anyway since it's isolated and was found in this
+            // same raw-bytecode-only method either way
+            if (d20 < 0.0) d20 = d20 * 0.8;
             heightmap[i] = (int)d20;
         }
     }
@@ -154,14 +159,26 @@ static void carveTunnels(Level* level) {
             dira2 *= 0.9f;
             dira2 += randf() - randf();
 
+            // server1.6: skips this path node entirely about 30% of the
+            // time, and when not skipped, carves a sphere centered up to 2
+            // blocks off the walker's exact position (each axis
+            // independently) instead of dead on it. Confirmed via direct
+            // bytecode diff, matching the same finding in the paired
+            // client's LevelGen copy. Ore veins (below) got no such change
+            if (randf() < 0.3f) continue;
+
+            float cx = x + randf() * 4.0f - 2.0f;
+            float cy = y + randf() * 4.0f - 2.0f;
+            float cz = z + randf() * 4.0f - 2.0f;
+
             float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
 
-            for (int xx = (int)(x - size); xx <= (int)(x + size); ++xx) {
-                for (int yy = (int)(y - size); yy <= (int)(y + size); ++yy) {
-                    for (int zz = (int)(z - size); zz <= (int)(z + size); ++zz) {
-                        float xd = xx - x;
-                        float yd = yy - y;
-                        float zd = zz - z;
+            for (int xx = (int)(cx - size); xx <= (int)(cx + size); ++xx) {
+                for (int yy = (int)(cy - size); yy <= (int)(cy + size); ++yy) {
+                    for (int zz = (int)(cz - size); zz <= (int)(cz + size); ++zz) {
+                        float xd = xx - cx;
+                        float yd = yy - cy;
+                        float zd = zz - cz;
                         float dd = xd * xd + yd * yd * 2.0f + zd * zd;
                         if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
                             xx < level->width - 1 && yy < level->depth - 1 && zz < level->height - 1) {

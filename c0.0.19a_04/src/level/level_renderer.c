@@ -28,7 +28,10 @@ extern Tessellator TESSELLATOR;  // use the global, like chunks do
 // slot 0 is ground and slot 1 is water.
 static void compileSurroundingGround(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
-    GLuint rockTex = loadTextureTiled("resources/rock.png", GL_NEAREST);
+    // c0.0.19a_04: TextureManager's shared upload path dropped mipmap
+    // generation entirely (gluBuild2DMipmaps -> plain glTexImage2D), which
+    // applies to every texture it loads, not just the newly animated ones
+    GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, rockTex);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
@@ -89,7 +92,8 @@ static void compileSurroundingGround(LevelRenderer* r) {
 static void compileSurroundingWater(LevelRenderer* r) {
     glEnable(GL_TEXTURE_2D);
     glColor3f(1.0f, 1.0f, 1.0f);
-    GLuint waterTex = loadTextureTiled("resources/water.png", GL_NEAREST);
+    // c0.0.19a_04: see compileSurroundingGround, same mipmap removal applies
+    GLuint waterTex = loadTexture("resources/water.png", GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, waterTex);
 
     const float y = Level_getWaterLevel(r->level);

@@ -119,7 +119,7 @@ bool NetConnection_pollConnecting(NetConnection* c) {
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 4); // protocol version
+    writeByte(c, 5); // c0.0.19a_04: protocol version bumped from 4, wire shapes unchanged
     writeString(c, c->connectUsername);
     writeString(c, "--"); // session id placeholder, never actually used by the server
     return true;
@@ -195,7 +195,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             break;
         }
         case PACKET_LEVEL_FINALIZE: {
-            // wire order is width, depth, height -- matches this codebase's
+            // wire order is width, depth, height, matching this codebase's
             // own (Notch-inherited) naming where depth is the vertical axis
             // and height is a horizontal one, confirmed against both the
             // client's Level.setData(w, depth, height, ...) and the
@@ -210,6 +210,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             unsigned char* raw = (unsigned char*)malloc((size_t)rawSize + 4);
             if (raw && gunzipBuffer(c->levelBuf, c->levelBufLen, raw, rawSize + 4)) {
                 Minecraft_installNetworkLevel(width, height, depth, raw + 4);
+                c->levelLoaded = true; // c0.0.19a_04: unlocks the per-tick self Teleport send
             }
             free(raw);
             c->levelBufLen = 0;
@@ -234,12 +235,12 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             if (sid >= 0) {
                 Minecraft_spawnNetworkPlayer(sid, name, sx, sy, sz, yaw, pitch);
             } else {
-                // id < 0: this is the server telling us where we spawn.
-                // c0.0.17a also updates the level's own spawn point here, so
-                // a later respawn returns to the server's spawn instead of
-                // nowhere. The stored spawn yaw and the yaw actually applied
-                // to the player use two different formulas, confirmed as a
-                // genuine inconsistency in the real source rather than a
+                // id < 0: this is the server telling the client where it
+                // spawns. c0.0.17a also updates the level's own spawn point
+                // here, so a later respawn returns to the server's spawn
+                // instead of nowhere. The stored spawn yaw and the yaw
+                // actually applied to the player use two different formulas,
+                // confirmed as a genuine inconsistency in the real source rather than a
                 // transcription slip: the stored spawn point uses integer
                 // math and a 320 constant with no negation, while the
                 // applied facing uses float math and 360 with no negation
@@ -264,8 +265,8 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
                 // sentinel with no sender). Now the real source uses it to
                 // support the new server /teleport command, moving the local
                 // player. Yaw here is NOT negated, matching the real source's
-                // (b4 * 360) / 256.0F exactly -- unlike angleYaw's negated
-                // conversion used for other players, this is a deliberate
+                // (b4 * 360) / 256.0F exactly, unlike angleYaw's negated
+                // conversion used for other players; this is a deliberate
                 // asymmetry, not a mistake
                 float yaw = ((float)syaw * 360.0f) / 256.0f;
                 Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, yaw, anglePitch(spitch));
@@ -388,8 +389,8 @@ void NetConnection_sendTeleportSelf(NetConnection* c, float x, float y, float z,
     writeU16(c, (unsigned short)(short)(x * 32.0f));
     writeU16(c, (unsigned short)(short)(y * 32.0f));
     writeU16(c, (unsigned short)(short)(z * 32.0f));
-    // outgoing angles are NOT negated, unlike incoming decode (angleYaw above) --
-    // confirmed asymmetric in the real source, not a transcription slip
+    // outgoing angles are NOT negated, unlike incoming decode (angleYaw above).
+    // Confirmed asymmetric in the real source, not a transcription slip
     writeByte(c, (unsigned char)((int)(yaw * 256.0f / 360.0f) & 0xFF));
     writeByte(c, (unsigned char)((int)(pitch * 256.0f / 360.0f) & 0xFF));
 }

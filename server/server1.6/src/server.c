@@ -5,6 +5,7 @@
 #include "net/packet.h"
 #include "level/level.h"
 #include "level/tile/tile.h"
+#include "stdin_reader.h"
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,7 @@ static void loadProperties(MinecraftServer* srv) {
     srv->port = 25565;
     srv->maxPlayers = 16;
     srv->isPublic = true;
+    srv->maxConnections = 3;
 
     FILE* f = fopen("server.properties", "r");
     if (f) {
@@ -61,12 +63,14 @@ static void loadProperties(MinecraftServer* srv) {
             else if (strcmp(key, "port") == 0) srv->port = atoi(value);
             else if (strcmp(key, "max-players") == 0) srv->maxPlayers = atoi(value);
             else if (strcmp(key, "public") == 0) srv->isPublic = (strcmp(value, "true") == 0);
+            else if (strcmp(key, "max-connections") == 0) srv->maxConnections = atoi(value);
         }
         fclose(f);
     }
 
     if (srv->maxPlayers < 1) srv->maxPlayers = 1;
     if (srv->maxPlayers > SERVER_MAX_PLAYERS) srv->maxPlayers = SERVER_MAX_PLAYERS;
+    if (srv->maxConnections < 1) srv->maxConnections = 1;
 
     FILE* out = fopen("server.properties", "w");
     if (out) {
@@ -76,6 +80,13 @@ static void loadProperties(MinecraftServer* srv) {
         fprintf(out, "port=%d\n", srv->port);
         fprintf(out, "max-players=%d\n", srv->maxPlayers);
         fprintf(out, "public=%s\n", srv->isPublic ? "true" : "false");
+        // server1.6: the real source always re-saves this key back as the
+        // literal default "3" regardless of what was actually loaded/used
+        // for the session, a confirmed cosmetic round-trip bug. This port
+        // round-trips the real configured value instead of replicating that
+        // bug, since it's a pure persistence glitch with no gameplay effect
+        // and no strong reason to deliberately carry it forward
+        fprintf(out, "max-connections=%d\n", srv->maxConnections);
         fclose(out);
     }
 }
@@ -101,6 +112,8 @@ bool Server_init(MinecraftServer* srv) {
         Log_severe("Failed to listen on port %d", srv->port);
         return false;
     }
+
+    StdinReader_start(srv); // server1.6: background stdin admin command reader
 
     Log_info("Now accepting connections on port %d", srv->port);
     return true;
@@ -227,8 +240,8 @@ void Server_teleportToPlayer(MinecraftServer* srv, Connection* issuer, const cha
 
 void Server_banIpByName(MinecraftServer* srv, const char* name) {
     // new in server1.3: matches by username OR by raw IP (with or without a
-    // leading slash, an artifact of Java's InetAddress.toString() that our
-    // remoteAddress never has to begin with), against every connected
+    // leading slash, an artifact of Java's InetAddress.toString() that this
+    // port's remoteAddress never has to begin with), against every connected
     // session, not just the first match by name
     const char* ipMatch = name;
     if (name[0] == '/') ipMatch = name + 1;
@@ -285,8 +298,7 @@ void Server_onBlockChanged(void* ctx, int x, int y, int z) {
 void Server_run(MinecraftServer* srv) {
     // matches run(): network I/O every outer iteration, a fixed ~20Hz world
     // tick, a slower ~0.5s ping broadcast, autosave every ~60s. Heartbeat to
-    // the long dead minecraft.net master list is deliberately not ported --
-    // see PORTING_SCOPE.md
+    // the long dead minecraft.net master list is deliberately not ported
     const long long tickNanos = 50000000LL;  // 50ms = 20Hz
     const long long pingNanos = 500000000LL; // 0.5s
 
@@ -295,12 +307,16 @@ void Server_run(MinecraftServer* srv) {
     long long pingAccum = 0;
 
     // static, not stack local: each Connection carries 3 x 256KB buffers,
-    // so the full array is tens of megabytes -- comfortably past a typical
+    // so the full array is tens of megabytes, comfortably past a typical
     // thread's default stack size
     static Connection connections[SERVER_MAX_PLAYERS];
     static bool connectionUsed[SERVER_MAX_PLAYERS];
 
     for (;;) {
+        // server1.6: drains queued stdin admin command lines, once per
+        // outer loop iteration, matching MinecraftServer.c()
+        StdinReader_poll(srv);
+
         // accept new connections
         sock_t clientSock;
         while (NetSocket_accept(srv->listenSock, &clientSock)) {
@@ -313,15 +329,17 @@ void Server_run(MinecraftServer* srv) {
                 continue;
             }
 
-            // new in server1.3: reject a 4th simultaneous connection from the
-            // same address, checked by IP at accept time before any login,
-            // matching the real source exactly (this is IP based, not
-            // username based, despite how it reads at first glance)
+            // new in server1.3: reject simultaneous connections from the
+            // same address beyond the configured limit, checked by IP at
+            // accept time before any login, matching the real source
+            // exactly (this is IP based, not username based, despite how it
+            // reads at first glance). server1.6: the cap (previously always
+            // 3) is now the real server.properties max-connections value
             int sameAddrCount = 0;
             for (int i = 0; i < SERVER_MAX_PLAYERS; i++) {
                 if (connectionUsed[i] && strcmp(connections[i].remoteAddress, addr) == 0) sameAddrCount++;
             }
-            if (sameAddrCount >= 3) {
+            if (sameAddrCount >= srv->maxConnections) {
                 NetSocket_configure(clientSock);
                 NetSocket_close(clientSock);
                 continue;
@@ -364,6 +382,15 @@ void Server_run(MinecraftServer* srv) {
         while (tickAccum >= tickNanos) {
             tickAccum -= tickNanos;
             srv->tickCount++;
+
+            // server1.6: per-connection tick, matching PlayerConnection.a().
+            // Click/chat throttle decay and the SetBlock/Move queue
+            // drain, all fixed-rate, distinct from the fast network I/O
+            // poll in Connection_tick above
+            for (int i = 0; i < SERVER_MAX_PLAYERS; i++) {
+                if (connectionUsed[i]) Connection_onGameTick(&connections[i]);
+            }
+
             Level_onTick(&srv->level);
 
             if (srv->tickCount - srv->lastSaveTick >= 1200) {

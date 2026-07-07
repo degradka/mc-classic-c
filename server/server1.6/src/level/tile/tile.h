@@ -44,6 +44,12 @@ struct Tile {
 
     // Reaction to a neighboring block changing to `type`. Default is a no op.
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
+
+    // server1.6: fired once when this tile is placed/removed at (x,y,z),
+    // added for Sponge's dry-a-5x5x5-area-of-water mechanic. NULL for every
+    // other tile (no op)
+    void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
+    void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
 };
 
 // Global registry, index by tile id (0..255)
@@ -53,7 +59,10 @@ extern const Tile* gTiles[256];
 extern Tile TILE_ROCK;      // id=1
 extern Tile TILE_GRASS;     // id=2 (custom per face)
 extern Tile TILE_DIRT;      // id=3
-extern Tile TILE_STONEBRICK;// id=4
+// id=4 (StoneBrick) is intentionally not registered: server1.6's real source
+// drops it from the tile registry entirely, gTiles[4] stays NULL. Client
+// side keeps it registered, just off the hotbar/whitelist. This is a
+// server-only removal, not a whole-game one
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
 extern Tile TILE_BEDROCK;   // id=7, new in c0.0.14a_08, plain tile, unreachable from the hotbar
@@ -70,6 +79,9 @@ extern Tile TILE_IRON_ORE;  // id=15, new in c0.0.14a_08
 extern Tile TILE_COAL_ORE;  // id=16, new in c0.0.14a_08
 extern Tile TILE_LOG;    // id=17, new in c0.0.14a_08, per face texture
 extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light blocking
+
+extern Tile TILE_SPONGE; // id=19, new in server1.6
+extern Tile TILE_GLASS;  // id=20, new in server1.6
 
 void Tile_registerAll(void);
 

@@ -216,8 +216,7 @@ void Server_onBlockChanged(void* ctx, int x, int y, int z) {
 void Server_run(MinecraftServer* srv) {
     // matches run(): network I/O every outer iteration, a fixed ~20Hz world
     // tick, a slower ~0.5s ping broadcast, autosave every ~60s. Heartbeat to
-    // the long dead minecraft.net master list is deliberately not ported --
-    // see PORTING_SCOPE.md
+    // the long dead minecraft.net master list is deliberately not ported
     const long long tickNanos = 50000000LL;  // 50ms = 20Hz
     const long long pingNanos = 500000000LL; // 0.5s
 
@@ -226,7 +225,7 @@ void Server_run(MinecraftServer* srv) {
     long long pingAccum = 0;
 
     // static, not stack local: each Connection carries 3 x 256KB buffers,
-    // so the full array is tens of megabytes -- comfortably past a typical
+    // so the full array is tens of megabytes, comfortably past a typical
     // thread's default stack size
     static Connection connections[SERVER_MAX_PLAYERS];
     static bool connectionUsed[SERVER_MAX_PLAYERS];

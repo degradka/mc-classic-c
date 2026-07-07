@@ -54,6 +54,12 @@ struct Tile {
     // Reaction to a neighboring block changing to `type`. Default is a no op.
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
 
+    // c0.0.19a_04: fired once when this tile is placed/removed at (x,y,z),
+    // added for Sponge's dry-a-5x5x5-area-of-water mechanic. NULL for every
+    // other tile (no op)
+    void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
+    void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
+
     // Per face visibility test and per face vertex emission, used by the
     // shared render() to draw the 6 faces of a shaped tile. Liquids override
     // both to render only in the dedicated liquid layer and draw both sides.
@@ -85,6 +91,9 @@ extern Tile TILE_IRON_ORE;  // id=15, new in c0.0.14a_08
 extern Tile TILE_COAL_ORE;  // id=16, new in c0.0.14a_08
 extern Tile TILE_LOG;    // id=17, new in c0.0.14a_08, per face texture
 extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light blocking
+
+extern Tile TILE_SPONGE; // id=19, new in c0.0.19a_04, dries a 5x5x5 area of water on placement
+extern Tile TILE_GLASS;  // id=20, new in c0.0.19a_04, non light blocking, doesn't double-face with neighboring glass
 
 void Tile_registerAll(void);
 

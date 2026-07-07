@@ -210,19 +210,18 @@ ArrayList_AABB Level_getCubes(const Level* level, const AABB* aabb) {
 
 // server_level.dat is gzipped: a 4 byte magic, a version byte, then a real
 // Java serialized Level object (the server always writes version 2, unlike
-// the client's simpler hand rolled version 1 level.dat -- these are NOT the
+// the client's simpler hand rolled version 1 level.dat; these are NOT the
 // same format despite sharing the magic/version wrapper convention). Byte
-// layout confirmed against a real save file field by field; see
-// PORTING_SCOPE.md for the full derivation. The class descriptor is a fixed
-// byte sequence (deterministic for this exact, unchanging field layout), so
-// it's just a hardcoded template rather than something built field by field
-// at runtime -- both for writing, and as a known-length block to validate
-// and skip over when reading.
+// layout confirmed against a real save file field by field. The class
+// descriptor is a fixed byte sequence (deterministic for this exact,
+// unchanging field layout), so it's just a hardcoded template rather than
+// something built field by field at runtime, both for writing, and as a
+// known-length block to validate and skip over when reading.
 
 // magic + version byte + Java serialization stream header (0xACED0005) +
 // full class descriptor for com.mojang.minecraft.level.Level (14 fields, in
 // Java's actual default serialization order: primitives alphabetically,
-// then objects alphabetically -- NOT declaration order): createTime(J),
+// then objects alphabetically, NOT declaration order): createTime(J),
 // depth(I), height(I), rotSpawn(F), tickCount(I), unprocessed(I), width(I),
 // xSpawn(I), ySpawn(I), zSpawn(I), blocks([B), creator(Ljava/lang/String;),
 // entities(Ljava/util/ArrayList;), name(Ljava/lang/String;)
@@ -334,7 +333,7 @@ static void writeJavaString(gzFile f, const char* s) {
 // string object, but that's a runtime object identity coincidence that
 // practically never happens for independent name/creator strings (unlike
 // the header's fixed type descriptor strings, which do alias each other and
-// are already baked into the hardcoded template above) -- falls back to an
+// are already baked into the hardcoded template above). Falls back to an
 // empty string rather than actually resolving the handle table in that case
 static int readJavaString(gzFile f, char* out, size_t outCapacity) {
     unsigned char tag;
@@ -520,7 +519,7 @@ bool level_setTile(Level* level, int x, int y, int z, int type) {
 }
 
 // No neighbor notification, no light recalc. Used by liquid tick reactions
-// to avoid cascading recursion, matching Java exactly -- but the listener
+// to avoid cascading recursion, matching Java exactly, but the listener
 // still fires, since a connected client needs to see this change too even
 // when it doesn't cascade locally (e.g. liquid meeting liquid turning to
 // rock), confirmed against the real server's setTileNoNeighborChange

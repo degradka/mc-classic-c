@@ -195,6 +195,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->neighborChanged = Tile_default_neighborChanged;
     t->shouldRenderFace = Tile_default_shouldRenderFace;
     t->renderFace = Tile_default_renderFace;
+    t->onPlace = NULL;
+    t->onRemoved = NULL;
 
     gTiles[id] = t;
 }
@@ -217,6 +219,8 @@ Tile TILE_IRON_ORE;
 Tile TILE_COAL_ORE;
 Tile TILE_LOG;
 Tile TILE_LEAVES;
+Tile TILE_SPONGE;
+Tile TILE_GLASS;
 
 /* Grass has per face textures: top is 0, bottom is 2, sides are 3 */
 static int Grass_getTexture(const Tile* self, int face) {
@@ -259,12 +263,26 @@ static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
 }
 static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
 
+// c0.0.19a_04: true if a Sponge exists within a 5x5x5 cube centered on
+// (x,y,z). Used to stop water (not lava) from falling or spreading into a
+// sponge's dry zone, working together with Sponge's own onPlace/onRemoved
+// hooks to keep water from re-flooding the area it just dried
+static int hasNearbySponge(const Level* lvl, int x, int y, int z) {
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        if (Level_getTile(lvl, x + dx, y + dy, z + dz) == TILE_SPONGE.id) return 1;
+    }
+    return 0;
+}
+
 // Spreads one cell into an air neighbor and schedules its own next tick,
 // used by the falling/spreading pass below. Always returns nothing useful by
 // design (matches the real source, which discards this helper's result and
 // bases the calm/flowing decision purely on the fall loop below), the point
 // is the side effect of placing a tile and scheduling its next tick.
 static void Liquid_spreadToNeighbor(const Tile* self, Level* lvl, int x, int y, int z) {
+    if (self->liquidType == LIQUID_WATER && hasNearbySponge(lvl, x, y, z)) return;
     if (Level_getTile(lvl, x, y, z) == 0 && level_setTile(lvl, x, y, z, self->tileId)) {
         Level_addToTickNextTick(lvl, x, y, z, self->tileId);
     }
@@ -283,8 +301,10 @@ static void Liquid_tick(const Tile* self, Level* lvl, int x, int y, int z) {
 
     // y > 0 guard stops the fall at the map floor. Level_getTile reads out
     // of bounds y as air, so without this an open shaft reaching y 0 makes
-    // the loop fall forever and hangs the game.
-    while (y > 0 && Level_getTile(lvl, x, y - 1, z) == 0) {
+    // the loop fall forever and hangs the game. c0.0.19a_04: water also
+    // stops falling into a cell within a sponge's 5x5x5 dry zone
+    while (y > 0 && Level_getTile(lvl, x, y - 1, z) == 0
+           && !(self->liquidType == LIQUID_WATER && hasNearbySponge(lvl, x, y - 1, z))) {
         y--;
         if (level_setTile(lvl, x, y, z, self->tileId)) hasChanged = 1;
     }
@@ -430,6 +450,52 @@ static int Log_getTexture(const Tile* self, int face) {
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 
+/* Sponge: new in c0.0.19a_04. Dries a 5x5x5 area of water on placement, and
+   re-triggers neighbor evaluation over the same area when removed (working
+   with the water tile's own sponge-proximity guard above to keep the area
+   from immediately re-flooding). No onTick override, so it cannot randomly
+   decay via the ambient random-tick scheduler, matching the real source. */
+static void Sponge_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    // c0.0.19a_04: gated no-op in multiplayer, matching the real source
+    // calling the gated setTileNoNeighborChange here (not the always
+    // executing netSetTileNoNeighborChange). The server dries the area
+    // itself and echoes each affected water tile back as its own SetBlock
+    if (lvl->networkMode) return;
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        int id = Level_getTile(lvl, x + dx, y + dy, z + dz);
+        if (id == TILE_WATER.id || id == TILE_CALM_WATER.id) {
+            Level_setTileNoUpdate(lvl, x + dx, y + dy, z + dz, 0);
+        }
+    }
+}
+static void Sponge_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        Level_updateNeighborsAt(lvl, x + dx, y + dy, z + dz);
+    }
+}
+
+/* Glass: new in c0.0.19a_04. Doesn't block light, and doesn't count as
+   "solid" for opacity/face-culling purposes either (a neighboring tile's
+   face touching Glass renders normally rather than getting hidden behind an
+   assumed-opaque neighbor). Physics stays solid: only the two no-arg
+   blocksLight/isSolid overrides below, not the AABB method, so collision is
+   unaffected, matching the real source overriding both a() and b() to false
+   while leaving the 3-arg AABB getter untouched. Also skips its own face
+   where the neighboring tile is also Glass, hiding the seam between
+   adjacent glass blocks. */
+static int Glass_blocksLight(const Tile* self) { (void)self; return 0; }
+static int Glass_isSolid(const Tile* self) { (void)self; return 0; }
+static int Glass_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+    if (Level_getTile(lvl, x, y, z) == self->id) return 0;
+    return Tile_default_shouldRenderFace(self, lvl, x, y, z, layer, face);
+}
+
 void Tile_registerAll(void) {
     memset((void*)gTiles, 0, sizeof(gTiles));
     registerTile(&TILE_ROCK,       1,  1,  NULL);
@@ -475,9 +541,19 @@ void Tile_registerAll(void) {
     TILE_CALM_LAVA.mayPick  = Liquid_mayPick;
 
     // shape is a full block minus a thin sliver off the top, so the surface
-    // sits slightly below a full block
-    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.1f;
-    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.9f;
+    // sits slightly below a full block. c0.0.19a_04 widened the horizontal
+    // extent by 0.01 past the voxel cube on every side (was an exact [0,1]),
+    // enabled by a previously broken shape setter being fixed to actually
+    // respect all 6 parameters instead of hardcoding X/Z. Kept as is even
+    // though it's the leading suspect for this version's new water z
+    // fighting bug, matching the confirmed real source rather than
+    // normalizing it away
+    TILE_WATER.xx0 = TILE_CALM_WATER.xx0 = TILE_LAVA.xx0 = TILE_CALM_LAVA.xx0 = -0.01f;
+    TILE_WATER.xx1 = TILE_CALM_WATER.xx1 = TILE_LAVA.xx1 = TILE_CALM_LAVA.xx1 = 1.01f;
+    TILE_WATER.zz0 = TILE_CALM_WATER.zz0 = TILE_LAVA.zz0 = TILE_CALM_LAVA.zz0 = -0.01f;
+    TILE_WATER.zz1 = TILE_CALM_WATER.zz1 = TILE_LAVA.zz1 = TILE_CALM_LAVA.zz1 = 1.01f;
+    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.11f;
+    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.91f;
 
     TILE_WATER.shouldRenderFace      = Liquid_shouldRenderFace;
     TILE_CALM_WATER.shouldRenderFace = Liquid_shouldRenderFace;
@@ -525,6 +601,21 @@ void Tile_registerAll(void) {
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
     TILE_LEAVES.particleGravity = 0.4f; // c0.0.16a_02: leaf break particles fall slower
+
+    // c0.0.19a_04: texture 48 is inferred, not directly present in the
+    // decompiled bytecode (the constructor call never assigns one there).
+    // terrain.png's atlas cell 48 visibly contains a sponge texture unused
+    // by anything else, so this is treated as a decompilation artifact
+    // rather than a real "texture 0" bug
+    registerTile(&TILE_SPONGE, 19, 48, NULL);
+    registerTile(&TILE_GLASS,  20, 49, NULL);
+
+    TILE_SPONGE.onPlace   = Sponge_onPlace;
+    TILE_SPONGE.onRemoved = Sponge_onRemoved;
+
+    TILE_GLASS.blocksLight     = Glass_blocksLight;
+    TILE_GLASS.isSolid         = Glass_isSolid;
+    TILE_GLASS.shouldRenderFace = Glass_shouldRenderFace;
 }
 
 /* untextured single face helper for hit highlight */

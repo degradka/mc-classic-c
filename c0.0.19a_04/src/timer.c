@@ -7,6 +7,7 @@
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
+  #include <mmsystem.h>
 #elif defined(__APPLE__)
   #include <mach/mach_time.h>
   #include <time.h>
@@ -19,6 +20,14 @@
 #define MAX_TICKS_PER_UPDATE 100
 
 void Timer_init(Timer* timer, float ticksPerSecond) {
+#if defined(_WIN32)
+    // Windows' default scheduler tick is ~15.6ms (64Hz), so Sleep(n) rounds
+    // up to that granularity regardless of n, silently capping the 100fps
+    // limiter (sleepMillis, below) at ~64fps. Requesting 1ms timer
+    // resolution for this process fixes Sleep()'s granularity everywhere it's
+    // used, matching the precision Windows' JVM historically requested too
+    timeBeginPeriod(1);
+#endif
     timer->ticksPerSecond = ticksPerSecond;
     timer->timeScale      = 1.0f;
     timer->fps            = 0.0f;

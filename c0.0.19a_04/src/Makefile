@@ -19,6 +19,7 @@ SRC = minecraft.c player.c timer.c  hitresult.c user.c \
       level/levelgen/synth/perlin_noise.c level/levelgen/synth/distort.c \
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
+      renderer/texture_fx.c \
       renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c \
       gui/generate_level_screen.c gui/chat_input_screen.c gui/message_screen.c \
       net/net_socket.c net/packet.c net/connection.c net/network_player.c
@@ -60,11 +61,13 @@ endif
 
 ifeq ($(OS),Windows_NT)
     EXE := minecraft.exe
-    # MSYS2 / MinGW (assumes -lglfw3 -lglew32 in your env)
+    # MSYS2 / MinGW (assumes -lglfw3 -lglew32 in your env). -lwinmm: needed
+    # for timeBeginPeriod, requesting 1ms Sleep() granularity so the 100fps
+    # cap actually reaches 100fps instead of Windows' default ~64fps
     ifeq ($(BUILD),release)
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -mwindows
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm -mwindows
     else
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm
     endif
 endif
 

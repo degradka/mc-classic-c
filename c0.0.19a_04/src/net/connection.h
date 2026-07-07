@@ -37,6 +37,12 @@ typedef struct {
     unsigned char* levelBuf;
     int levelBufLen;
     int levelBufCapacity;
+
+    // c0.0.19a_04: set once the level finishes downloading and installing.
+    // The per-tick self Teleport send is now gated on this instead of firing
+    // unconditionally from the moment the socket connects, so the server no
+    // longer sees movement data arrive while the client is still mid-download
+    bool levelLoaded;
 } NetConnection;
 
 // kicks off the connect on a background thread and returns immediately,

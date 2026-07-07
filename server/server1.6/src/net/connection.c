@@ -13,7 +13,7 @@
 
 // implemented in commands.c. Only ever called for text starting with "/",
 // matching the real source's own routing (a plain String.startsWith check)
-extern void Commands_handle(Connection* c, const char* text);
+extern void Commands_dispatch(MinecraftServer* srv, Connection* issuer, const char* text);
 
 /* wire format helpers, identical convention to the client's net/connection.c */
 
@@ -45,7 +45,7 @@ static void readString(const unsigned char* p, char* out, size_t outCapacity) {
 
 // byte angle helpers, matching the client's asymmetric convention exactly:
 // incoming decode negates yaw, outgoing encode does not (confirmed real,
-// not a transcription slip -- see c0.0.16a_02/src/net/connection.c)
+// not a transcription slip, see c0.0.16a_02/src/net/connection.c)
 static float angleYawIn(signed char b)   { return (-(float)b * 360.0f) / 256.0f; }
 static float anglePitchIn(signed char b) { return ((float)b * 360.0f) / 256.0f; }
 static signed char angleOut(float degrees) { return (signed char)((int)(degrees * 256.0f / 360.0f) & 0xFF); }
@@ -123,7 +123,7 @@ static void handleLogin(Connection* c, const unsigned char* f) {
     Log_info("%s connected", c->remoteAddress);
 
     // new in server1.4.1: reject control/non-printable characters in the
-    // username before it ever reaches another client -- matches the real
+    // username before it ever reaches another client, matching the real
     // fix for "bad names connecting and crashing all players"
     for (const char* p = username; *p; p++) {
         if ((unsigned char)*p < 0x20 || (unsigned char)*p > 0x7F) {
@@ -137,7 +137,7 @@ static void handleLogin(Connection* c, const unsigned char* f) {
     Server_kickExistingSessionByName(c->server, username);
     Log_info("%s logged in as %s", c->remoteAddress, username);
 
-    if (protocolVersion != 4) {
+    if (protocolVersion != 5) { // server1.6: bumped from 4, wire shapes unchanged
         Connection_kick(c, "Wrong protocol version.");
         return;
     }
@@ -152,7 +152,7 @@ static void handleLogin(Connection* c, const unsigned char* f) {
 
     // login is bidirectional: this same packet id, reused for the reply
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 4);
+    writeByte(c, 5); // server1.6: bumped from 4
     writeString(c, c->server->serverName);
     writeString(c, c->server->motd);
 
@@ -161,14 +161,41 @@ static void handleLogin(Connection* c, const unsigned char* f) {
 }
 
 // server-only tile whitelist new in server1.3: only these ids may ever be
-// placed by a client, matches the real source's root a.java array exactly
-static const int PLACEABLE_TILE_IDS[] = { 1, 3, 4, 5, 6, 17, 18, 12, 13 };
+// placed by a client, matches the real source's root a.java array exactly.
+// server1.6: StoneBrick(4) and Sand(12) replaced by Sponge(19) and Glass(20)
+static const int PLACEABLE_TILE_IDS[] = { 1, 3, 19, 5, 6, 17, 18, 20, 13 };
 
+// server1.6: enqueues a SetBlock item instead of validating/applying it
+// immediately; Connection_onGameTick's drain does that once per real tick
 static void handleSetBlock(Connection* c, const unsigned char* f) {
     if (!c->spawned) return;
-    int x = readU16(f), y = readU16(f + 2), z = readU16(f + 4);
-    int mode = f[6];
-    int type = f[7];
+    // matches the real source's shared cap check, done at enqueue time
+    // ("kick if size() > 400 before adding"), not at drain time
+    if (c->actionQueueCount > 400) {
+        Connection_kick(c, "Cheat detected: Too much lag");
+        return;
+    }
+    QueuedAction* a = &c->actionQueue[(c->actionQueueHead + c->actionQueueCount) % CONN_ACTION_QUEUE_CAP];
+    a->isSetBlock = true;
+    a->sbX = readU16(f); a->sbY = readU16(f + 2); a->sbZ = readU16(f + 4);
+    a->sbMode = f[6];
+    a->sbType = f[7];
+    c->actionQueueCount++;
+}
+
+// the real per-item SetBlock validation/apply logic, unchanged from before
+// this version's queueing rework, now running once per drained queue item
+// instead of once per received packet
+static void processSetBlockItem(Connection* c, int x, int y, int z, int mode, int type) {
+    // server1.6: new click-rate limiter, incremented once per drained
+    // SetBlock item (decayed by 2 every tick in Connection_onGameTick). A
+    // kick here only ends this one item's processing; the real source
+    // still drains every other queued SetBlock item in the same tick
+    c->clickCounter++;
+    if (c->clickCounter == 100) {
+        Connection_kick(c, "Cheat detected: Too much clicking!");
+        return;
+    }
 
     // distance check: matches the real source, computed against the
     // connection's last known raw fixed point position (1/32 block units)
@@ -182,7 +209,7 @@ static void handleSetBlock(Connection* c, const unsigned char* f) {
     }
 
     // the whitelist check runs before the mode check in the real source, so
-    // it also gates breaking, not just placing -- a player whose currently
+    // it also gates breaking, not just placing: a player whose currently
     // selected tile isn't on the list gets kicked even while only breaking.
     // confirmed against the real decompile, not a guess, kept as is
     bool whitelisted = false;
@@ -217,38 +244,59 @@ static void handleSetBlock(Connection* c, const unsigned char* f) {
         level_setTile(&c->server->level, x, y, z, type);
     }
     // re-broadcast happens via the Level block-change listener (Server_onBlockChanged),
-    // not here directly -- matches the real source's decoupled design
+    // not here directly, matching the real source's decoupled design
 }
 
-// matches the throttled movement rebroadcast: every other received update is
-// acted on, and the cheapest applicable packet (full resync / move+look /
-// move only / look only) is chosen based on what actually changed and how
-// far it moved. Reconstructed from the research description of the real
-// bytecode rather than a byte exact trace, since JD-Core failed to produce
-// real source for this method -- the strategy is confirmed, exact thresholds
-// (every 2nd update acted on, full resync every 20) are as researched
+// server1.6: enqueues a Move/Teleport item instead of processing it
+// immediately; Connection_onGameTick's drain does that once per real tick
 static void handleTeleportSelf(Connection* c, const unsigned char* f) {
     if (!c->spawned) return;
-
-    int x = (short)readU16(f + 1), y = (short)readU16(f + 3), z = (short)readU16(f + 5);
-    signed char yawByte = (signed char)f[7], pitchByte = (signed char)f[8];
-
-    c->moveTickCounter++;
-    if (c->moveTickCounter % 2 != 0) {
-        // skipped tick: leave lastX/Y/Z alone so the next acted-on tick's delta
-        // covers both ticks worth of movement, not just the most recent one
+    if (c->actionQueueCount > 400) {
+        Connection_kick(c, "Cheat detected: Too much lag");
         return;
     }
+    QueuedAction* a = &c->actionQueue[(c->actionQueueHead + c->actionQueueCount) % CONN_ACTION_QUEUE_CAP];
+    a->isSetBlock = false;
+    a->mvX = (short)readU16(f + 1); a->mvY = (short)readU16(f + 3); a->mvZ = (short)readU16(f + 5);
+    a->mvYaw = (signed char)f[7]; a->mvPitch = (signed char)f[8];
+    c->actionQueueCount++;
+}
 
+// the throttled movement rebroadcast: every other dequeued update is acted
+// on, and the cheapest applicable packet (full resync / move+look / move
+// only / look only) is chosen based on what actually changed and how far it
+// moved. Hand-traced directly from the real (raw bytecode) per-connection
+// tick method, confirmed byte exact, superseding an earlier version of
+// this project's port that was reconstructed from research prose because
+// JD-Core failed to decompile this method on either side. Returns true if
+// the drain loop should continue to the next queued item this tick, false
+// if it should stop and defer the rest to next tick, matching the real
+// source's own loop-continue flag exactly, including the otherwise
+// easy-to-miss detail that a periodic resync always stops the drain even
+// when the position itself didn't change
+static bool processMoveItem(Connection* c, int x, int y, int z, signed char yawByte, signed char pitchByte) {
     if (!c->hasLastPos) {
         c->lastX = x; c->lastY = y; c->lastZ = z;
         c->lastYaw = yawByte; c->lastPitch = pitchByte;
         c->hasLastPos = true;
     }
 
+    // nothing at all changed: no broadcast, no counter increment, keep draining
+    if (x == c->lastX && y == c->lastY && z == c->lastZ &&
+        yawByte == c->lastYaw && pitchByte == c->lastPitch) {
+        return true;
+    }
+
+    bool posUnchanged = (x == c->lastX && y == c->lastY && z == c->lastZ);
+
+    c->moveTickCounter++;
+    if (c->moveTickCounter % 2 != 0) {
+        // skipped update: no broadcast, but the loop-continue flag is still
+        // resolved from the position-only comparison above
+        return posUnchanged;
+    }
+
     int dx = x - c->lastX, dy = y - c->lastY, dz = z - c->lastZ;
-    bool posChanged = (dx != 0 || dy != 0 || dz != 0);
-    bool rotChanged = (yawByte != c->lastYaw || pitchByte != c->lastPitch);
     bool outOfDeltaRange = (dx < -128 || dx > 127 || dy < -128 || dy > 127 || dz < -128 || dz > 127);
     bool periodicResync = (c->moveTickCounter % 20 <= 1);
 
@@ -262,29 +310,40 @@ static void handleTeleportSelf(Connection* c, const unsigned char* f) {
         pkt[n++] = (unsigned char)(z >> 8); pkt[n++] = (unsigned char)z;
         pkt[n++] = (unsigned char)yawByte;
         pkt[n++] = (unsigned char)pitchByte;
-    } else if (posChanged && rotChanged) {
-        pkt[n++] = (unsigned char)PACKET_MOVE_LOOK;
-        pkt[n++] = (unsigned char)c->playerId;
-        pkt[n++] = (unsigned char)dx; pkt[n++] = (unsigned char)dy; pkt[n++] = (unsigned char)dz;
-        pkt[n++] = (unsigned char)yawByte;
-        pkt[n++] = (unsigned char)pitchByte;
-    } else if (posChanged) {
-        pkt[n++] = (unsigned char)PACKET_MOVE;
-        pkt[n++] = (unsigned char)c->playerId;
-        pkt[n++] = (unsigned char)dx; pkt[n++] = (unsigned char)dy; pkt[n++] = (unsigned char)dz;
-    } else if (rotChanged) {
+        Server_broadcastExcept(c->server, c, pkt, n);
+        c->lastX = x; c->lastY = y; c->lastZ = z;
+        c->lastYaw = yawByte; c->lastPitch = pitchByte;
+        return false; // a resync always stops the drain, even if position itself didn't change
+    }
+
+    if (posUnchanged) {
         pkt[n++] = (unsigned char)PACKET_LOOK;
         pkt[n++] = (unsigned char)c->playerId;
         pkt[n++] = (unsigned char)yawByte;
         pkt[n++] = (unsigned char)pitchByte;
-    } else {
-        return; // nothing changed, nothing to broadcast
+        Server_broadcastExcept(c->server, c, pkt, n);
+        c->lastYaw = yawByte; c->lastPitch = pitchByte;
+        return true;
     }
 
-    Server_broadcastExcept(c->server, c, pkt, n);
+    if (yawByte == c->lastYaw && pitchByte == c->lastPitch) {
+        pkt[n++] = (unsigned char)PACKET_MOVE;
+        pkt[n++] = (unsigned char)c->playerId;
+        pkt[n++] = (unsigned char)dx; pkt[n++] = (unsigned char)dy; pkt[n++] = (unsigned char)dz;
+        Server_broadcastExcept(c->server, c, pkt, n);
+        c->lastX = x; c->lastY = y; c->lastZ = z;
+        return false;
+    }
 
+    pkt[n++] = (unsigned char)PACKET_MOVE_LOOK;
+    pkt[n++] = (unsigned char)c->playerId;
+    pkt[n++] = (unsigned char)dx; pkt[n++] = (unsigned char)dy; pkt[n++] = (unsigned char)dz;
+    pkt[n++] = (unsigned char)yawByte;
+    pkt[n++] = (unsigned char)pitchByte;
+    Server_broadcastExcept(c->server, c, pkt, n);
     c->lastX = x; c->lastY = y; c->lastZ = z;
     c->lastYaw = yawByte; c->lastPitch = pitchByte;
+    return false;
 }
 
 static void handleMessage(Connection* c, const unsigned char* f) {
@@ -299,21 +358,37 @@ static void handleMessage(Connection* c, const unsigned char* f) {
     start[len] = '\0';
     if (len == 0) return;
 
-    // new in server1.4.1: reject control/non-printable characters in chat
-    // and commands, matching the login check above. Real source bug,
-    // replicated faithfully rather than silently fixed: this kicks but does
-    // NOT return, so the already-doomed connection's line still gets
-    // processed below (and a message with multiple bad characters can
-    // retrigger the kick call more than once). Harmless in outcome since
-    // the connection is already being torn down either way
+    // server1.6: chat throttle, evaluated before any bad-character check or
+    // routing, matching the real source's own ordering exactly (trim
+    // first, then this). Once the running total exceeds 600 it's set to
+    // 760 and this message is dropped entirely, with a system message sent
+    // to the sender only (not broadcast, despite reading like a public
+    // announcement). While the counter stays elevated, every further chat
+    // attempt keeps adding to it and re-triggering the same drop, decaying
+    // by 1 per real tick (see Connection_onGameTick) until it clears
+    c->chatMuteCounter += (len + 15) * 4;
+    if (c->chatMuteCounter > 600) {
+        c->chatMuteCounter = 760;
+        Connection_sendSystemMessage(c, "Too much chatter! Muted for eight seconds.");
+        Log_info("Muting %s for chatting too much", c->username);
+        return;
+    }
+
+    // server1.6: fixed here, now correctly returns after kicking.
+    // server1.4.1's version kicked but fell through to process the line
+    // anyway, faithfully replicated there since it was a real (if harmless)
+    // upstream bug; no longer needs that treatment now that it's fixed
     for (const char* p = start; *p; p++) {
         if ((unsigned char)*p < 0x20 || (unsigned char)*p > 0x7F) {
             Connection_kick(c, "Cheat detected: Bad chat message!");
+            return;
         }
     }
 
     if (start[0] == '/') {
-        Commands_handle(c, start);
+        // server1.6: leading "/" stripped before reaching the shared
+        // dispatcher (was matched with the slash still attached before)
+        Commands_dispatch(c->server, c, start + 1);
         return;
     }
 
@@ -424,7 +499,7 @@ static void driveLevelSend(Connection* c) {
     c->hasLastPos = true;
 
     // announce to everyone else with the real slot id, then tell the new
-    // client about everyone already online -- matches the real join order
+    // client about everyone already online, matching the real join order
     unsigned char spawnPkt[1 + 1 + PACKET_STRING_LEN + 2 + 2 + 2 + 1 + 1];
     int n = 0;
     spawnPkt[n++] = (unsigned char)PACKET_SPAWN_PLAYER;
@@ -478,7 +553,7 @@ void Connection_tick(Connection* c) {
 
     if (c->pendingClose) {
         // just drain the outgoing buffer (the kick/ban Disconnect packet)
-        // and count down, matching PendingDisconnect -- no more reading or
+        // and count down, matching PendingDisconnect, no more reading or
         // dispatching packets from a connection that's on its way out
         if (c->writeLen > 0) {
             int n = NetSocket_write(c->sock, c->writeBuf, c->writeLen);
@@ -528,6 +603,43 @@ void Connection_tick(Connection* c) {
             c->writeLen -= n;
         } else if (n < 0) {
             Connection_close(c);
+        }
+    }
+}
+
+void Connection_onGameTick(Connection* c) {
+    if (!c->open || c->pendingClose) return;
+
+    // click counter decay, matches d.a()'s "if (r >= 2) r -= 2"
+    if (c->clickCounter >= 2) c->clickCounter -= 2;
+
+    // chat mute counter decay/resolution, matches d.a()'s "if (p > 0) { p--;
+    // if (p == 600) {...; p = 300;} }". The reply goes to this connection
+    // only, not a public broadcast, same correction as the mute message above
+    if (c->chatMuteCounter > 0) {
+        c->chatMuteCounter--;
+        if (c->chatMuteCounter == 600) {
+            Connection_sendSystemMessage(c, "You can now talk again.");
+            c->chatMuteCounter = 300;
+        }
+    }
+
+    // drains the shared SetBlock/Move queue: SetBlock items never stop the
+    // drain (all backlog SetBlock items resolve in one tick), Move items
+    // stop the drain the moment one represents actual movement (or a
+    // periodic resync fires), deferring the rest to the next tick, matching
+    // the real source's own loop-continue flag exactly
+    bool keepDraining = true;
+    while (keepDraining && c->actionQueueCount > 0) {
+        QueuedAction item = c->actionQueue[c->actionQueueHead];
+        c->actionQueueHead = (c->actionQueueHead + 1) % CONN_ACTION_QUEUE_CAP;
+        c->actionQueueCount--;
+
+        if (item.isSetBlock) {
+            processSetBlockItem(c, item.sbX, item.sbY, item.sbZ, item.sbMode, item.sbType);
+            keepDraining = true;
+        } else {
+            keepDraining = processMoveItem(c, item.mvX, item.mvY, item.mvZ, item.mvYaw, item.mvPitch);
         }
     }
 }

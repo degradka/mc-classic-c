@@ -7,7 +7,7 @@ INCLUDE := -I.
 
 BUILD ?= debug
 
-SRC = main.c server.c commands.c player_list.c log.c \
+SRC = main.c server.c commands.c stdin_reader.c player_list.c log.c \
       level/level.c level/tile/tile.c \
       level/levelgen/level_gen.c \
       level/levelgen/synth/synth.c level/levelgen/synth/improved_noise.c \

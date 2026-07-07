@@ -97,6 +97,17 @@ Released June 14 2009 as a bugfix pass over 0.0.18a (June 13 2009), paired with 
 * Chat can now send `\`, `@`, `|`, and `$`, on top of the existing allowed characters
 * Server admins can use `/teleport <name>` to warp to another connected player
 
+### c0.0.19a_04
+
+Released June 19-20 2009, accumulating five real point releases (0.0.19a through 0.0.19a_04) paired with dedicated server 1.6. The largest update since c0.0.17a.
+
+* New Glass and Sponge blocks; Cobblestone and Sand are no longer in the default hotbar, replaced by Sponge and Glass. Sponge dries out a 5x5x5 area of water when placed and lets it flow back in when removed
+* Real hotbar UI: a highlighted bar across the bottom of the screen showing all 9 quick-select tiles as small isometric blocks, instead of just a single held-item preview
+* Water and lava now animate in place instead of using a static texture
+* Other connected players no longer render mirrored left-right, and their walking/standing animation looks more natural (no more permanent slight body bob while standing still)
+* Chat can now send `;`, on top of the existing allowed characters
+* Singleplayer world generation: smaller beaches/shorelines, and caves are noticeably sparser and more broken up rather than long continuous tunnels
+
 ## Building
 
 ### Windows
@@ -149,6 +160,8 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 
 `server/server1.4.1/` pairs with the c0.0.18a_02 client, same build/run/DLL layout again. It adds `/teleport <name>` for admins, rejects usernames and chat messages containing control characters, and logs to a `server.log` file next to the console output.
 
+`server/server1.6/` pairs with the c0.0.19a_04 client, same build/run/DLL layout again. Admin commands can now also be typed directly into the server's own console (no in-game connection needed) using the same names as the in-game chat commands but without the leading `/` — e.g. typing `kick SomePlayer` at the console. Chat is now rate-limited: sending too much too fast mutes that player for about 8 seconds, with a message telling them so. Glass and Sponge are placeable (matching the client's new hotbar), replacing Cobblestone and Sand in the placeable-tile list. `server.properties` gains a `max-connections` setting (default 3) controlling how many simultaneous connections are allowed from the same address.
+
 ## References
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
@@ -158,3 +171,8 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.16a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.16a_02)
 * [Java Edition Classic 0.0.17a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.17a)
 * [Java Edition Classic 0.0.18a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.18a_02)
+* [Java Edition Classic 0.0.19a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a)
+* [Java Edition Classic 0.0.19a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_01)
+* [Java Edition Classic 0.0.19a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_02)
+* [Java Edition Classic 0.0.19a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_03)
+* [Java Edition Classic 0.0.19a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_04)

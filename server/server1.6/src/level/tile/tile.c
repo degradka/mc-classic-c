@@ -33,13 +33,27 @@ static void registerTile(Tile* t, int id, int tex) {
     t->getAABB     = Tile_default_getAABB;
     t->mayPick     = Tile_default_mayPick;
     t->neighborChanged = Tile_default_neighborChanged;
+    t->onPlace = NULL;
+    t->onRemoved = NULL;
 
     gTiles[id] = t;
 }
 
+// server1.6: true if a Sponge exists within a 5x5x5 cube centered on
+// (x,y,z). Used to stop water (not lava) from falling or spreading into a
+// sponge's dry zone, working together with Sponge's own onPlace/onRemoved
+// hooks to keep water from re-flooding the area it just dried
+static int hasNearbySponge(Level* lvl, int x, int y, int z) {
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        if (Level_getTile(lvl, x + dx, y + dy, z + dz) == TILE_SPONGE.id) return 1;
+    }
+    return 0;
+}
+
 Tile TILE_ROCK;
 Tile TILE_DIRT;
-Tile TILE_STONEBRICK;
 Tile TILE_WOOD;
 Tile TILE_GRASS;
 Tile TILE_BUSH;
@@ -55,6 +69,8 @@ Tile TILE_IRON_ORE;
 Tile TILE_COAL_ORE;
 Tile TILE_LOG;
 Tile TILE_LEAVES;
+Tile TILE_SPONGE;
+Tile TILE_GLASS;
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
@@ -97,6 +113,8 @@ static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
 // bases the calm/flowing decision purely on the fall loop below), the point
 // is the side effect of placing a tile and scheduling its next tick.
 static void Liquid_spreadToNeighbor(const Tile* self, Level* lvl, int x, int y, int z) {
+    // server1.6: water (not lava) won't spread into a cell within 5x5x5 of a Sponge
+    if (self->liquidType == LIQUID_WATER && hasNearbySponge(lvl, x, y, z)) return;
     if (Level_getTile(lvl, x, y, z) == 0 && level_setTile(lvl, x, y, z, self->tileId)) {
         Level_addToTickNextTick(lvl, x, y, z, self->tileId);
     }
@@ -116,7 +134,8 @@ static void Liquid_tick(const Tile* self, Level* lvl, int x, int y, int z) {
     // y > 0 guard stops the fall at the map floor. Level_getTile reads out
     // of bounds y as air, so without this an open shaft reaching y 0 makes
     // the loop fall forever and hangs the game.
-    while (y > 0 && Level_getTile(lvl, x, y - 1, z) == 0) {
+    while (y > 0 && Level_getTile(lvl, x, y - 1, z) == 0 &&
+           !(self->liquidType == LIQUID_WATER && hasNearbySponge(lvl, x, y - 1, z))) {
         y--;
         if (level_setTile(lvl, x, y, z, self->tileId)) hasChanged = 1;
     }
@@ -198,12 +217,35 @@ static void FallingTile_neighborChanged(const Tile* self, Level* lvl, int x, int
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 
+// server1.6: on placement, dries out (converts to air) any water within a
+// 5x5x5 cube; on removal, re-triggers neighbor evaluation over the same
+// cube so flowing water nearby can resume into the now-empty space
+static void Sponge_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        int id = Level_getTile(lvl, x + dx, y + dy, z + dz);
+        if (id == TILE_WATER.id || id == TILE_CALM_WATER.id) {
+            Level_setTileNoUpdate(lvl, x + dx, y + dy, z + dz, 0);
+        }
+    }
+}
+static void Sponge_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    for (int dx = -2; dx <= 2; ++dx)
+    for (int dy = -2; dy <= 2; ++dy)
+    for (int dz = -2; dz <= 2; ++dz) {
+        Level_updateNeighborsAt(lvl, x + dx, y + dy, z + dz);
+    }
+}
+
 void Tile_registerAll(void) {
     memset((void*)gTiles, 0, sizeof(gTiles));
     registerTile(&TILE_ROCK,       1,  1);
     registerTile(&TILE_GRASS,      2,  3);
     registerTile(&TILE_DIRT,       3,  2);
-    registerTile(&TILE_STONEBRICK, 4, 16);
+    // id=4 (StoneBrick) intentionally not registered, see the tile.h comment
     registerTile(&TILE_WOOD,       5,  4);
     registerTile(&TILE_BUSH,       6, 15);
     registerTile(&TILE_BEDROCK,    7, 17);
@@ -274,14 +316,21 @@ void Tile_registerAll(void) {
     registerTile(&TILE_IRON_ORE,   15, 33);
     registerTile(&TILE_COAL_ORE,   16, 34);
     // server1.2's own tile id 17 is a plain single-texture tile, unlike the
-    // client's per-face TILE_LOG (see PORTING_SCOPE.md) -- matches the real
-    // server, not a copy-paste oversight
+    // client's per-face TILE_LOG, matching the real server, not a
+    // copy-paste oversight
     registerTile(&TILE_LOG,        17,  0);
     registerTile(&TILE_LEAVES,     18, 22);
+    registerTile(&TILE_SPONGE,     19, 48);
+    registerTile(&TILE_GLASS,      20, 49);
 
     TILE_SAND.onTick   = TILE_GRAVEL.onTick   = FallingTile_onTick;
     TILE_SAND.neighborChanged = TILE_GRAVEL.neighborChanged = FallingTile_neighborChanged;
 
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
+
+    TILE_SPONGE.onPlace   = Sponge_onPlace;
+    TILE_SPONGE.onRemoved = Sponge_onRemoved;
+    // Glass needs nothing special server-side beyond registration; no
+    // lighting-propagation logic exists server-side, normal solid collision
 }

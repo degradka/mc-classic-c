@@ -24,6 +24,7 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->tickList = NULL;
     level->tickListSize = 0;
     level->tickListCapacity = 0;
+    level->networkMode = false;
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -61,6 +62,7 @@ void Level_resize(Level* level, int width, int height, int depth) {
     free(level->tickList);
     level->tickList = NULL;
     level->tickListSize = level->tickListCapacity = 0;
+    level->networkMode = false; // regenerating always returns to local/singleplayer authority
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -96,6 +98,10 @@ void Level_setDataFromNetwork(Level* level, int width, int height, int depth, co
     free(level->tickList);
     level->tickList = NULL;
     level->tickListSize = level->tickListCapacity = 0;
+    // c0.0.19a_04: a network-installed level is server-authoritative for its
+    // whole lifetime, matching new Level().setNetworkMode(true) in the real
+    // source's LevelFinalize handler
+    level->networkMode = true;
 
     size_t total = (size_t)width * height * depth;
     level->blocks = (byte*)malloc(total);
@@ -383,13 +389,33 @@ static void notifyNeighborChanged(Level* level, int x, int y, int z, int type) {
     if (t && t->neighborChanged) t->neighborChanged(t, level, x, y, z, type);
 }
 
+void Level_updateNeighborsAt(Level* level, int x, int y, int z) {
+    notifyNeighborChanged(level, x, y, z, Level_getTile(level, x, y, z));
+}
+
 bool level_setTile(Level* level, int x, int y, int z, int type) {
+    // c0.0.19a_04: gated no-op in multiplayer, matching the real source's
+    // setTile/setTileNoNeighborChange checking networkMode. Only the
+    // server's own echoed SetBlock (via Level_netSetTile) may actually
+    // change tiles once a level has been installed from a network connection
+    if (level->networkMode) return false;
+    return Level_netSetTile(level, x, y, z, type);
+}
+
+bool Level_netSetTile(Level* level, int x, int y, int z, int type) {
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return false;
 
     int index = (y * level->height + z) * level->width + x;
-    if (level->blocks[index] == (byte)type) return false;
+    int oldType = level->blocks[index];
+    if (oldType == (byte)type) return false;
 
     level->blocks[index] = (byte)type;
+
+    // c0.0.19a_04: onPlace/onRemoved hooks, added for Sponge
+    const Tile* oldTile = (oldType >= 0 && oldType < 256) ? gTiles[oldType] : NULL;
+    if (oldTile && oldTile->onRemoved) oldTile->onRemoved(oldTile, level, x, y, z);
+    const Tile* newTile = (type >= 0 && type < 256) ? gTiles[type] : NULL;
+    if (newTile && newTile->onPlace) newTile->onPlace(newTile, level, x, y, z);
 
     notifyNeighborChanged(level, x - 1, y, z, type);
     notifyNeighborChanged(level, x + 1, y, z, type);
@@ -483,6 +509,10 @@ void Level_setSpawnPos(Level* level, int x, int y, int z, float rot) {
 }
 
 void Level_swap(Level* level, int x1, int y1, int z1, int x2, int y2, int z2) {
+    // c0.0.19a_04: gated no-op in multiplayer, matching the real source.
+    // Falling blocks (Sand/Gravel) are server-simulated once connected; the
+    // client only sees them move via the server's own SetBlock echoes
+    if (level->networkMode) return;
     int a = Level_getTile(level, x1, y1, z1);
     int b = Level_getTile(level, x2, y2, z2);
     Level_setTileNoUpdate(level, x1, y1, z1, b);

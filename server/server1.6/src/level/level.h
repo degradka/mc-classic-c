@@ -85,6 +85,9 @@ void  Level_save(const Level* level);
 bool  level_setTile(Level* level, int x, int y, int z, int type);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 int   Level_getTile(const Level* level, int x, int y, int z);
+// server1.6: re-runs neighborChanged at (x,y,z) without touching the block
+// there, added for Sponge's onRemoved to re-trigger nearby water flow
+void  Level_updateNeighborsAt(Level* level, int x, int y, int z);
 
 AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);
 

@@ -34,19 +34,25 @@ void ZombieModel_init(ZombieModel* m) {
     Cube_setPos(&m->leftLeg, 2, 12, 0);
 }
 
-void ZombieModel_render(ZombieModel* m, float animStep, float headYaw, float headPitch) {
+void ZombieModel_render(ZombieModel* m, float animStep, float run, float age, float headYaw, float headPitch) {
     // animate. Head faces headYaw/headPitch directly (degrees to radians,
     // matching character.a.a's 57.29578 divisor); arm/leg swing is driven by
-    // animStep, which walk distance accumulates and standing still resets
-    // to 0, not by raw elapsed time -- a standing character doesn't fidget
+    // animStep, which walk distance accumulates and standing still eases
+    // back toward 0 via run rather than snapping instantly. c0.0.19a_04
+    // switched the waveform from sin to cos and scaled it by run, and added
+    // a small idle arm sway driven by age on top, independent of animStep
     m->head.yRot      = headYaw   / 57.29578f;
     m->head.xRot      = headPitch / 57.29578f;
-    m->rightArm.xRot  = (float)sin(animStep * 0.6662 + M_PI) * 2.0f;
-    m->rightArm.zRot  = (float)(sin(animStep * 0.2312) + 1.0);
-    m->leftArm.xRot   = (float)sin(animStep * 0.6662) * 2.0f;
-    m->leftArm.zRot   = (float)(sin(animStep * 0.2812) - 1.0);
-    m->rightLeg.xRot  = (float)sin(animStep * 0.6662) * 1.4f;
-    m->leftLeg.xRot   = (float)sin(animStep * 0.6662 + M_PI) * 1.4f;
+    m->rightArm.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 2.0f * run;
+    m->rightArm.zRot  = (float)(cos(animStep * 0.2312) + 1.0) * run;
+    m->leftArm.xRot   = (float)cos(animStep * 0.6662) * 2.0f * run;
+    m->leftArm.zRot   = (float)(cos(animStep * 0.2812) - 1.0) * run;
+    m->rightLeg.xRot  = (float)cos(animStep * 0.6662) * 1.4f * run;
+    m->leftLeg.xRot   = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
+    m->rightArm.zRot += (float)cos(age * 0.09) * 0.05f + 0.05f;
+    m->leftArm.zRot  -= (float)cos(age * 0.09) * 0.05f + 0.05f;
+    m->rightArm.xRot += (float)sin(age * 0.067) * 0.05f;
+    m->leftArm.xRot  -= (float)sin(age * 0.067) * 0.05f;
 
     // draw
     Cube_render(&m->head);

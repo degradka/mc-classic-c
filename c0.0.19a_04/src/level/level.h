@@ -48,6 +48,13 @@ typedef struct Level {
     TickEntry* tickList;
     int tickListSize;
     int tickListCapacity;
+
+    // c0.0.19a_04: true for the lifetime of a level installed from a network
+    // connection. While true, level_setTile is a no-op (server-authoritative
+    // block mutation): only Level_netSetTile, driven by an incoming SetBlock
+    // packet, actually changes tiles. Reset to false whenever a singleplayer
+    // level is (re)generated
+    bool networkMode;
 } Level;
 
 typedef struct {
@@ -77,7 +84,16 @@ void  Level_generateMap(Level* level);
 bool  Level_load(Level* level);
 void  Level_save(const Level* level);
 
+// no-op (returns false) while level->networkMode is true, matching the real
+// source's setTile/setTileNoNeighborChange gating: in multiplayer, only the
+// server's own echoed changes (via Level_netSetTile) are allowed to mutate
+// the level, not local world-gen/player-initiated calls
 bool  level_setTile(Level* level, int x, int y, int z, int type);
+// the always-executing core level_setTile delegates to when not in network
+// mode. Used directly by the incoming SetBlock packet handler, which must
+// always be able to apply the server's authoritative change regardless of
+// networkMode
+bool  Level_netSetTile(Level* level, int x, int y, int z, int type);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 int   Level_getTile(const Level* level, int x, int y, int z);
 
@@ -106,5 +122,11 @@ void  Level_swap(Level* level, int x1, int y1, int z1, int x2, int y2, int z2);
 // schedules a tile reaction for a future tick (drained every 5 ticks), used
 // by liquids and the falling-block tile family instead of resolving inline
 void  Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId);
+
+// c0.0.19a_04: re-invokes the tile at (x,y,z)'s own neighborChanged callback,
+// passing its own current tile id as the "type" argument, a way to force a
+// cell to re-evaluate its reaction logic without an actual neighbor changing.
+// Added for Sponge's onRemoved hook, which re-triggers this over a 5x5x5 area
+void  Level_updateNeighborsAt(Level* level, int x, int y, int z);
 
 #endif  // LEVEL_H

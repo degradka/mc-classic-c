@@ -227,8 +227,8 @@ void Server_teleportToPlayer(MinecraftServer* srv, Connection* issuer, const cha
 
 void Server_banIpByName(MinecraftServer* srv, const char* name) {
     // new in server1.3: matches by username OR by raw IP (with or without a
-    // leading slash, an artifact of Java's InetAddress.toString() that our
-    // remoteAddress never has to begin with), against every connected
+    // leading slash, an artifact of Java's InetAddress.toString() that this
+    // port's remoteAddress never has to begin with), against every connected
     // session, not just the first match by name
     const char* ipMatch = name;
     if (name[0] == '/') ipMatch = name + 1;
@@ -285,8 +285,7 @@ void Server_onBlockChanged(void* ctx, int x, int y, int z) {
 void Server_run(MinecraftServer* srv) {
     // matches run(): network I/O every outer iteration, a fixed ~20Hz world
     // tick, a slower ~0.5s ping broadcast, autosave every ~60s. Heartbeat to
-    // the long dead minecraft.net master list is deliberately not ported --
-    // see PORTING_SCOPE.md
+    // the long dead minecraft.net master list is deliberately not ported
     const long long tickNanos = 50000000LL;  // 50ms = 20Hz
     const long long pingNanos = 500000000LL; // 0.5s
 
@@ -295,7 +294,7 @@ void Server_run(MinecraftServer* srv) {
     long long pingAccum = 0;
 
     // static, not stack local: each Connection carries 3 x 256KB buffers,
-    // so the full array is tens of megabytes -- comfortably past a typical
+    // so the full array is tens of megabytes, comfortably past a typical
     // thread's default stack size
     static Connection connections[SERVER_MAX_PLAYERS];
     static bool connectionUsed[SERVER_MAX_PLAYERS];

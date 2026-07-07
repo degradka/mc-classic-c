@@ -23,6 +23,16 @@ static bool equalsIgnoreCase(const char* a, const char* b) {
     return *a == *b;
 }
 
+// c0.0.19a_04: the synthetic halfway waypoint's rotation used to be a naive
+// (from+to)/2 average, which spun the wrong way around the 0/360 wrap. Now
+// takes the shortest path from `from` to `to` and steps halfway along it
+static float midpointAngle(float from, float to) {
+    float diff = to - from;
+    while (diff >= 180.0f) diff -= 360.0f;
+    while (diff < -180.0f) diff += 360.0f;
+    return from + diff * 0.5f;
+}
+
 static void pushMoveEntry(NetworkPlayer* np, float x, float y, float z, float yaw, float pitch, bool hasPos, bool hasRot) {
     if (np->queueCount >= NETPLAYER_QUEUE_CAP) return; // shouldn't happen, catch up drain keeps this bounded
     int tail = (np->queueHead + np->queueCount) % NETPLAYER_QUEUE_CAP;
@@ -46,6 +56,8 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* nam
     snprintf(np->name, sizeof np->name, "%s", name);
     np->animStep = np->animStepO = 0.0f;
     np->yBodyRot = np->yBodyRotO = 0.0f;
+    np->run = np->runO = 0.0f;
+    np->tickCount = 0;
     np->xp = xRaw; np->yp = yRaw; np->zp = zRaw;
     np->queueHead = np->queueCount = 0;
 
@@ -56,6 +68,7 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* nam
 void NetworkPlayer_onTick(NetworkPlayer* np) {
     Entity_onTick(&np->base);
     np->animStepO = np->animStep;
+    np->tickCount++;
 
     // matches NetworkPlayer.tick(): always drains at least one queued
     // waypoint, then up to 5 more only while the backlog is still over 10,
@@ -80,12 +93,16 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
     float dist = sqrtf(dx * dx + dz * dz);
     float targetBodyYaw = np->yBodyRot;
     float animDelta = 0.0f;
-    if (dist == 0.0f) {
-        np->animStep = 0.0f; // standing still resets the walk cycle, doesn't just pause it
-    } else {
+    np->runO = np->run;
+    float targetRun = 0.0f;
+    if (dist != 0.0f) {
+        targetRun = 1.0f;
         animDelta = dist * 3.0f;
         targetBodyYaw = -(atan2f(dz, dx) * 180.0f / (float)M_PI + 90.0f);
     }
+    // c0.0.19a_04: run eases toward 0/1 instead of animStep snapping to 0 on
+    // stopping, matching the "fixed the default player stance" changelog item
+    np->run += (targetRun - np->run) * 0.3f;
 
     float diff = targetBodyYaw - np->yBodyRot;
     while (diff < -180.0f) diff += 360.0f;
@@ -99,6 +116,7 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
     if (headDiff < -75.0f) headDiff = -75.0f;
     if (headDiff >= 75.0f) headDiff = 75.0f;
     np->yBodyRot = np->base.yRotation - headDiff;
+    np->yBodyRot += headDiff * 0.1f;
     if (facingBackward) animDelta = -animDelta;
 
     // keep the interpolated angle pairs within 180 degrees of each other so
@@ -117,10 +135,29 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texChar);
 
-    float bodyYaw   = np->yBodyRotO + (np->yBodyRot - np->yBodyRotO) * partialTicks;
-    float headYaw   = np->base.prevYRotation + (np->base.yRotation - np->base.prevYRotation) * partialTicks;
-    float headPitch = np->base.prevXRotation + (np->base.xRotation - np->base.prevXRotation) * partialTicks;
-    headYaw -= bodyYaw; // head model rotation is relative to the body, which is rotated separately below
+    float run = np->runO + (np->run - np->runO) * partialTicks;
+
+    // c0.0.19a_04: explicit wraparound normalization on the prev/current
+    // angle pairs right before lerping, on top of the wraparound already
+    // done in onTick, which didn't exist before this version
+    float bodyYawO = np->yBodyRotO;
+    while (bodyYawO - np->yBodyRot < -180.0f) bodyYawO += 360.0f;
+    while (bodyYawO - np->yBodyRot >= 180.0f) bodyYawO -= 360.0f;
+    float bodyYaw = bodyYawO + (np->yBodyRot - bodyYawO) * partialTicks;
+
+    float headPitchO = np->base.prevXRotation;
+    while (headPitchO - np->base.xRotation < -180.0f) headPitchO += 360.0f;
+    while (headPitchO - np->base.xRotation >= 180.0f) headPitchO -= 360.0f;
+
+    float headYawO = np->base.prevYRotation;
+    while (headYawO - np->base.yRotation < -180.0f) headYawO += 360.0f;
+    while (headYawO - np->base.yRotation >= 180.0f) headYawO -= 360.0f;
+
+    float headYaw   = headYawO + (np->base.yRotation - headYawO) * partialTicks;
+    float headPitch = headPitchO + (np->base.xRotation - headPitchO) * partialTicks;
+    // head model rotation is relative to the body, which is rotated
+    // separately below; negated in c0.0.19a_04 to match the mirrored body
+    headYaw = -(headYaw - bodyYaw);
     float animStep  = np->animStepO + (np->animStep - np->animStepO) * partialTicks;
 
     float b = Entity_getBrightness(&np->base);
@@ -135,10 +172,15 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glScalef(1.0f, -1.0f, 1.0f);
     const float size = 0.0625f;
     glScalef(size, size, size);
-    float offY = -(fabsf(sinf(animStep * 0.6662f)) * 5.0f) - 23.0f;
+    // c0.0.19a_04: leg-bob switched from a constant-amplitude sine to a
+    // run-speed-scaled cosine, matching "fixed the default player stance"
+    float offY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
     glTranslatef(0.0f, offY, 0.0f);
     glRotatef(bodyYaw, 0.0f, 1.0f, 0.0f);
-    ZombieModel_render(&sModel, animStep, headYaw, headPitch);
+    glDisable(GL_ALPHA_TEST);
+    glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: "fixed mirroring"
+    ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);
+    glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
     // name tag: floats above the head, billboarded to face the camera
@@ -162,14 +204,14 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
 
 void NetworkPlayer_teleport(NetworkPlayer* np, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
     pushMoveEntry(np, (np->xp + xRaw) / 64.0f, (np->yp + yRaw) / 64.0f, (np->zp + zRaw) / 64.0f,
-                  (np->base.yRotation + yaw) / 2.0f, (np->base.xRotation + pitch) / 2.0f, true, true);
+                  midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, true);
     np->xp = xRaw; np->yp = yRaw; np->zp = zRaw;
     pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, yaw, pitch, true, true);
 }
 
 void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yaw, float pitch) {
     pushMoveEntry(np, (np->xp + dx / 2.0f) / 32.0f, (np->yp + dy / 2.0f) / 32.0f, (np->zp + dz / 2.0f) / 32.0f,
-                  (np->base.yRotation + yaw) / 2.0f, (np->base.xRotation + pitch) / 2.0f, true, true);
+                  midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, true);
     np->xp += dx; np->yp += dy; np->zp += dz;
     pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, yaw, pitch, true, true);
 }
@@ -182,6 +224,6 @@ void NetworkPlayer_queueMove(NetworkPlayer* np, int dx, int dy, int dz) {
 }
 
 void NetworkPlayer_queueLook(NetworkPlayer* np, float yaw, float pitch) {
-    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, (np->base.yRotation + yaw) / 2.0f, (np->base.xRotation + pitch) / 2.0f, true, false);
+    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, false);
     pushMoveEntry(np, 0.0f, 0.0f, 0.0f, yaw, pitch, true, false);
 }

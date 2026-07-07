@@ -28,6 +28,9 @@ typedef struct MinecraftServer {
     char motd[65];
     int port;
     bool isPublic;
+    // server1.6: real config value (default 3), replacing the previously
+    // hardcoded same-IP simultaneous connection cap
+    int maxConnections;
 
     PlayerList admins;
     PlayerList bannedNames;

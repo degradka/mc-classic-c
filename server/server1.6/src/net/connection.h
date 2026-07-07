@@ -19,6 +19,21 @@ struct MinecraftServer;
 // gets close to this before a level transfer completes
 #define CONN_QUEUE_BUFFER_SIZE  (256 * 1024)
 
+// server1.6: SetBlock and Move/Teleport packets are queued on receipt and
+// only drained once per real game tick (see Connection_onGameTick), instead
+// of being processed inline the moment they arrive. The real cap is checked
+// as "kick if size() > 400 before adding", so 400 is the largest the queue
+// is ever allowed to hold going into a tick; sized with headroom since
+// that's a soft cap enforced by the check, not a hard array bound
+#define CONN_ACTION_QUEUE_CAP 420
+
+typedef struct {
+    bool isSetBlock; // true: SetBlock item below is valid. false: Move/Teleport item is valid
+    int sbX, sbY, sbZ, sbMode, sbType;
+    int mvX, mvY, mvZ;
+    signed char mvYaw, mvPitch;
+} QueuedAction;
+
 typedef struct Connection {
     sock_t sock;
     bool open; // false once torn down, caller removes it from the server's list next tick
@@ -50,6 +65,21 @@ typedef struct Connection {
     int moveTickCounter;
     bool hasLastPos; // false until the first update, so it always sends a full resync first
 
+    // server1.6: shared FIFO for both SetBlock and Move/Teleport packets,
+    // drained once per real game tick by Connection_onGameTick instead of
+    // being processed the instant each packet arrives
+    QueuedAction actionQueue[CONN_ACTION_QUEUE_CAP];
+    int actionQueueHead, actionQueueCount;
+
+    // server1.6: chat mute counter ('p' in the real source). Incremented by
+    // (message length + 15) * 4 on every chat line; muted once it exceeds
+    // 600, decremented by 1 every game tick while positive
+    int chatMuteCounter;
+    // server1.6: SetBlock click-rate limiter ('r' in the real source).
+    // Incremented by 1 each time a queued SetBlock item is drained, decayed
+    // by 2 every game tick; kicks at 100
+    int clickCounter;
+
     // outgoing packets for events that happen elsewhere while this
     // connection hasn't finished joining yet
     unsigned char queuedBuf[CONN_QUEUE_BUFFER_SIZE];
@@ -68,6 +98,11 @@ void Connection_init(Connection* c, struct MinecraftServer* server, sock_t sock)
 // non-blocking read, dispatch up to 100 buffered packets, flush pending
 // writes. Matches the per-connection body of MinecraftServer.tickNetwork()
 void Connection_tick(Connection* c);
+// server1.6: once per real game tick (not once per network poll like
+// Connection_tick above), matching PlayerConnection.tick(): decays the
+// click counter, decays/resolves the chat mute counter, and drains the
+// queued SetBlock/Move actions
+void Connection_onGameTick(Connection* c);
 void Connection_close(Connection* c);
 
 // sends immediately if the join sequence is done, otherwise buffers into

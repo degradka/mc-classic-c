@@ -14,9 +14,10 @@ static ChatInputScreen instance;
 
 // the same allowed character set as the (unimplemented) save-name entry
 // screen in the real source, both hand roll this independently rather than
-// sharing a base text field. c0.0.18a_02 added \, @, |, $ on top of this
+// sharing a base text field. c0.0.18a_02 added \, @, |, $ on top of this.
+// c0.0.19a_04 added ;
 static const char* ALLOWED =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.:-_'*!\"#%/()=+?[]{}<>\\@|$";
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.:-_'*!\"#%/()=+?[]{}<>\\@|$;";
 
 static void ChatInputScreen_render(Screen* self, int xm, int ym) {
     (void)xm; (void)ym;

@@ -1,6 +1,6 @@
 // net/network_player.h: remote player entity, ported from
 // com.mojang.minecraft.net.NetworkPlayer. Position/rotation are never set
-// directly from incoming packets -- every update enqueues a synthetic
+// directly from incoming packets: every update enqueues a synthetic
 // halfway waypoint plus the real final state onto a per-player move queue,
 // so even a single coarse network update gets a 2 step interpolation path.
 // tick() drains the queue on top of that, and render() does its own
@@ -33,6 +33,12 @@ typedef struct {
 
     float animStep, animStepO;
     float yBodyRot, yBodyRotO;
+    // c0.0.19a_04: smoothed 0..1 "is moving" value, blended toward 1 while
+    // walking and 0 while standing, replacing the old instant animStep=0
+    // snap on stopping. run scales leg/arm swing amplitude in the model
+    float run, runO;
+    // c0.0.19a_04: feeds the model's idle arm sway, independent of movement
+    int tickCount;
 
     // raw 1/32 block fixed point network position, tracked independently of
     // base.x/y/z so relative Move/MoveAndLook deltas accumulate exactly like

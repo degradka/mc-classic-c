@@ -23,6 +23,7 @@
 #include "renderer/frustum.h"
 #include "level/tile/tile.h"
 #include "renderer/textures.h"
+#include "renderer/texture_fx.h"
 #include "particle/particle_engine.h"
 #include "player.h"
 #include "user.h"
@@ -65,9 +66,11 @@ static int prevR    = GLFW_RELEASE;
 static int prevT    = GLFW_RELEASE;
 
 // c0.0.14a_08: hotbar expanded from 6 individually wired keys to a real 9
-// slot bar (rock, dirt, stonebrick, wood, sapling, log, leaves, sand,
-// gravel), selectable by keys 1-9, mouse wheel, or middle click pick block
-static const int gHotbar[9] = { 1, 3, 4, 5, 6, 17, 18, 12, 13 };
+// slot bar, selectable by keys 1-9, mouse wheel, or middle click pick block.
+// c0.0.19a_04: stonebrick and sand dropped in favor of the two new tiles
+// (rock, dirt, sponge, wood, sapling, log, leaves, glass, gravel), and this
+// is also the first version to actually draw the bar on screen (see the Hud)
+static const int gHotbar[9] = { 1, 3, 19, 5, 6, 17, 18, 20, 13 };
 
 static int gTickCount = 0;
 static int gLastMineTick = 0;
@@ -96,6 +99,13 @@ static char gConnectUsername[64] = ""; // empty = fall back to "guest"
 
 static int texTerrain = 0;
 static int texDirt = 0;
+static int texGui = 0; // c0.0.19a_04: hotbar background/highlight atlas
+
+// c0.0.19a_04: animated water/lava, one 16x16 patch per tile re-simulated
+// and re-uploaded into texTerrain once per tick
+static LavaTextureFX  gLavaFX;
+static WaterTextureFX gWaterFX;
+static TextureFX* gTextureFX[2];
 static char gLoadTitle[64];
 
 static Tessellator hudTess;
@@ -201,8 +211,8 @@ void Minecraft_openMessageScreen(const char* title, const char* message) {
 }
 
 // matches LevelFinalize's handling: installs the freshly gunzipped level and
-// swaps in a fresh LevelRenderer sized for it, then leaves loading mode --
-// spawn position arrives separately as a SpawnPlayer packet
+// swaps in a fresh LevelRenderer sized for it, then leaves loading mode.
+// Spawn position arrives separately as a SpawnPlayer packet
 void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     LevelRenderer_destroy(&levelRenderer);
     Level_setDataFromNetwork(&level, w, h, d, blocks);
@@ -212,13 +222,15 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     gLoading = false;
 }
 
-// matches SetBlock server to client: applies directly, no local echo back
+// matches SetBlock server to client: applies directly, no local echo back.
+// Uses Level_netSetTile (not the gated level_setTile) since this is exactly
+// the server-authoritative path that's allowed to mutate a network level
 void Minecraft_networkSetBlock(int x, int y, int z, int type) {
-    level_setTile(&level, x, y, z, type);
+    Level_netSetTile(&level, x, y, z, type);
 }
 
-// matches SpawnPlayer with id < 0: the server telling us where our own
-// player belongs, once the level transfer finishes
+// matches SpawnPlayer with id < 0: the server telling the client where its
+// own player belongs, once the level transfer finishes
 void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float pitch) {
     Entity_setPosition(&player.e, x, y, z);
     player.e.yRotation = yaw;
@@ -515,9 +527,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.18a_02", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.19a_04", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.18a_02", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.19a_04", NULL, NULL);
     }
 
     if (!window) {
@@ -548,7 +560,11 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 
-    glEnable(GL_CULL_FACE);
+    // matches the real source: glCullFace/glFrontFace are set once here, but
+    // GL_CULL_FACE is never actually enabled anywhere in the real client, so
+    // this is inert state rather than active back-face culling. Confirmed by
+    // checking every version's decompile for a GL_CULL_FACE enable call and
+    // finding none
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
@@ -567,14 +583,25 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     // c0.0.13a_03 defaults to "anonymous" instead of "noname" when no
     // session is set, matching Minecraft.run()'s fallback level owner name.
     // c0.0.16a_02: the connect path takes an optional username argument,
-    // falling back to "guest" instead of "anonymous" if none is given --
-    // both fallbacks exist because we have no real login session either way
+    // falling back to "guest" instead of "anonymous" if none is given.
+    // Both fallbacks exist since there's no real login session either way
     const char* connectName = gConnectUsername[0] ? gConnectUsername : "guest";
     User_init(&user, gConnectHost[0] ? connectName : "anonymous");
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
+    texGui     = loadTexture("resources/gui.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.png"); // c0.0.17a: was default.gif
+
+    // c0.0.19a_04: register the water/lava animators against their tile's
+    // still-texture atlas cell, ticking once immediately so neither is blank
+    // on the very first frame
+    LavaTextureFX_init(&gLavaFX, TILE_LAVA.textureId);
+    WaterTextureFX_init(&gWaterFX, TILE_WATER.textureId);
+    gTextureFX[0] = &gLavaFX.base;
+    gTextureFX[1] = &gWaterFX.base;
+    gTextureFX[0]->tick(gTextureFX[0]);
+    gTextureFX[1]->tick(gTextureFX[1]);
 
     Level_init(lvl, 256, 256, 64);
     LevelRenderer_init(lr, lvl, texTerrain);
@@ -589,13 +616,13 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     Timer_init(&timer, 20.0f);
 
-    // c0.0.16a_02: a host argument switches to multiplayer -- the boot level
+    // c0.0.16a_02: a host argument switches to multiplayer. The boot level
     // above stays only as a placeholder until LevelFinalize replaces it
     if (gConnectHost[0]) {
         // matches the real client's Player starting at (0,0,0): its Level is
         // null at this point in multiplayer, so Entity's constructor leaves
         // it at the origin and resetPos() no-ops rather than searching a
-        // (nonexistent) spawn point. Our placeholder level's own spawn point
+        // (nonexistent) spawn point. This placeholder level's own spawn point
         // has no relation to the real server's, so keeping it here would
         // just broadcast a more random wrong position, not a more correct one
         Entity_setPosition(&p->e, 0.0f, 0.0f, 0.0f);
@@ -645,6 +672,20 @@ static void setupCamera(Player* p, float t) {
     moveCameraToPlayer(p, t);
 }
 
+// c0.0.19a_04: blits a sprite from the 256x64 gui.png atlas at pixel
+// coordinates (u,v,w,h) to screen position (x,y). Matches the real source's
+// own blit helper's UV math exactly (divide U by 256, V by 64)
+static void drawGuiBlit(int x, int y, int u, int v, int w, int h) {
+    float u0 = u / 256.0f, u1 = (u + w) / 256.0f;
+    float v0 = v / 64.0f,  v1 = (v + h) / 64.0f;
+    Tessellator_begin(&hudTess);
+    Tessellator_vertexUV(&hudTess, (float)x,     (float)(y + h), -90.0f, u0, v1);
+    Tessellator_vertexUV(&hudTess, (float)(x+w), (float)(y + h), -90.0f, u1, v1);
+    Tessellator_vertexUV(&hudTess, (float)(x+w), (float)y,       -90.0f, u1, v0);
+    Tessellator_vertexUV(&hudTess, (float)x,     (float)y,       -90.0f, u0, v0);
+    Tessellator_end(&hudTess);
+}
+
 static void drawGui(float partialTicks) {
     (void)partialTicks;
 
@@ -670,36 +711,56 @@ static void drawGui(float partialTicks) {
     glLoadIdentity();
     glTranslatef(0.0f, 0.0f, -200.0f);
 
-    // held block preview in the top right corner, 16x16 logical size
-    glPushMatrix();
-    glTranslated((double)screenWidth - 16.0, 16.0, -50.0);
-    glScalef(16.0f, 16.0f, 16.0f);
-    glRotatef(-30.0f, 1, 0, 0);
-    glRotatef(45.0f, 0, 1, 0);
-    glTranslatef(-1.5f, 0.5f, 0.5f);
-    glScalef(-1.0f, -1.0f, -1.0f);
+    // c0.0.19a_04: the new visual hotbar replaces the old top-right held
+    // block preview entirely, matching the real source: the Hud class's
+    // only 3D icon rendering is the hotbar slot loop below, no separate
+    // corner preview exists anymore (the highlighted hotbar slot is now
+    // the only "what am I holding" indicator). Background bar and
+    // selection highlight come from gui.png (a 256x64 atlas: bar sprite at
+    // (0,0) 182x22, highlight sprite at (0,22) 24x22, sliding 20px per
+    // slot). Item icons are real tiny 3D isometric block renders using the
+    // terrain atlas, not flat sprites
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texGui);
+    drawGuiBlit(screenWidth / 2 - 91, screenHeight - 22, 0, 0, 182, 22);
 
-    // reset state a screen's own drawing could have left in an unexpected
-    // place, so the preview always renders the same regardless of whether
-    // a menu is open this frame
+    int selectedSlot = 0;
+    for (int i = 0; i < 9; ++i) if (gHotbar[i] == selectedTileId) selectedSlot = i;
+    drawGuiBlit(screenWidth / 2 - 91 - 1 + selectedSlot * 20, screenHeight - 22 - 1, 0, 22, 24, 22);
+
     glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+
     glEnable(GL_ALPHA_TEST);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     glEnable(GL_TEXTURE_2D);
+    for (int i = 0; i < 9; ++i) {
+        glPushMatrix();
+        glTranslated((double)(screenWidth / 2 - 90 + i * 20), (double)(screenHeight - 16), -50.0);
+        glScalef(10.0f, 10.0f, 10.0f);
+        glTranslatef(1.0f, 0.5f, 0.0f);
+        glRotatef(-30.0f, 1, 0, 0);
+        glRotatef(45.0f, 0, 1, 0);
+        glTranslatef(-1.5f, 0.5f, 0.5f);
+        glScalef(-1.0f, -1.0f, -1.0f);
 
-    Tessellator_begin(&hudTess);
-    const Tile* hand = gTiles[selectedTileId];
-    if (hand && hand->render) {
-        hand->render(hand, &hudTess, &level, 0, -2, 0, 0);
+        Tessellator_begin(&hudTess);
+        const Tile* slotTile = gTiles[gHotbar[i]];
+        if (slotTile && slotTile->render) {
+            slotTile->render(slotTile, &hudTess, &level, 0, -2, 0, 0);
+        }
+        Tessellator_end(&hudTess);
+
+        glPopMatrix();
     }
-    Tessellator_end(&hudTess);
-
     glDisable(GL_TEXTURE_2D);
-    glPopMatrix();
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.18a_02", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.19a_04", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -926,8 +987,8 @@ static void handleGameplayKeys(GLFWwindow* w) {
     // c0.0.16a_02: T opens chat. Minecraft_setScreen releases the held
     // movement keys itself, same as any other screen opening.
     // c0.0.17a: T now does nothing at all without an active connection,
-    // instead of opening a chat screen whose Enter handler would crash --
-    // this is the real client's own fix for that singleplayer NPE dead end,
+    // instead of opening a chat screen whose Enter handler would crash.
+    // This is the real client's own fix for that singleplayer NPE dead end,
     // not a deviation this port needs to keep working around anymore
     int kT = glfwGetKey(w, GLFW_KEY_T);
     if (kT == GLFW_PRESS && prevT == GLFW_RELEASE && gConnected) {
@@ -992,10 +1053,15 @@ static void mineOrPlace(void) {
         // destroy
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-        bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
+        // c0.0.19a_04: the player's own break/place always uses the
+        // ungated Level_netSetTile, matching the real source calling
+        // netSetTile directly here, not the gated setTile. Only derivative
+        // world-simulation reactions (grass spread, liquid flow, falling
+        // blocks, sponge) route through the gated level_setTile/Level_swap
+        bool changed = Level_netSetTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
         if (t && changed) {
             // type field is the currently selected tile even on destroy,
-            // matching the real source -- the server ignores it for mode 0
+            // matching the real source; the server ignores it for mode 0
             if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, selectedTileId);
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
         }
@@ -1030,7 +1096,7 @@ static void mineOrPlace(void) {
             }
             if (!blocked) {
                 if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, selectedTileId);
-                level_setTile(&level, x, y, z, selectedTileId);
+                Level_netSetTile(&level, x, y, z, selectedTileId);
             }
         }
     }
@@ -1128,10 +1194,6 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     frustum_calculate(&frustum);
     LevelRenderer_cull(lr, &frustum);
 
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
-
     // c0.0.14a_08 merges the old lit+shadow solid passes into one, colored
     // per face by Level_getBrightness instead of a binary lit/shadow choice,
     // so zombies and particles no longer need a separate lit/shadow split
@@ -1204,6 +1266,14 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     drawGui(t);
 
     glfwSwapBuffers(window);
+
+    // c0.0.19a_04: new 100fps cap (Display.sync(100) in the real source)
+    static long long lastFrameTime = 0;
+    long long now = currentTimeMillis();
+    long long budget = 1000LL / 100LL;
+    long long elapsed = now - lastFrameTime;
+    if (lastFrameTime != 0 && elapsed < budget) sleepMillis((int)(budget - elapsed));
+    lastFrameTime = currentTimeMillis();
 }
 
 /* main loop */
@@ -1232,7 +1302,7 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
         for (int i = 0; i < timer.ticks; ++i) tick(p, window);
 
         // while connecting/downloading a level, skip world interaction and
-        // the normal render entirely -- the loading screen is drawn
+        // the normal render entirely. The loading screen is drawn
         // synchronously from inside tick()'s packet handling instead,
         // matching the real source's separate !isLoading render gate
         if (!gLoading) {
@@ -1296,6 +1366,19 @@ static void tick(Player* p, GLFWwindow* w) {
 
     gTickCount++;
 
+    // c0.0.19a_04: advance the water/lava animation one step and patch the
+    // result directly into the live terrain.png texture at that tile's
+    // atlas cell (16 pixels per cell, 16 cells per row)
+    glBindTexture(GL_TEXTURE_2D, texTerrain);
+    for (int i = 0; i < 2; ++i) {
+        TextureFX* fx = gTextureFX[i];
+        fx->tick(fx);
+        int cellX = (fx->tileId % 16) << 4;
+        int cellY = (fx->tileId / 16) << 4;
+        glTexSubImage2D(GL_TEXTURE_2D, 0, cellX, cellY, TEXTURE_FX_SIZE, TEXTURE_FX_SIZE,
+                         GL_RGBA, GL_UNSIGNED_BYTE, fx->pixels);
+    }
+
     // c0.0.17a: age no longer evicts a line from the backlog, only the 50
     // line cap does (see Minecraft_addChatLine). Age now only affects
     // render time visibility in the HUD, letting old messages persist in a
@@ -1305,14 +1388,15 @@ static void tick(Player* p, GLFWwindow* w) {
     }
 
     // matches f(): drains queued packets, then unconditionally broadcasts
-    // our own position every tick, no dirty check, no rate limiting -- even
-    // before our real SpawnPlayer(-1) arrives. The real client's own Player
-    // starts at exactly (0,0,0) in multiplayer (Entity's constructor always
-    // does setPos(0,0,0), and resetPos() is a no-op when level is null,
-    // which it is until LevelFinalize), so other clients genuinely do see a
-    // newly connecting player appear briefly at world origin before
-    // snapping to their real spawn point -- confirmed original quirk, not a
-    // bug, see the matching (0,0,0) reset in the connect branch of init()
+    // the local player's own position every tick, no dirty check, no rate
+    // limiting, even before its real SpawnPlayer(-1) arrives. The real
+    // client's own Player starts at exactly (0,0,0) in multiplayer (Entity's
+    // constructor always does setPos(0,0,0), and resetPos() is a no-op when
+    // level is null, which it is until LevelFinalize), so other clients
+    // genuinely do see a newly connecting player appear briefly at world
+    // origin before snapping to their real spawn point. Confirmed original
+    // quirk, not a bug, see the matching (0,0,0) reset in the connect
+    // branch of init()
     if (gConnecting) {
         if (NetConnection_pollConnecting(&gConn)) {
             gConnecting = false;
@@ -1321,7 +1405,10 @@ static void tick(Player* p, GLFWwindow* w) {
     }
     if (gConnected) {
         NetConnection_tick(&gConn);
-        if (gConnected) {
+        // c0.0.19a_04: withheld until the level finishes downloading, so the
+        // server doesn't see movement data arrive mid-download and throttle
+        // the client for "moving too fast" before it's even finished loading
+        if (gConnected && gConn.levelLoaded) {
             NetConnection_sendTeleportSelf(&gConn, p->e.x, p->e.y, p->e.z, p->e.yRotation, p->e.xRotation);
         }
     }
