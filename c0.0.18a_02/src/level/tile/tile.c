@@ -516,7 +516,11 @@ void Tile_registerAll(void) {
     registerTile(&TILE_GOLD_ORE,   14, 32, NULL);
     registerTile(&TILE_IRON_ORE,   15, 33, NULL);
     registerTile(&TILE_COAL_ORE,   16, 34, NULL);
-    registerTile(&TILE_LOG,        17,  0, Log_getTexture);
+    // textureId (used for break particles) is 20, not 0: confirmed directly
+    // against the real source's Log subclass, which sets its base texture
+    // field to 20 (the bark texture) in its constructor, on top of its own
+    // per face getTexture override
+    registerTile(&TILE_LOG,        17, 20, Log_getTexture);
     registerTile(&TILE_LEAVES,     18, 22, NULL);
 
     TILE_SAND.onTick   = TILE_GRAVEL.onTick   = FallingTile_onTick;
