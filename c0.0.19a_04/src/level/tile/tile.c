@@ -81,54 +81,6 @@ static void Tile_default_renderFace(const Tile* self, Tessellator* t, int x, int
     }
 }
 
-// Reversed winding, older fractional UV padding. Used by liquids to draw a
-// back face for the surface so it's visible from both sides, matches the
-// original source keeping this formula while renderFace moved to the
-// integer pixel one.
-static void Tile_renderBackFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
-    int tex = self->getTexture(self, face);
-    float u0 = (tex % 16) / 16.0f;
-    float u1 = u0 + 0.0624375f;
-    float v0 = (tex / 16) / 16.0f;
-    float v1 = v0 + 0.0624375f;
-
-    float x0 = x + self->xx0, x1 = x + self->xx1;
-    float y0 = y + self->yy0, y1 = y + self->yy1;
-    float z0 = z + self->zz0, z1 = z + self->zz1;
-
-    if (face == 0) {
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z0, u1, v0);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
-    } else if (face == 1) {
-        Tessellator_vertexUV(t, x0, y1, z1, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v1);
-    } else if (face == 2) {
-        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x1, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
-    } else if (face == 3) {
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z1, u0, v0);
-    } else if (face == 4) {
-        Tessellator_vertexUV(t, x0, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y1, z1, u1, v0);
-    } else if (face == 5) {
-        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
-        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
-        Tessellator_vertexUV(t, x1, y0, z0, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
-    }
-}
-
 // c0.0.14a_08: per face color is now the neighbor cell's brightness
 // (Level_getBrightness, 1.0 lit / 0.5 shadowed) times the same fixed
 // directional factors as before, replacing the old flat lit/shadow colors.
@@ -348,8 +300,15 @@ static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, in
 }
 
 static void Liquid_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
+    // the real source also draws a second, reversed winding copy of this
+    // same face right after (matches base class methods a() then b()),
+    // meant to make the liquid surface visible from both sides. Since
+    // GL_CULL_FACE is never enabled anywhere in this port (confirmed,
+    // matches the real client), a single quad already renders from both
+    // sides on its own, so the second, exactly coplanar copy is dropped
+    // here: it served no visual purpose and caused the water/lava surface
+    // to z fight with itself, showing as flicker and light colored seams
     Tile_default_renderFace(self, t, x, y, z, face);
-    Tile_renderBackFace(self, t, x, y, z, face);
 }
 
 static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
@@ -403,15 +362,18 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
         float y0 = (float)y, y1 = (float)y + 1.0f;
         float z0 = z + 0.5f - za, z1 = z + 0.5f + za;
 
+        // the real source draws this same quad a second time right after,
+        // reversed (opposite winding), meant to make it visible from both
+        // sides without relying on two sided rendering. Since GL_CULL_FACE
+        // is never enabled anywhere in this port (confirmed, matches the
+        // real client), a single quad already renders from both sides on its
+        // own, so the second, exactly coplanar copy is dropped here: it
+        // served no visual purpose and caused the two crossing quads to
+        // z fight with themselves, flickering
         Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
         Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
         Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
         Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
-
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
     }
 }
 
