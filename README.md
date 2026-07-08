@@ -108,6 +108,18 @@ Released June 19-20 2009, accumulating five real point releases (0.0.19a through
 * Chat can now send `;`, on top of the existing allowed characters
 * Singleplayer world generation: smaller beaches/shorelines, and caves are noticeably sparser and more broken up rather than long continuous tunnels
 
+### c0.0.20a_02
+
+Released June 20 2009, accumulating five real point releases (0.0.19a_05 through 0.0.20a_02) paired with dedicated server 1.8.2.
+
+* New tiles: 16 dyed Cloth colors, Gold Block, Dandelion, Rose, Brown Mushroom, and Red Mushroom
+* New inventory screen (B key): pick any placeable tile from a full grid instead of just the 9 hotbar slots
+* Bedrock can no longer be broken unless the player has operator status
+* Mouse wheel now cycles the hotbar in the opposite direction from before
+* Other players and mobs now catch real directional lighting instead of flat shading, and usernames are easier to read against it
+* The 100 FPS cap added last version is removed again
+* Water no longer flickers or shows light colored seams at tile borders, and no longer sometimes looks fully opaque
+
 ## Building
 
 ### Windows
@@ -162,6 +174,8 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 
 `server/server1.6/` pairs with the c0.0.19a_04 client, same build/run/DLL layout again. Admin commands can now also be typed directly into the server's own console (no in-game connection needed) using the same names as the in-game chat commands but without the leading `/` — e.g. typing `kick SomePlayer` at the console. Chat is now rate-limited: sending too much too fast mutes that player for about 8 seconds, with a message telling them so. Glass and Sponge are placeable (matching the client's new hotbar), replacing Cobblestone and Sand in the placeable-tile list. `server.properties` gains a `max-connections` setting (default 3) controlling how many simultaneous connections are allowed from the same address.
 
+`server/server1.8.2/` pairs with the c0.0.20a_02 client, same build/run/DLL layout again. Bedrock can no longer be destroyed by a regular player at all — server1.6 had no protection against this whatsoever. A new `/solid` admin command toggles placing unbreakable, Bedrock-backed "stone" instead of normal stone. `/tp` now works as a shorthand for `/teleport`. The placeable-tile whitelist grows to match the client's new tiles and its full inventory screen.
+
 ## References
 
 * [Java Edition Classic 0.0.11a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.11a)
@@ -176,3 +190,8 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.19a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_02)
 * [Java Edition Classic 0.0.19a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_03)
 * [Java Edition Classic 0.0.19a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_04)
+* [Java Edition Classic 0.0.19a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_05)
+* [Java Edition Classic 0.0.19a_06](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_06)
+* [Java Edition Classic 0.0.20a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a)
+* [Java Edition Classic 0.0.20a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_01)
+* [Java Edition Classic 0.0.20a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_02)
