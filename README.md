@@ -122,7 +122,7 @@ Released June 20 2009, accumulating five real point releases (0.0.19a_05 through
 
 ### c0.0.23a_01
 
-Released over several months across 2010-2011, accumulating ten real point releases (0.0.21a through 0.0.23a_01), by far the largest jump this project has done. Client only, no paired server release this time.
+Released July 11 2009, accumulating ten real point releases (0.0.21a through 0.0.23a_01), by far the largest jump this project has done. Paired with the same server1.8.2 as c0.0.20a_02, no new server release this time.
 
 * Sound and music: footsteps and block breaking now make a sound matching the tile (stone, grass, gravel, wood, cloth, or a metallic clink for glass and gold block), and an ambient music track plays every 5 to 20 minutes
 * New Options menu (from the pause menu): toggle music, sound, mouse Y invert, and the FPS/chunk-updates counter (now hidden by default), plus a Render distance setting
@@ -189,7 +189,7 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 
 `server/server1.6/` pairs with the c0.0.19a_04 client, same build/run/DLL layout again. Admin commands can now also be typed directly into the server's own console (no in-game connection needed) using the same names as the in-game chat commands but without the leading `/` — e.g. typing `kick SomePlayer` at the console. Chat is now rate-limited: sending too much too fast mutes that player for about 8 seconds, with a message telling them so. Glass and Sponge are placeable (matching the client's new hotbar), replacing Cobblestone and Sand in the placeable-tile list. `server.properties` gains a `max-connections` setting (default 3) controlling how many simultaneous connections are allowed from the same address.
 
-`server/server1.8.2/` pairs with the c0.0.20a_02 client, same build/run/DLL layout again. Bedrock can no longer be destroyed by a regular player at all — server1.6 had no protection against this whatsoever. A new `/solid` admin command toggles placing unbreakable, Bedrock-backed "stone" instead of normal stone. `/tp` now works as a shorthand for `/teleport`. The placeable-tile whitelist grows to match the client's new tiles and its full inventory screen.
+`server/server1.8.2/` pairs with the c0.0.20a_02 client, same build/run/DLL layout again. Bedrock can no longer be destroyed by a regular player at all — server1.6 had no protection against this whatsoever. A new `/solid` admin command toggles placing unbreakable, Bedrock-backed "stone" instead of normal stone. `/tp` now works as a shorthand for `/teleport`. The placeable-tile whitelist grows to match the client's new tiles and its full inventory screen. Also pairs with the later c0.0.23a_01 client unchanged, since that jump was client-only with no new server release.
 
 ## References
 
