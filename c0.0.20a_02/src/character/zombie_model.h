@@ -13,6 +13,6 @@ typedef struct {
 } ZombieModel;
 
 void ZombieModel_init  (ZombieModel* m);
-void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot);
+void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot, float scale);
 
 #endif

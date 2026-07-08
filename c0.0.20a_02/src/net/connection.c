@@ -16,6 +16,7 @@ extern void Minecraft_installNetworkLevel(int w, int d, int h, unsigned char* bl
 extern void Minecraft_addChatLine(const char* text);
 extern void Minecraft_networkSetBlock(int x, int y, int z, int type);
 extern void Minecraft_showErrorScreen(const char* title, const char* message);
+extern void Minecraft_setUserType(int type);
 extern bool Minecraft_networkSelfSpawn(int x, int y, int z, int yaw, int pitch);
 extern void Minecraft_networkSelfTeleport(int x, int y, int z, int yaw, int pitch);
 extern bool Minecraft_spawnNetworkPlayer(int id, const char* name, int x, int y, int z, float yRot, float xRot);
@@ -81,9 +82,10 @@ int NetConnection_finishConnect(NetConnection* c) {
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 5);
+    writeByte(c, 6);
     writeString(c, c->username);
     writeString(c, c->mppass);
+    writeByte(c, 0);
     c->loggedIn = true;
     return 1;
 }
@@ -147,6 +149,7 @@ static bool handle(NetConnection* c, int id, const unsigned char* f) {
             readString(f + 1 + PACKET_STRING_LEN, motd);
             Minecraft_beginLevelLoading(name);
             Minecraft_levelLoadUpdate(motd);
+            Minecraft_setUserType((signed char)f[1 + 2 * PACKET_STRING_LEN]);
             break;
         }
         case PACKET_PING:

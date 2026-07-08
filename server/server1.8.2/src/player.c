@@ -152,7 +152,7 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     if (other) Player_kick(other, "You logged in from another computer.");
     char who[512], n[JSTR_MAX * 3];
     Log_info("%s logged in as %s", Player_toString(p, who, sizeof who), jstr_c(&name, n, sizeof n));
-    if (protocol != 5) {
+    if (protocol != 6) {
         Player_kick(p, "Wrong protocol version.");
         return;
     }
@@ -162,14 +162,20 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     }
     p->loggedIn = true;
     jstr_copy(&p->name, &name);
-    PacketValue reply[3] = { { .i = 5 }, { .s = &p->server->serverName }, { .s = &p->server->motd } };
+    // 100 tells the client it's an op
+    PacketValue reply[4] = { { .i = 6 }, { .s = &p->server->serverName }, { .s = &p->server->motd },
+                             { .i = PlayerList_contains(&p->server->admins, &name) ? 100 : 0 } };
     sendDirect(p, PACKET_LOGIN, reply);
     startLevelJob(p);
     PlayerList_add(&p->server->playerList, &name);
 }
 
 // what a client may place, anything else is a cheat
-static const int PLACEABLE[9] = { TILE_ROCK, TILE_DIRT, TILE_SPONGE, TILE_WOOD, TILE_BUSH, TILE_LOG, TILE_LEAVES, TILE_GLASS, TILE_GRAVEL };
+static const int PLACEABLE[32] = {
+    TILE_ROCK, TILE_STONEBRICK, TILE_DIRT, TILE_WOOD, TILE_LOG, TILE_LEAVES, TILE_BUSH, TILE_DANDELION, TILE_ROSE,
+    TILE_BROWN_MUSHROOM, TILE_RED_MUSHROOM, TILE_SAND, TILE_GRAVEL, TILE_GLASS, TILE_SPONGE, TILE_GOLD,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+};
 
 static void broadcastText(MinecraftServer* s, const JStr* text) {
     PacketValue v[2] = { { .i = -1 }, { .s = text } };
@@ -177,7 +183,7 @@ static void broadcastText(MinecraftServer* s, const JStr* text) {
 }
 
 static void queueAction(Player* p, int id, const PacketValue* v, const bool* present) {
-    if (p->actionCount > 400) {
+    if (p->actionCount > 1200) {
         cheat(p, "Too much lag");
         return;
     }
@@ -219,21 +225,26 @@ static void place(Player* p, const PendingAction* a) {
         cheat(p, "Distance");
         return;
     }
+    // the tile object is looked up in the list, an id without a tile is never in it
+    const Tile* tile = Tile_get(type);
     bool allowed = false;
-    for (int i = 0; i < 9 && !allowed; ++i) if (PLACEABLE[i] == type) allowed = true;
+    for (int i = 0; i < 32 && tile && !allowed; ++i) if (PLACEABLE[i] == tile->id) allowed = true;
     if (!allowed) {
         cheat(p, "Tile type");
         return;
     }
     if (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) return;
     if (mode == 0) {
-        Level_setTile(level, x, y, z, 0);
+        // only admins break bedrock
+        if (Level_getTile(level, x, y, z) != TILE_UNBREAKABLE || PlayerList_contains(&p->server->admins, &p->name)) {
+            Level_setTile(level, x, y, z, 0);
+        }
         return;
     }
     // only into air or a liquid, anything goes
     const Tile* t = Tile_get(Level_getTile(level, x, y, z));
     if (t == NULL || t->id == TILE_WATER || t->id == TILE_CALM_WATER || t->id == TILE_LAVA || t->id == TILE_CALM_LAVA) {
-        Level_setTile(level, x, y, z, type);
+        Level_setTile(level, x, y, z, p->solid && type == TILE_ROCK ? TILE_UNBREAKABLE : type);
         const Tile* placed = Tile_req(type);
         if (placed->onPlace) placed->onPlace(placed, level, x, y, z);
     }

@@ -161,12 +161,11 @@ void NetworkPlayer_render(NetworkPlayer* np, float a) {
     float z = np->base.prevZ + (np->base.z - np->base.prevZ) * a;
     glTranslatef(x, y - np->base.heightOffset, z);
     glScalef(1.0f, -1.0f, 1.0f);
-    glScalef(size, size, size);
-    glTranslatef(0.0f, yy, 0.0f);
+    glTranslatef(0.0f, yy * size, 0.0f);
     glRotatef(bodyYRot, 0.0f, 1.0f, 0.0f);
     glDisable(GL_ALPHA_TEST);
     glScalef(-1.0f, 1.0f, 1.0f);
-    ZombieModel_render(&sModel, anim, run, (float)np->tickCount + a, headYRot, headXRot);
+    ZombieModel_render(&sModel, anim, run, (float)np->tickCount + a, headYRot, headXRot, size);
     glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
@@ -178,11 +177,17 @@ void NetworkPlayer_render(NetworkPlayer* np, float a) {
     float s = 0.05f;
     glScalef(0.05f, -s, s);
     glTranslatef((float)(-Font_width(font, np->name)) / 2.0f, 0.0f, 0.0f);
+    // the entity light is on here, the front name is drawn without it
+    glNormal3f(1.0f, -1.0f, 1.0f);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_LIGHT0);
     if (equalsIgnoreCase(np->name, "Notch")) {
         Font_draw(font, &sNameTess, np->name, 0, 0, 0xFFFF00);
     } else {
         Font_draw(font, &sNameTess, np->name, 0, 0, 0xFFFFFF);
     }
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHTING);
     glTranslatef(1.0f, 1.0f, -0.05f);
     Font_draw(font, &sNameTess, np->name, 0, 0, 0x505050);
     glPopMatrix();

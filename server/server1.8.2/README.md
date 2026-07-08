@@ -1,20 +1,19 @@
-# Dedicated server 1.6
+# Dedicated server 1.8.2
 
 [Back to all versions](../../README.md)
 
-Released June 19, 2009, for the 0.0.19a_04 client.
+Released June 20, 2009, for the 0.0.20a_02 client. It also works with 0.0.23a_01, there was no new server for that one.
 
 ## What changed
 
-- Commands can be typed into the server console too, without the `/`
-- Chat is rate limited, spamming mutes you for a while
-- Glass and sponge can be placed, sponges dry the water around them
-- `max-connections` in `server.properties` sets how many connections one ip can have, 3 by default
-- Block changes and movement are handled once a game tick instead of as they arrive, with kicks for
-  "Too much lag" (over 400 waiting) and "Too much clicking!"
-- Cobblestone and sand can't be placed any more
-- Admin commands are logged as "<name> admins: <command>", one without a name no longer drops the admin
-- `server.log` is written after every line
+- Only admins can break bedrock
+- /solid makes stone you place come out as bedrock
+- /tp works the same as /teleport
+- Cloth, gold block and the new plants can be placed, cobblestone and sand again too
+- Flowers and mushrooms die off dirt or grass or in the dark, like saplings (mushrooms too)
+- The login tells the client if it's an op
+- Commands can start with any number of `/`
+- "Too much lag" only past 1200 waiting block changes and moves
 
 ## How it was ported
 
@@ -31,9 +30,9 @@ Like the original, `max-connections` is read from `server.properties` but always
 
 ## Playing on it
 
-Works with the [c0.0.19a_04](../../c0.0.19a_04/) client here and with the original Java one. Start the server, then the client from its folder:
+Works with the [c0.0.20a_02](../../c0.0.20a_02/) and [c0.0.23a_01](../../c0.0.23a_01/) clients here and with the original Java ones. Start the server, then the client from its folder:
 ```bash
-cd mc-classic-c/c0.0.19a_04
+cd mc-classic-c/c0.0.20a_02
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```
 
@@ -61,7 +60,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/server/server1.6/src
+cd mc-classic-c/server/server1.8.2/src
 make
 ```
 
@@ -78,4 +77,4 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic server 1.6](https://minecraft.wiki/w/Java_Edition_Classic_server_1.6)
+- [minecraft.wiki: Java Edition Classic server 1.8.2](https://minecraft.wiki/w/Java_Edition_Classic_server_1.8.2)

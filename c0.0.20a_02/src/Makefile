@@ -18,7 +18,7 @@ SRC = minecraft.c player.c timer.c  hitresult.c jrandom.c java_sort.c java_hashm
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
       renderer/frustum.c renderer/texture_fx.c gui/font.c gui/screen.c gui/pause_screen.c gui/new_level_screen.c \
-      gui/chat_screen.c gui/error_screen.c \
+      gui/chat_screen.c gui/error_screen.c gui/block_select_screen.c \
       net/net_socket.c net/packet.c net/connection.c net/network_player.c
 
 OBJ := $(SRC:.c=.o)
@@ -50,9 +50,9 @@ ifeq ($(OS),Windows_NT)
     EXE := minecraft.exe
     # MSYS2 / MinGW (assumes -lglfw3 -lglew32 in your env)
     ifeq ($(BUILD),release)
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm -mwindows
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -mwindows
     else
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32
     endif
 endif
 

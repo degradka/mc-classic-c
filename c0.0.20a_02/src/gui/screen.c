@@ -73,6 +73,7 @@ void Screen_initBase(Screen* s, Font* font, int width, int height) {
     s->render = Screen_render;
     s->keyPressed = Screen_keyPressed;
     s->buttonClicked = NULL;
+    s->mouseClicked = Screen_mouseClicked;
     s->tick = NULL;
     s->opened = NULL;
     s->removed = NULL;
@@ -80,6 +81,15 @@ void Screen_initBase(Screen* s, Font* font, int width, int height) {
 
 void Screen_addButton(Screen* s, int id, int x, int y, int w, int h, const char* msg) {
     if (s->buttonCount < SCREEN_MAX_BUTTONS) Button_init(&s->buttons[s->buttonCount++], id, x, y, w, h, msg);
+}
+
+void Screen_mouseClicked(Screen* s, int x, int y, int button) {
+    if (button != 0) return;
+    for (int i = 0; i < s->buttonCount; i++) {
+        Button* b = &s->buttons[i];
+        if (!b->enabled || x < b->x || y < b->y || x >= b->x + b->w || y >= b->y + b->h) continue;
+        if (s->buttonClicked) s->buttonClicked(s, b);
+    }
 }
 
 void Screen_render(Screen* s, int xm, int ym) {

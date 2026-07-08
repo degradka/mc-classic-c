@@ -7,8 +7,6 @@
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
-  #include <mmsystem.h>
-  #include <stdbool.h>
 #elif defined(__APPLE__)
   #include <mach/mach_time.h>
   #include <time.h>
@@ -74,20 +72,24 @@ long long currentTimeMillis(void) {
 #endif
 }
 
-// the clock counts milliseconds on windows
+// System.nanoTime in milliseconds, the sync factor eases a fifth of the way each second
 void Timer_advanceTime(Timer* timer) {
     long long now = currentTimeMillis();
     long long passed = now - timer->lastSyncSysClock;
+    long long hr = getCurrentTimeInNanoseconds() / 1000000LL;
     if (passed > 1000LL) {
-        long long hr = getCurrentTimeInNanoseconds() / 1000000LL;
         long long hrPassed = hr - timer->lastSyncHRClock;
-        timer->timeSyncAdjustment = (double)passed / (double)hrPassed;
+        double ratio = (double)passed / (double)hrPassed;
+        timer->timeSyncAdjustment += (ratio - timer->timeSyncAdjustment) * (double)0.2f;
         timer->lastSyncSysClock = now;
         timer->lastSyncHRClock = hr;
     }
-    if (passed < 0LL) timer->lastSyncSysClock = now;
+    if (passed < 0LL) {
+        timer->lastSyncSysClock = now;
+        timer->lastSyncHRClock = hr;
+    }
 
-    double hrTime = (double)(getCurrentTimeInNanoseconds() / 1000000LL) / 1000.0;
+    double hrTime = (double)hr / 1000.0;
     double delta = (hrTime - timer->lastHRTime) * timer->timeSyncAdjustment;
     timer->lastHRTime = hrTime;
     if (delta < 0.0) delta = 0.0;
@@ -98,32 +100,4 @@ void Timer_advanceTime(Timer* timer) {
     if (timer->ticks > 100) timer->ticks = 100;
     timer->passedTime -= (float)timer->ticks;
     timer->partialTicks = timer->passedTime;
-}
-
-static long long syncThen = 0;
-static long long syncLate = 0;
-
-void Display_sync(int fps) {
-#if defined(_WIN32)
-    // short sleeps turn on the 1ms windows timer, without it Sleep(1) takes ~15ms
-    static bool fineTimer = false;
-    if (!fineTimer) {
-        timeBeginPeriod(1);
-        fineTimer = true;
-    }
-#endif
-    long long gapTo = 1000LL / fps + syncThen;
-    long long now = getCurrentTimeInNanoseconds() / 1000000LL;
-    while (gapTo > now + syncLate) {
-#if defined(_WIN32)
-        Sleep(1);
-#else
-        struct timespec ts = { 0, 1000000L };
-        nanosleep(&ts, NULL);
-#endif
-        now = getCurrentTimeInNanoseconds() / 1000000LL;
-    }
-    if (gapTo < now) syncLate = now - gapTo;
-    else syncLate = 0;
-    syncThen = now;
 }

@@ -5,7 +5,7 @@
 #include "../../jexc.h"
 #include <string.h>
 
-static Tile tiles[21];
+static Tile tiles[42];
 static const Tile* registry[256];
 bool Tile_shouldTick[256];
 
@@ -181,6 +181,14 @@ static void Sponge_onRemoved(const Tile* t, Level* level, int x, int y, int z) {
     }
 }
 
+static void bush(int id) {
+    Tile* t = add(id);
+    t->blocksLight = false;
+    t->solid = false;
+    t->tick = Bush_tick;
+    Tile_shouldTick[id] = true;
+}
+
 void Tile_registerAll(void) {
     memset(registry, 0, sizeof registry);
     memset(Tile_shouldTick, 0, sizeof Tile_shouldTick);
@@ -190,11 +198,7 @@ void Tile_registerAll(void) {
     add(TILE_DIRT);
     add(TILE_STONEBRICK);
     add(TILE_WOOD);
-    Tile* bush = add(TILE_BUSH);
-    bush->blocksLight = false;
-    bush->solid = false;
-    bush->tick = Bush_tick;
-    Tile_shouldTick[TILE_BUSH] = true;
+    bush(TILE_BUSH);
     add(TILE_UNBREAKABLE);
     liquid(TILE_WATER, LIQUID_WATER, false);
     liquid(TILE_CALM_WATER, LIQUID_WATER, true);
@@ -218,4 +222,8 @@ void Tile_registerAll(void) {
     Tile* glass = add(TILE_GLASS);
     glass->blocksLight = false;
     glass->solid = false;
+    for (int id = TILE_CLOTH_FIRST; id <= TILE_CLOTH_LAST; ++id) add(id);
+    // flowers and mushrooms are the sapling's class, they die the same way
+    for (int id = TILE_DANDELION; id <= TILE_RED_MUSHROOM; ++id) bush(id);
+    add(TILE_GOLD);
 }

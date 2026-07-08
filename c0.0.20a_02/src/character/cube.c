@@ -59,15 +59,15 @@ Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
 
 void Cube_setPos(Cube* c, float x, float y, float z) { c->x = x; c->y = y; c->z = z; }
 
-void Cube_render(const Cube* c) {
+void Cube_render(const Cube* c, float scale) {
     glPushMatrix();
-    glTranslatef(c->x, c->y, c->z);
+    glTranslatef(c->x * scale, c->y * scale, c->z * scale);
     glRotatef(c->zRot * 57.29578f, 0.0f, 0.0f, 1.0f);
     glRotatef(c->yRot * 57.29578f, 0.0f, 1.0f, 0.0f);
     glRotatef(c->xRot * 57.29578f, 1.0f, 0.0f, 0.0f);
 
     glBegin(GL_QUADS);
-    for (int i = 0; i < 6; ++i) Polygon_render(&c->polys[i]);
+    for (int i = 0; i < 6; ++i) Polygon_render(&c->polys[i], scale);
     glEnd();
 
     glPopMatrix();

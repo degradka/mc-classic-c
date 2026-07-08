@@ -19,6 +19,8 @@ struct Screen {
     void (*render)(Screen* self, int xMouse, int yMouse);
     void (*keyPressed)(Screen* self, char eventCharacter, int eventKey);
     void (*buttonClicked)(Screen* self, Button* button);
+    // a press of any mouse button, the base one clicks the buttons with the left one
+    void (*mouseClicked)(Screen* self, int x, int y, int button);
     void (*tick)(Screen* self);
     // called once it's the current screen, may be NULL
     void (*opened)(Screen* self);
@@ -30,6 +32,7 @@ void Screen_initBase(Screen* s, Font* font, int width, int height);
 void Screen_addButton(Screen* s, int id, int x, int y, int w, int h, const char* msg);
 // the base render, draws the buttons
 void Screen_render(Screen* s, int xMouse, int yMouse);
+void Screen_mouseClicked(Screen* s, int x, int y, int button);
 // escape closes the screen and grabs the mouse
 void Screen_keyPressed(Screen* s, char eventCharacter, int eventKey);
 

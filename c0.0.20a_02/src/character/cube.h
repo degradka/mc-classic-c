@@ -15,6 +15,6 @@ typedef struct {
 void  Cube_init(Cube* c, int texOffX, int texOffY);
 Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d);
 void  Cube_setPos(Cube* c, float x, float y, float z);
-void  Cube_render(const Cube* c);
+void  Cube_render(const Cube* c, float scale);
 
 #endif

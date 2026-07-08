@@ -255,6 +255,12 @@ Tile TILE_LOG;
 Tile TILE_LEAVES;
 Tile TILE_SPONGE;
 Tile TILE_GLASS;
+Tile TILE_CLOTH[16];
+Tile TILE_DANDELION;
+Tile TILE_ROSE;
+Tile TILE_BROWN_MUSHROOM;
+Tile TILE_RED_MUSHROOM;
+Tile TILE_GOLD_BLOCK;
 
 static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
@@ -443,9 +449,9 @@ static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
     t->calmTileId = calm ? id : id + 1;
     float f = 0.01f;
     float f2 = 0.1f;
-    t->xx0 = 0.0f - f;
-    t->yy0 = 0.0f - f2 - f;
-    t->zz0 = 0.0f - f;
+    t->xx0 = f + 0.0f;
+    t->yy0 = 0.0f - f2 + f;
+    t->zz0 = f + 0.0f;
     t->xx1 = f + 1.0f;
     t->yy1 = 1.0f - f2 + f;
     t->zz1 = f + 1.0f;
@@ -552,16 +558,26 @@ void Tile_registerAll(void) {
     registerTile(&TILE_LEAVES,     18, 22, NULL);
     registerTile(&TILE_SPONGE,     19, 48, NULL);
     registerTile(&TILE_GLASS,      20, 49, NULL);
+    for (int i = 0; i < 16; i++) registerTile(&TILE_CLOTH[i], 21 + i, 64 + i, NULL);
+    registerTile(&TILE_DANDELION,  37, 13, NULL);
+    registerTile(&TILE_ROSE,       38, 12, NULL);
+    registerTile(&TILE_BROWN_MUSHROOM, 39, 29, NULL);
+    registerTile(&TILE_RED_MUSHROOM,   40, 28, NULL);
+    registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
 
     TILE_GRASS.shouldTick = true;
     TILE_GRASS.onTick     = Grass_onTick;
 
-    TILE_BUSH.shouldTick  = true;
-    TILE_BUSH.isSolid     = Bush_isSolid;
-    TILE_BUSH.blocksLight = Bush_blocksLight;
-    TILE_BUSH.getAABB     = Bush_getAABB;
-    TILE_BUSH.render      = Bush_render;
-    TILE_BUSH.onTick      = Bush_onTick;
+    // flowers and mushrooms are bushes too
+    Tile* bushes[5] = { &TILE_BUSH, &TILE_DANDELION, &TILE_ROSE, &TILE_BROWN_MUSHROOM, &TILE_RED_MUSHROOM };
+    for (int i = 0; i < 5; i++) {
+        bushes[i]->shouldTick  = true;
+        bushes[i]->isSolid     = Bush_isSolid;
+        bushes[i]->blocksLight = Bush_blocksLight;
+        bushes[i]->getAABB     = Bush_getAABB;
+        bushes[i]->render      = Bush_render;
+        bushes[i]->onTick      = Bush_onTick;
+    }
 
     TILE_SAND.onPlace           = Falling_onPlace;
     TILE_SAND.neighborChanged   = Falling_neighborChanged;

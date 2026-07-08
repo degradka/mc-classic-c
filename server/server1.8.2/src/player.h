@@ -50,6 +50,8 @@ typedef struct Player {
     int64_t connectTime;
     // kicked, everything it sends after that is ignored
     bool kicked;
+    // /solid, stone goes in as bedrock
+    bool solid;
     // chat flood and click counters, both cool down every tick
     int chatter;
     int clicks;

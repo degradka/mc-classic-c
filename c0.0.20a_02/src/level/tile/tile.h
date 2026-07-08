@@ -82,6 +82,13 @@ extern Tile TILE_LOG;        // id=17
 extern Tile TILE_LEAVES;     // id=18
 extern Tile TILE_SPONGE;     // id=19
 extern Tile TILE_GLASS;      // id=20
+// 21 to 36, the 16 cloth colors
+extern Tile TILE_CLOTH[16];
+extern Tile TILE_DANDELION;  // id=37
+extern Tile TILE_ROSE;       // id=38
+extern Tile TILE_BROWN_MUSHROOM; // id=39
+extern Tile TILE_RED_MUSHROOM;   // id=40
+extern Tile TILE_GOLD_BLOCK; // id=41
 
 void Tile_registerAll(void);
 

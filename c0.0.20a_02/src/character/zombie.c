@@ -67,11 +67,11 @@ void Zombie_render(const Zombie* z, float partialTicks) {
                  z->base.prevY + (z->base.y - z->base.prevY) * partialTicks,
                  z->base.prevZ + (z->base.z - z->base.prevZ) * partialTicks);
     glScalef(1.0f, -1.0f, 1.0f);
-    glScalef(size, size, size);
-    glTranslatef(0.0f, yy, 0.0f);
+    glTranslatef(0.0f, yy * size, 0.0f);
     glRotatef(z->rotation * 57.29578f + 180.0f, 0.0f, 1.0f, 0.0f);
+    glScalef(-1.0f, 1.0f, 1.0f);
 
-    ZombieModel_render(&z->model, (float)time, 1.0f, 0.0f, 0.0f, 0.0f);
+    ZombieModel_render(&z->model, (float)time, 1.0f, 0.0f, 0.0f, 0.0f, size);
 
     glPopMatrix();
     glDisable(GL_TEXTURE_2D);

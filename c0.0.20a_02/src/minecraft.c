@@ -36,6 +36,7 @@
 #include "gui/new_level_screen.h"
 #include "gui/chat_screen.h"
 #include "gui/error_screen.h"
+#include "gui/block_select_screen.h"
 
 static GLFWwindow*    window;
 // the level can be gone while a server level downloads
@@ -48,9 +49,15 @@ static ParticleEngine particleEngine;
 
 static int editMode = 0;
 static int yMouseAxis = 1;
-static int paintTexture = 1;
-// the blocks the number keys, the wheel and the middle button pick from
-static int palette[9];
+// what B offers, the inventory starts with the first 9
+const int Minecraft_blockList[] = { 1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
+                                    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36 };
+const int Minecraft_blockListCount = 32;
+// the player's 9 slots and the selected one
+static int inventory[9];
+static int selectedSlot = 0;
+// from the server's login, 100 and up may break bedrock
+static int userType = 0;
 
 static int texTerrain = 0;
 static int texGui = 0;
@@ -85,6 +92,7 @@ static int ticksRan = 0;
 static int lastClickTick = 0;
 
 static PauseScreen    pauseScreen;
+static BlockSelectScreen blockSelectScreen;
 static NewLevelScreen newLevelScreen;
 static ChatScreen     chatScreen;
 static ErrorScreen    errorScreen;
@@ -227,6 +235,32 @@ void Minecraft_setScreen(Screen* s) {
     Minecraft_grabMouse();
 }
 
+static int inventoryIndexOf(int id) {
+    for (int i = 0; i < 9; i++) {
+        if (inventory[i] == id) return i;
+    }
+    return -1;
+}
+
+// a block already in another slot swaps places with the selected one
+void Minecraft_inventoryReplace(int id) {
+    int i = inventoryIndexOf(id);
+    if (i >= 0) inventory[i] = inventory[selectedSlot];
+    inventory[selectedSlot] = id;
+}
+
+const Level* Minecraft_getLevel(void) {
+    return &level;
+}
+
+int Minecraft_getTerrainTexture(void) {
+    return texTerrain;
+}
+
+void Minecraft_setUserType(int type) {
+    userType = type;
+}
+
 void Minecraft_showPauseScreen(void) {
     if (errorShown()) return;
     int sw, sh;
@@ -249,6 +283,20 @@ void Minecraft_showErrorScreen(const char* t, const char* message) {
     guiSize(&sw, &sh);
     ErrorScreen_init(&errorScreen, &gFont, sw, sh, t, message);
     Minecraft_setScreen((Screen*)&errorScreen);
+}
+
+// leaves an open pause screen alone
+static void pause(void) {
+    if (screen == (Screen*)&pauseScreen) return;
+    Minecraft_showPauseScreen();
+}
+
+static void showBlockSelectScreen(void) {
+    if (errorShown()) return;
+    int sw, sh;
+    guiSize(&sw, &sh);
+    BlockSelectScreen_init(&blockSelectScreen, &gFont, sw, sh);
+    Minecraft_setScreen((Screen*)&blockSelectScreen);
 }
 
 static void showChatScreen(void) {
@@ -492,6 +540,8 @@ void Minecraft_sendChat(const char* text) {
 static void setupFog(void) {
     GLfloat c[4] = { fogRed, fogGreen, fogBlue, 1.0f };
     glFogfv(GL_FOG_COLOR, c);
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     const Tile* currentTile = gTiles[Level_getTile(&level, (int)player.e.x, (int)(player.e.y + 0.12f), (int)player.e.z)];
     if (currentTile && currentTile->liquidType != LIQUID_NONE) {
         glFogi(GL_FOG_MODE, GL_EXP);
@@ -516,6 +566,30 @@ static void setupFog(void) {
     glEnable(GL_LIGHTING);
 }
 
+// entities get one light from above and to the side
+static void setupEntityLight(bool on) {
+    if (!on) {
+        glDisable(GL_LIGHTING);
+        glDisable(GL_LIGHT0);
+        return;
+    }
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    float a = 0.7f;
+    float d = 0.3f;
+    float len = (float)sqrt(0.0f * 0.0f + -1.0f * -1.0f + 0.5f * 0.5f);
+    GLfloat pos[4] = { 0.0f / len, -1.0f / len, 0.5f / len, 0.0f };
+    GLfloat diffuse[4] = { d, d, d, 1.0f };
+    GLfloat ambient[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    GLfloat model[4] = { a, a, a, 1.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, pos);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, model);
+}
+
 /* boot and shutdown */
 
 static int init(void) {
@@ -531,9 +605,9 @@ static int init(void) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
 
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.19a_04", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.20a_02", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.19a_04", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.20a_02", NULL, NULL);
     }
 
     if (!window) {
@@ -568,13 +642,11 @@ static int init(void) {
     glMatrixMode(GL_MODELVIEW);
 
     Tile_registerAll();
-    int p[9] = { TILE_ROCK.id, TILE_DIRT.id, TILE_SPONGE.id, TILE_WOOD.id, TILE_BUSH.id,
-                 TILE_LOG.id, TILE_LEAVES.id, TILE_GLASS.id, TILE_GRAVEL.id };
     LavaFX_init(&lavaFX, TILE_LAVA.textureId);
     lavaFX.step(&lavaFX);
     WaterFX_init(&waterFX, TILE_WATER.textureId);
     waterFX.step(&waterFX);
-    memcpy(palette, p, sizeof(palette));
+    for (int i = 0; i < 9; i++) inventory[i] = Minecraft_blockList[i];
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texGui     = loadTexture("resources/gui.png", GL_NEAREST);
@@ -784,22 +856,25 @@ static void handleMouseClick(void) {
     }
     const Tile* oldTile = gTiles[Level_getTile(&level, x, y, z)];
     if (editMode == 0) {
+        // bedrock only breaks for ops
+        if (oldTile == &TILE_UNBREAKABLE && userType < 100) return;
         bool changed = Level_netSetTile(&level, x, y, z, 0);
         if (oldTile && changed) {
-            if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, paintTexture);
+            if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, inventory[selectedSlot]);
             Tile_onDestroy(oldTile, &level, x, y, z, &particleEngine);
         }
         return;
     }
+    int id = inventory[selectedSlot];
     const Tile* there = gTiles[Level_getTile(&level, x, y, z)];
     if (there && there != &TILE_WATER && there != &TILE_CALM_WATER && there != &TILE_LAVA && there != &TILE_CALM_LAVA) return;
-    const Tile* tile = gTiles[paintTexture];
+    const Tile* tile = gTiles[id];
     AABB aabb;
     if (tile->getAABB(tile, x, y, z, &aabb)) {
         if (AABB_intersects(&player.e.boundingBox, &aabb) || !Level_isFree(&level, &aabb)) return;
     }
-    if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, paintTexture);
-    Level_netSetTile(&level, x, y, z, paintTexture);
+    if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, id);
+    Level_netSetTile(&level, x, y, z, inventory[selectedSlot]);
     tile->onPlace(tile, &level, x, y, z);
 }
 
@@ -813,12 +888,8 @@ static void screenUpdateEvents(Screen* s) {
             lwjglMouse(mouseEvents[e].x, mouseEvents[e].y, &ex, &ey);
             int xm = ex * s->width / width;
             int ym = s->height - ey * s->height / height - 1;
-            if (mouseEvents[e].key != GLFW_MOUSE_BUTTON_LEFT) continue;
-            for (int i = 0; i < s->buttonCount; i++) {
-                Button* b = &s->buttons[i];
-                if (!b->enabled || xm < b->x || ym < b->y || xm >= b->x + b->w || ym >= b->y + b->h) continue;
-                if (s->buttonClicked) s->buttonClicked(s, b);
-            }
+            if (mouseEvents[e].key < 0) continue;
+            s->mouseClicked(s, xm, ym, mouseEvents[e].key);
         }
     }
     mouseEventCount = 0;
@@ -871,14 +942,9 @@ static void tick(void) {
         for (int e = 0; e < mouseEventCount; e++) {
             int wheel = mouseEvents[e].wheel;
             if (wheel != 0) {
-                int i = 0;
-                for (int k = 0; k < 9; ++k) {
-                    if (palette[k] == paintTexture) i = k;
-                }
-                i += wheel;
-                while (i < 0) i += 9;
-                while (i >= 9) i -= 9;
-                paintTexture = palette[i];
+                selectedSlot -= wheel;
+                while (selectedSlot < 0) selectedSlot += 9;
+                while (selectedSlot >= 9) selectedSlot -= 9;
             }
             if (!mouseGrabbed && mouseEvents[e].state) {
                 Minecraft_grabMouse();
@@ -901,11 +967,20 @@ static void tick(void) {
                     mouseEventCount -= e + 1;
                     return;
                 }
+                // a block in the slots gets selected, one from the list goes in the selected slot
                 int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
                 if (id == TILE_GRASS.id) id = TILE_DIRT.id;
-                for (int k = 0; k < 9; ++k) {
-                    if (id == palette[k]) paintTexture = palette[k];
+                int slot = inventoryIndexOf(id);
+                if (slot >= 0) {
+                    selectedSlot = slot;
+                    continue;
                 }
+                bool listed = false;
+                for (int k = 0; k < Minecraft_blockListCount; ++k) {
+                    if (Minecraft_blockList[k] == id) listed = true;
+                }
+                if (id <= 0 || !listed) continue;
+                Minecraft_inventoryReplace(id);
             }
         }
         mouseEventCount = 0;
@@ -916,7 +991,7 @@ static void tick(void) {
             if (key == 0) continue;
             Player_setKey(&player, key, keyEvents[e].state);
             if (!keyEvents[e].state) continue;
-            if (key == GLFW_KEY_ESCAPE) Minecraft_showPauseScreen();
+            if (key == GLFW_KEY_ESCAPE) pause();
             if (key == GLFW_KEY_R) Entity_resetPosition(&player.e);
             if (key == GLFW_KEY_ENTER) {
                 if (!hasLevel) {
@@ -929,7 +1004,7 @@ static void tick(void) {
                 Entity_resetPosition(&player.e);
             }
             for (int k = 0; k < 9; ++k) {
-                if (key == GLFW_KEY_1 + k) paintTexture = palette[k];
+                if (key == GLFW_KEY_1 + k) selectedSlot = k;
             }
             if (key == GLFW_KEY_Y) yMouseAxis = -yMouseAxis;
             if (key == GLFW_KEY_G && !networked) {
@@ -949,6 +1024,7 @@ static void tick(void) {
                 bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
                 levelRenderer.drawDistance = (levelRenderer.drawDistance + (shift ? -1 : 1)) & 3;
             }
+            if (key == GLFW_KEY_B) showBlockSelectScreen();
             if (key == GLFW_KEY_T && networked && NetConnection_isOpen(&connection)) {
                 Player_releaseAllKeys(&player);
                 showChatScreen();
@@ -1018,18 +1094,12 @@ static bool drawGui(void) {
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glEnable(GL_BLEND);
     blitGui(sw / 2 - 91, sh - 22, 0, 182);
-    int selected = 0;
-    for (int k = 0; k < 9; ++k) {
-        if (palette[k] == paintTexture) {
-            selected = k;
-            break;
-        }
-    }
-    blitGui(sw / 2 - 91 - 1 + selected * 20, sh - 22 - 1, 22, 24);
+    blitGui(sw / 2 - 91 - 1 + selectedSlot * 20, sh - 22 - 1, 22, 24);
     glDisable(GL_BLEND);
 
     for (int k = 0; k < 9; ++k) {
-        const Tile* tile = gTiles[palette[k]];
+        if (inventory[k] <= 0) continue;
+        const Tile* tile = gTiles[inventory[k]];
         glPushMatrix();
         glTranslatef((float)(sw / 2 - 90 + k * 20), (float)(sh - 16), -50.0f);
         glScalef(10.0f, 10.0f, 10.0f);
@@ -1047,7 +1117,7 @@ static bool drawGui(void) {
         glPopMatrix();
     }
 
-    Font_drawShadow(&gFont, &hudTess, "0.0.19a_04", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.20a_02", 2, 2, 0xFFFFFF);
     Font_drawShadow(&gFont, &hudTess, fpsString, 2, 12, 0xFFFFFF);
     // 10 lines for 10 seconds each, the chat screen shows 20 of any age
     int maxLines = 10;
@@ -1145,7 +1215,10 @@ static bool renderLevel(float a, int width, int height) {
             LevelRenderer_renderInside(&levelRenderer, x, y, z);
         }
     }
+    setupEntityLight(true);
     LevelRenderer_renderEntities(&levelRenderer, &frustum, a);
+    setupEntityLight(false);
+    setupFog();
     ParticleEngine_render(&particleEngine, &player, a);
     LevelRenderer_renderSurroundingGround(&levelRenderer);
     glDisable(GL_LIGHTING);
@@ -1158,7 +1231,7 @@ static bool renderLevel(float a, int width, int height) {
     if (!isHitNull) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, paintTexture);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, inventory[selectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, editMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -1181,7 +1254,7 @@ static bool renderLevel(float a, int width, int height) {
     if (!isHitNull) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, paintTexture);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, inventory[selectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, editMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
@@ -1192,7 +1265,7 @@ static bool renderLevel(float a, int width, int height) {
 
 // false where it throws, the frame isn't shown then
 static bool render(float a) {
-    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) Minecraft_showPauseScreen();
+    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) pause();
 
     if (mouseGrabbed) {
         double mx, my;
@@ -1236,7 +1309,6 @@ static bool render(float a) {
     }
 
     if (Font_threw) return false;
-    Display_sync(100);
     glfwSwapBuffers(window);
     // pumps the window messages
     glfwPollEvents();

@@ -484,7 +484,11 @@ static void tailBroadcast(MinecraftServer* s, const JStr* command, int skip) {
     Server_broadcast(s, PACKET_MESSAGE, v);
 }
 
-void Server_command(MinecraftServer* s, Player* p, const JStr* command) {
+void Server_command(MinecraftServer* s, Player* p, const JStr* text) {
+    static JStr stripped;
+    jstr_copy(&stripped, text);
+    while (jstr_startsWithc(&stripped, "/")) jstr_substring(&stripped, &stripped, 1);
+    const JStr* command = &stripped;
     char who[JSTR_MAX * 3], c[JSTR_MAX * 3];
     if (p) jstr_c(&p->name, who, sizeof who);
     else snprintf(who, sizeof who, "[console]");
@@ -513,11 +517,15 @@ void Server_command(MinecraftServer* s, Player* p, const JStr* command) {
         } else {
             Log_info("Can't set spawn from console!");
         }
+    } else if (is(&parts[0], "solid")) {
+        if (!p) return;
+        p->solid = !p->solid;
+        Player_message(p, p->solid ? "Now placing unbreakable stone" : "Now placing normal stone");
     } else if (is(&parts[0], "broadcast") && count > 1) {
         tailBroadcast(s, command, 10);
     } else if (is(&parts[0], "say") && count > 1) {
         tailBroadcast(s, command, 4);
-    } else if (is(&parts[0], "teleport") && count > 1) {
+    } else if ((is(&parts[0], "teleport") || is(&parts[0], "tp")) && count > 1) {
         if (!p) {
             Log_info("Can't teleport from console!");
             return;

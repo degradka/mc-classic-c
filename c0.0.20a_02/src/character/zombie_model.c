@@ -30,7 +30,7 @@ void ZombieModel_init(ZombieModel* m) {
 
 // the head angles come in degrees
 // swing scales the walk, idle sways the arms a little
-void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot) {
+void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot, float scale) {
     Cube* rightArm = (Cube*)&m->rightArm;
     Cube* leftArm  = (Cube*)&m->leftArm;
     ((Cube*)&m->head)->yRot      = headYRot / 57.29578f;
@@ -46,10 +46,10 @@ void ZombieModel_render(const ZombieModel* m, float time, float swing, float idl
     rightArm->xRot += (float)sin((double)idle * 0.067) * 0.05f;
     leftArm->xRot  -= (float)sin((double)idle * 0.067) * 0.05f;
 
-    Cube_render(&m->head);
-    Cube_render(&m->body);
-    Cube_render(&m->rightArm);
-    Cube_render(&m->leftArm);
-    Cube_render(&m->rightLeg);
-    Cube_render(&m->leftLeg);
+    Cube_render(&m->head, scale);
+    Cube_render(&m->body, scale);
+    Cube_render(&m->rightArm, scale);
+    Cube_render(&m->leftArm, scale);
+    Cube_render(&m->rightLeg, scale);
+    Cube_render(&m->leftLeg, scale);
 }
