@@ -3,7 +3,7 @@
 #include "packet.h"
 
 const int PacketPayloadLen[PACKET_COUNT] = {
-    1 + 64 + 64,     // Login
+    1 + 64 + 64 + 1, // Login, c0.0.20a_02/server1.8.2: gained a trailing userType byte
     0,               // Ping
     0,               // LevelInit
     2 + 1024 + 1,    // LevelChunk

@@ -193,8 +193,16 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     float textWidth = (float)Font_width(font, np->name);
     glTranslatef(-textWidth / 2.0f, 0.0f, 0.0f);
 
+    // c0.0.20a_02: the new per face entity lighting darkens/tints the primary
+    // colored text if left enabled here, so it's switched off for that draw
+    // and back on for the shadow copy behind it
+    glNormal3f(1.0f, -1.0f, 1.0f);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_LIGHT0);
     bool isNotch = equalsIgnoreCase(np->name, "Notch");
     Font_draw(font, &sNameTess, np->name, 0, 0, isNotch ? 0xFFFF00 : 0xFFFFFF);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHTING);
     glTranslatef(1.0f, 1.0f, -0.05f);
     Font_draw(font, &sNameTess, np->name, 0, 0, 0x505050);
     glPopMatrix();

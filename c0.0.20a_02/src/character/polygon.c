@@ -14,6 +14,13 @@ void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
 void Polygon_render(const Polygon* p) {
     glColor3f(1.f, 1.f, 1.f);
 
+    // c0.0.20a_02: per face lighting normal, matching the real source's
+    // normalize(v1-v0) cross normalize(v1-v2)
+    Vec3 e1 = Vec3_normalize(Vec3_sub(p->v[1].pos, p->v[0].pos));
+    Vec3 e2 = Vec3_normalize(Vec3_sub(p->v[1].pos, p->v[2].pos));
+    Vec3 n  = Vec3_normalize(Vec3_cross(e1, e2));
+    glNormal3f(n.x, n.y, n.z);
+
     // real source divides by the exact atlas size, 64.0/32.0; matching it now
     // instead of the anti-seam epsilon this port had been carrying
     const float uDiv = 64.0f;

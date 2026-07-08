@@ -95,7 +95,29 @@ extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light bloc
 extern Tile TILE_SPONGE; // id=19, new in c0.0.19a_04, dries a 5x5x5 area of water on placement
 extern Tile TILE_GLASS;  // id=20, new in c0.0.19a_04, non light blocking, doesn't double-face with neighboring glass
 
+// c0.0.20a_02: 16 Cloth colors, ids 21..36, textures 64..79 (one full terrain.png
+// row). All plain tiles, no special behavior beyond the texture id, placeable
+// only (no world generation spawn)
+extern Tile TILE_CLOTH[16];
+
+// c0.0.20a_02: reuse Bush's tile class (isSolid/blocksLight/getAABB/render/onTick),
+// placeable only, no world generation spawn
+extern Tile TILE_DANDELION;      // id=37, tex=13
+extern Tile TILE_ROSE;           // id=38, tex=12
+extern Tile TILE_MUSHROOM_BROWN; // id=39, tex=29
+extern Tile TILE_MUSHROOM_RED;   // id=40, tex=28
+
+extern Tile TILE_GOLD_BLOCK; // id=41, tex=40, plain tile, no special behavior
+
 void Tile_registerAll(void);
+
+// c0.0.20a_02: master placeable-tile list, backing the new inventory screen's
+// grid and the default hotbar seed (first 9 entries). Order matches the real
+// source's own list exactly (not just the same set): Rock, StoneBrick, Dirt,
+// Wood, Log, Leaves, Bush, Dandelion, Rose, both Mushrooms, Sand, Gravel,
+// Glass, Sponge, GoldBlock, then all 16 Cloth colors.
+#define PLACEABLE_TILE_COUNT 32
+extern const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT];
 
 // Helper to render a plain, untextured face (for highlights)
 void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);

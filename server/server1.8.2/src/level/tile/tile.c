@@ -71,6 +71,14 @@ Tile TILE_LOG;
 Tile TILE_LEAVES;
 Tile TILE_SPONGE;
 Tile TILE_GLASS;
+Tile TILE_STONEBRICK;
+
+Tile TILE_CLOTH[16];
+Tile TILE_DANDELION;
+Tile TILE_ROSE;
+Tile TILE_MUSHROOM_BROWN;
+Tile TILE_MUSHROOM_RED;
+Tile TILE_GOLD_BLOCK;
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
@@ -245,7 +253,7 @@ void Tile_registerAll(void) {
     registerTile(&TILE_ROCK,       1,  1);
     registerTile(&TILE_GRASS,      2,  3);
     registerTile(&TILE_DIRT,       3,  2);
-    // id=4 (StoneBrick) intentionally not registered, see the tile.h comment
+    registerTile(&TILE_STONEBRICK, 4, 16);
     registerTile(&TILE_WOOD,       5,  4);
     registerTile(&TILE_BUSH,       6, 15);
     registerTile(&TILE_BEDROCK,    7, 17);
@@ -333,4 +341,32 @@ void Tile_registerAll(void) {
     TILE_SPONGE.onRemoved = Sponge_onRemoved;
     // Glass needs nothing special server-side beyond registration; no
     // lighting-propagation logic exists server-side, normal solid collision
+
+    // server1.8.2: 16 Cloth colors, one full terrain.png row, no special
+    // behavior beyond the texture id (unused server side either way)
+    for (int i = 0; i < 16; ++i) {
+        registerTile(&TILE_CLOTH[i], 21 + i, 64 + i);
+    }
+
+    // server1.8.2: Dandelion/Rose/Mushrooms reuse Bush's tile class outright
+    registerTile(&TILE_DANDELION,      37, 13);
+    registerTile(&TILE_ROSE,           38, 12);
+    registerTile(&TILE_MUSHROOM_BROWN, 39, 29);
+    registerTile(&TILE_MUSHROOM_RED,   40, 28);
+
+    Tile* plants[] = { &TILE_DANDELION, &TILE_ROSE, &TILE_MUSHROOM_BROWN, &TILE_MUSHROOM_RED };
+    for (int i = 0; i < 4; ++i) {
+        plants[i]->isSolid     = Bush_isSolid;
+        plants[i]->blocksLight = Bush_blocksLight;
+        plants[i]->getAABB     = Bush_getAABB;
+        plants[i]->onTick      = Bush_onTick;
+    }
+
+    // server1.8.2: Gold Block, plain tile, no special behavior
+    registerTile(&TILE_GOLD_BLOCK, 41, 40);
 }
+
+const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT] = {
+    1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+};

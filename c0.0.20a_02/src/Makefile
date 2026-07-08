@@ -22,6 +22,7 @@ SRC = minecraft.c player.c timer.c  hitresult.c user.c \
       renderer/texture_fx.c \
       renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c \
       gui/generate_level_screen.c gui/chat_input_screen.c gui/message_screen.c \
+      gui/inventory_screen.c \
       net/net_socket.c net/packet.c net/connection.c net/network_player.c
 
 # comm/socket_connection.c comm/socket_server.c server/client.c

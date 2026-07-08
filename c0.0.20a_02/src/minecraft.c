@@ -35,6 +35,7 @@
 #include "gui/pause_screen.h"
 #include "gui/chat_input_screen.h"
 #include "gui/message_screen.h"
+#include "gui/inventory_screen.h"
 #include "net/network_player.h"
 
 #define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
@@ -64,13 +65,19 @@ static int prevY    = GLFW_RELEASE;
 static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
 static int prevT    = GLFW_RELEASE;
+static int prevB    = GLFW_RELEASE; // c0.0.20a_02: opens the inventory screen
 
 // c0.0.14a_08: hotbar expanded from 6 individually wired keys to a real 9
 // slot bar, selectable by keys 1-9, mouse wheel, or middle click pick block.
 // c0.0.19a_04: stonebrick and sand dropped in favor of the two new tiles
 // (rock, dirt, sponge, wood, sapling, log, leaves, glass, gravel), and this
 // is also the first version to actually draw the bar on screen (see the Hud)
-static const int gHotbar[9] = { 1, 3, 19, 5, 6, 17, 18, 20, 13 };
+// c0.0.20a_02: the hotbar is now a mutable inventory, its slots overwritable
+// from the new full inventory screen (B key), so it defaults to the first 9
+// entries of PLACEABLE_TILE_IDS instead of a fixed named set, and selection
+// is tracked as a slot index rather than a remembered tile id
+static int gHotbar[9];
+static int gSelectedSlot = 0;
 
 static int gTickCount = 0;
 static int gLastMineTick = 0;
@@ -110,7 +117,6 @@ static char gLoadTitle[64];
 
 static Tessellator hudTess;
 static Font gFont;                     // HUD font
-static int selectedTileId = 1;         // 1=rock, 3=dirt, 4=stoneBrick, 5=wood
 static int gFPS = 0;                   // last computed fps per second
 static int gChunkUpdatesPerSec = 0;    // last computed chunk updates per second
 static int gChunkUpdatesAccum = 0;     // accumulates during the current second
@@ -227,6 +233,11 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
 // the server-authoritative path that's allowed to mutate a network level
 void Minecraft_networkSetBlock(int x, int y, int z, int type) {
     Level_netSetTile(&level, x, y, z, type);
+}
+
+// c0.0.20a_02: from the Login reply's new trailing byte
+void Minecraft_setUserType(int userType) {
+    player.userType = userType;
 }
 
 // matches SpawnPlayer with id < 0: the server telling the client where its
@@ -436,7 +447,10 @@ static void charCallback(GLFWwindow* w, unsigned int codepoint) {
     if (codepoint < 128) activeScreen->keyPressed(activeScreen, (char)codepoint, 0);
 }
 
-// c0.0.14a_08: mouse wheel now cycles the hotbar selection
+// c0.0.14a_08: mouse wheel now cycles the hotbar selection.
+// c0.0.20a_02: selection is now a slot index into the mutable hotbar rather
+// than a remembered tile id, and the wheel direction is inverted relative to
+// before (subtracts instead of adds), matching the real source exactly.
 static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     (void)w; (void)xoffset;
     if (activeScreen) return;
@@ -444,12 +458,9 @@ static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     int dir = (yoffset > 0.0) ? 1 : (yoffset < 0.0) ? -1 : 0;
     if (dir == 0) return;
 
-    int k = 0;
-    for (int i = 0; i < 9; ++i) if (gHotbar[i] == selectedTileId) k = i;
-    k += dir;
-    while (k < 0) k += 9;
-    while (k >= 9) k -= 9;
-    selectedTileId = gHotbar[k];
+    gSelectedSlot -= dir;
+    while (gSelectedSlot < 0) gSelectedSlot += 9;
+    while (gSelectedSlot >= 9) gSelectedSlot -= 9;
 }
 
 // c0.0.14a_08: daylight fog switched from exponential to linear, with its far
@@ -510,6 +521,38 @@ static void setupFog(int type) {
     glColorMaterial(GL_FRONT, GL_AMBIENT);
     glEnable(GL_COLOR_MATERIAL);
     glEnable(GL_LIGHTING);
+}
+
+// c0.0.20a_02: real per face lit shading for mobs/other players, layered on
+// top of their own brightness tinted vertex color. Bracket the entity render
+// loop with true then false, matching the real source exactly
+static void setupEntityLighting(bool enable) {
+    if (!enable) {
+        glDisable(GL_LIGHTING);
+        glDisable(GL_LIGHT0);
+        return;
+    }
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    // the body scale this port applies via glScalef isn't baked into the
+    // cube geometry itself, unlike the real source, so without this the
+    // scaled down modelview matrix would also shrink the lighting normals
+    glEnable(GL_NORMALIZE);
+
+    float dx = 0.0f, dy = -1.0f, dz = 0.5f;
+    float len = sqrtf(dx * dx + dy * dy + dz * dz);
+    GLfloat lightDir[4]     = { dx / len, dy / len, dz / len, 0.0f }; // w=0: directional
+    GLfloat lightDiffuse[4] = { 0.3f, 0.3f, 0.3f, 1.0f };
+    GLfloat lightAmbient[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    GLfloat modelAmbient[4] = { 0.7f, 0.7f, 0.7f, 1.0f };
+
+    glLightfv(GL_LIGHT0, GL_POSITION, lightDir);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmbient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, modelAmbient);
 }
 
 /* boot and shutdown */
@@ -579,6 +622,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetCharCallback(window, charCallback);
 
     Tile_registerAll();
+
+    for (int i = 0; i < 9; ++i) gHotbar[i] = PLACEABLE_TILE_IDS[i];
 
     // c0.0.13a_03 defaults to "anonymous" instead of "noname" when no
     // session is set, matching Minecraft.run()'s fallback level owner name.
@@ -727,9 +772,7 @@ static void drawGui(float partialTicks) {
     glBindTexture(GL_TEXTURE_2D, texGui);
     drawGuiBlit(screenWidth / 2 - 91, screenHeight - 22, 0, 0, 182, 22);
 
-    int selectedSlot = 0;
-    for (int i = 0; i < 9; ++i) if (gHotbar[i] == selectedTileId) selectedSlot = i;
-    drawGuiBlit(screenWidth / 2 - 91 - 1 + selectedSlot * 20, screenHeight - 22 - 1, 0, 22, 24, 22);
+    drawGuiBlit(screenWidth / 2 - 91 - 1 + gSelectedSlot * 20, screenHeight - 22 - 1, 0, 22, 24, 22);
 
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
@@ -760,7 +803,7 @@ static void drawGui(float partialTicks) {
     glDisable(GL_TEXTURE_2D);
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.19a_04", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.20a_02", 2, 2, 0xFFFFFF);
 
     char stats[64];
     snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
@@ -953,12 +996,20 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevEnter = enter;
 
-    // 1..9 = select tile directly from the hotbar
+    // 1..9 = select hotbar slot directly
     for (int i = 0; i < 9; ++i) {
         int k = glfwGetKey(w, GLFW_KEY_1 + i);
-        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) selectedTileId = gHotbar[i];
+        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) gSelectedSlot = i;
         prevNumKeys[i] = k;
     }
+
+    // c0.0.20a_02: B opens the full inventory/select block screen
+    int kB = glfwGetKey(w, GLFW_KEY_B);
+    if (kB == GLFW_PRESS && prevB == GLFW_RELEASE) {
+        int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
+        InventoryScreen_open(&gFont, fbw * 240 / fbh, 240, &level, gHotbar, &gSelectedSlot, texTerrain);
+    }
+    prevB = kB;
 
     // G = spawn zombie at player. c0.0.16a_02 disables this debug key whenever
     // connected to a server
@@ -1029,7 +1080,7 @@ static void handleBlockClicks(GLFWwindow* w) {
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
         if (id == TILE_GRASS.id) id = TILE_DIRT.id;
         for (int i = 0; i < 9; ++i) {
-            if (gHotbar[i] == id) selectedTileId = id;
+            if (gHotbar[i] == id) gSelectedSlot = i;
         }
     }
     prevMiddle = middle;
@@ -1052,6 +1103,10 @@ static void mineOrPlace(void) {
     if (gEditMode == 0) {
         // destroy
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
+        // c0.0.20a_02: Bedrock can't be broken unless userType>=100 (an
+        // operator flag from the Login reply). Stays 0 in singleplayer, so
+        // Bedrock is unbreakable there too, matching the real source exactly
+        if (id == TILE_BEDROCK.id && player.userType < 100) return;
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         // c0.0.19a_04: the player's own break/place always uses the
         // ungated Level_netSetTile, matching the real source calling
@@ -1062,7 +1117,7 @@ static void mineOrPlace(void) {
         if (t && changed) {
             // type field is the currently selected tile even on destroy,
             // matching the real source; the server ignores it for mode 0
-            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, selectedTileId);
+            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, gHotbar[gSelectedSlot]);
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
         }
     } else {
@@ -1095,8 +1150,8 @@ static void mineOrPlace(void) {
                 if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
             }
             if (!blocked) {
-                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, selectedTileId);
-                Level_netSetTile(&level, x, y, z, selectedTileId);
+                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, gHotbar[gSelectedSlot]);
+                Level_netSetTile(&level, x, y, z, gHotbar[gSelectedSlot]);
             }
         }
     }
@@ -1200,7 +1255,13 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // either (they now tint themselves via Entity_getBrightness)
     setupFog(0);
     LevelRenderer_render(lr, p, 0);
+    // c0.0.20a_02: unlit sapling/flower/mushroom sprites, split out of the
+    // liquid layer into their own single pass list so their self-intersecting
+    // cross-quad geometry doesn't get cut off by the liquid list's
+    // depth-prepass-then-color double draw further down
+    LevelRenderer_render(lr, p, 2);
 
+    setupEntityLighting(true);
     for (int i = 0; i < mobCount; ++i) {
         const Zombie* z = &mobs[i];
         if (frustum_isVisible(&frustum, &z->base.boundingBox)) {
@@ -1214,6 +1275,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
             NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
         }
     }
+    setupEntityLighting(false);
 
     ParticleEngine_render(&particleEngine, p, t);
 
@@ -1230,7 +1292,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, gHotbar[gSelectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -1257,7 +1319,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, selectedTileId);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, gHotbar[gSelectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
@@ -1267,13 +1329,8 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     glfwSwapBuffers(window);
 
-    // c0.0.19a_04: new 100fps cap (Display.sync(100) in the real source)
-    static long long lastFrameTime = 0;
-    long long now = currentTimeMillis();
-    long long budget = 1000LL / 100LL;
-    long long elapsed = now - lastFrameTime;
-    if (lastFrameTime != 0 && elapsed < budget) sleepMillis((int)(budget - elapsed));
-    lastFrameTime = currentTimeMillis();
+    // c0.0.20a_02: the 100fps cap added in c0.0.19a_04 (Display.sync(100) in
+    // the real source) is removed with no replacement, uncapped again
 }
 
 /* main loop */

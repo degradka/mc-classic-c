@@ -70,13 +70,19 @@ void Commands_dispatch(MinecraftServer* srv, Connection* issuer, const char* tex
     } else if (strcmp(cmd, "deop") == 0) {
         if (tokenCount < 2) { reply(issuer, "Usage: /deop <name>"); return; }
         Server_deopByName(srv, tokens[1]);
-    } else if (strcmp(cmd, "teleport") == 0) {
+    } else if (strcmp(cmd, "teleport") == 0 || strcmp(cmd, "tp") == 0) {
         // new in server1.4: teleports the ISSUER to the named player, not
         // the reverse. server1.6: refuses console, which has no position of
-        // its own to teleport from
+        // its own to teleport from. server1.8.2: /tp is a one-word alias
         if (!issuer) { Log_info("Can't teleport from console!"); return; }
         if (tokenCount < 2) { reply(issuer, "Usage: /teleport <name>"); return; }
         Server_teleportToPlayer(srv, issuer, tokens[1]);
+    } else if (strcmp(cmd, "solid") == 0) {
+        // server1.8.2: toggles this connection's solid mode, no reply for
+        // console since it has no connection of its own to toggle
+        if (!issuer) return;
+        issuer->solidMode = !issuer->solidMode;
+        reply(issuer, issuer->solidMode ? "Now placing unbreakable stone" : "Now placing normal stone");
     } else if (strcmp(cmd, "setspawn") == 0) {
         // new in server1.3: sets the world spawn to the issuing admin's own
         // last known position, no argument. server1.6: refuses console,

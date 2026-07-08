@@ -34,12 +34,17 @@ void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int 
     c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
     // c0.0.14a_08 merges the old lit+shadow solid passes into one (brightness
     // is now per face instead of a binary lit/shadow pass split), so chunks
-    // only need 2 lists: 0 = solid, 1 = liquid (renumbered down from 2)
-    c->lists = glGenLists(2);
+    // only need 2 lists: 0 = solid, 1 = liquid (renumbered down from 2).
+    // c0.0.20a_02: added a 3rd, 2 = unlit cross-quad plants (sapling, the new
+    // flowers/mushrooms), split out of the liquid list so their
+    // self-intersecting geometry doesn't get caught by the liquid list's
+    // depth-prepass-then-color double draw, which cuts off part of a plant's
+    // sprite wherever its two crossing quads overlap in screen space
+    c->lists = glGenLists(3);
 }
 
 void Chunk_destroy(Chunk* c) {
-    glDeleteLists(c->lists, 2);
+    glDeleteLists(c->lists, 3);
 }
 
 void Chunk_rebuild(Chunk* c, int layer) {

@@ -79,6 +79,10 @@ typedef struct Connection {
     // Incremented by 1 each time a queued SetBlock item is drained, decayed
     // by 2 every game tick; kicks at 100
     int clickCounter;
+    // server1.8.2: /solid toggles this per connection ('i' in the real
+    // source). While true, a request to place Stone silently places Bedrock
+    // instead
+    bool solidMode;
 
     // outgoing packets for events that happen elsewhere while this
     // connection hasn't finished joining yet

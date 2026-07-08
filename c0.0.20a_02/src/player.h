@@ -20,6 +20,10 @@ typedef struct Player {
     // c0.0.14a_08: jump key debounce latch, can't retrigger a jump while the
     // key stays held across an onGround transition until it's released
     bool jumping;
+    // c0.0.20a_02: from the Login reply's new trailing byte. 0 = normal,
+    // >=100 = operator, gates whether this player can break Bedrock. Stays 0
+    // in singleplayer, since no Login reply is ever received there
+    int userType;
 } Player;
 
 void Player_init(Player* player, Level* level);

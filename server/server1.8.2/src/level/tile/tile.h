@@ -59,10 +59,7 @@ extern const Tile* gTiles[256];
 extern Tile TILE_ROCK;      // id=1
 extern Tile TILE_GRASS;     // id=2 (custom per face)
 extern Tile TILE_DIRT;      // id=3
-// id=4 (StoneBrick) is intentionally not registered: server1.6's real source
-// drops it from the tile registry entirely, gTiles[4] stays NULL. Client
-// side keeps it registered, just off the hotbar/whitelist. This is a
-// server-only removal, not a whole-game one
+extern Tile TILE_STONEBRICK; // id=4, re-registered in server1.8.2 (server1.6 had dropped it)
 extern Tile TILE_WOOD;      // id=5
 extern Tile TILE_BUSH;      // id=6
 extern Tile TILE_BEDROCK;   // id=7, new in c0.0.14a_08, plain tile, unreachable from the hotbar
@@ -83,6 +80,25 @@ extern Tile TILE_LEAVES; // id=18, new in c0.0.14a_08, non solid, non light bloc
 extern Tile TILE_SPONGE; // id=19, new in server1.6
 extern Tile TILE_GLASS;  // id=20, new in server1.6
 
+// server1.8.2: 16 Cloth colors, ids 21..36, textures 64..79 (one full
+// terrain.png row, unused server side). Plain tiles, no special behavior
+extern Tile TILE_CLOTH[16];
+
+// server1.8.2: reuse Bush's tile class (isSolid/blocksLight/getAABB/onTick)
+extern Tile TILE_DANDELION;      // id=37
+extern Tile TILE_ROSE;           // id=38
+extern Tile TILE_MUSHROOM_BROWN; // id=39
+extern Tile TILE_MUSHROOM_RED;   // id=40
+
+extern Tile TILE_GOLD_BLOCK; // id=41, plain tile, no special behavior
+
 void Tile_registerAll(void);
+
+// server1.8.2: master placeable-tile list, backing the SetBlock whitelist.
+// Order matches the real source's own list: Rock, StoneBrick, Dirt, Wood,
+// Log, Leaves, Bush, Dandelion, Rose, both Mushrooms, Sand, Gravel, Glass,
+// Sponge, GoldBlock, then all 16 Cloth colors
+#define PLACEABLE_TILE_COUNT 32
+extern const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT];
 
 #endif

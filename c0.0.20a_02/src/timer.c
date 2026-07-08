@@ -22,10 +22,9 @@
 void Timer_init(Timer* timer, float ticksPerSecond) {
 #if defined(_WIN32)
     // Windows' default scheduler tick is ~15.6ms (64Hz), so Sleep(n) rounds
-    // up to that granularity regardless of n, silently capping the 100fps
-    // limiter (sleepMillis, below) at ~64fps. Requesting 1ms timer
-    // resolution for this process fixes Sleep()'s granularity everywhere it's
-    // used, matching the precision Windows' JVM historically requested too
+    // up to that granularity regardless of n. Requesting 1ms timer resolution
+    // for this process fixes Sleep()'s granularity everywhere it's used,
+    // matching the precision Windows' JVM historically requested too
     timeBeginPeriod(1);
 #endif
     timer->ticksPerSecond = ticksPerSecond;

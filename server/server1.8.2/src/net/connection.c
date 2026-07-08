@@ -137,7 +137,7 @@ static void handleLogin(Connection* c, const unsigned char* f) {
     Server_kickExistingSessionByName(c->server, username);
     Log_info("%s logged in as %s", c->remoteAddress, username);
 
-    if (protocolVersion != 5) { // server1.6: bumped from 4, wire shapes unchanged
+    if (protocolVersion != 6) { // server1.8.2: bumped from 5, wire shapes unchanged
         Connection_kick(c, "Wrong protocol version.");
         return;
     }
@@ -152,18 +152,16 @@ static void handleLogin(Connection* c, const unsigned char* f) {
 
     // login is bidirectional: this same packet id, reused for the reply
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 5); // server1.6: bumped from 4
+    writeByte(c, 6); // server1.8.2: bumped from 5
     writeString(c, c->server->serverName);
     writeString(c, c->server->motd);
+    // server1.8.2: new trailing userType byte, 100 for an admin, 0 otherwise.
+    // Gates whether the client's own local Bedrock break guard allows it
+    writeByte(c, PlayerList_contains(&c->server->admins, username) ? 100 : 0);
 
     size_t total = (size_t)c->server->level.width * c->server->level.height * c->server->level.depth;
     LevelSend_start(c, c->server->level.blocks, (int)total);
 }
-
-// server-only tile whitelist new in server1.3: only these ids may ever be
-// placed by a client, matches the real source's root a.java array exactly.
-// server1.6: StoneBrick(4) and Sand(12) replaced by Sponge(19) and Glass(20)
-static const int PLACEABLE_TILE_IDS[] = { 1, 3, 19, 5, 6, 17, 18, 20, 13 };
 
 // server1.6: enqueues a SetBlock item instead of validating/applying it
 // immediately; Connection_onGameTick's drain does that once per real tick
@@ -213,7 +211,7 @@ static void processSetBlockItem(Connection* c, int x, int y, int z, int mode, in
     // selected tile isn't on the list gets kicked even while only breaking.
     // confirmed against the real decompile, not a guess, kept as is
     bool whitelisted = false;
-    for (size_t i = 0; i < sizeof(PLACEABLE_TILE_IDS) / sizeof(PLACEABLE_TILE_IDS[0]); ++i) {
+    for (int i = 0; i < PLACEABLE_TILE_COUNT; ++i) {
         if (PLACEABLE_TILE_IDS[i] == type) { whitelisted = true; break; }
     }
     if (!whitelisted) {
@@ -232,7 +230,12 @@ static void processSetBlockItem(Connection* c, int x, int y, int z, int mode, in
     }
 
     if (mode == 0) {
-        level_setTile(&c->server->level, x, y, z, 0);
+        // server1.8.2: server1.6 had no protection at all here, letting any
+        // player destroy Bedrock. Now refused unless the requester is an admin
+        int tileHere = Level_getTile(&c->server->level, x, y, z);
+        if (tileHere != TILE_BEDROCK.id || PlayerList_contains(&c->server->admins, c->username)) {
+            level_setTile(&c->server->level, x, y, z, 0);
+        }
         return;
     }
 
@@ -241,7 +244,10 @@ static void processSetBlockItem(Connection* c, int x, int y, int z, int mode, in
     bool disallowed = (type == TILE_WATER.id || type == TILE_CALM_WATER.id ||
                        type == TILE_LAVA.id  || type == TILE_CALM_LAVA.id);
     if (t && !disallowed) {
-        level_setTile(&c->server->level, x, y, z, type);
+        // server1.8.2: /solid toggles this per connection; while active, a
+        // request to place Rock silently places Bedrock instead
+        int placeType = (c->solidMode && type == TILE_ROCK.id) ? TILE_BEDROCK.id : type;
+        level_setTile(&c->server->level, x, y, z, placeType);
     }
     // re-broadcast happens via the Level block-change listener (Server_onBlockChanged),
     // not here directly, matching the real source's decoupled design

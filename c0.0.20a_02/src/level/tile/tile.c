@@ -28,10 +28,11 @@ static int Tile_default_getTexture(const Tile* self, int face) {
 // pass (layer 0), now colored by per face neighbor brightness instead of a
 // binary lit/unlit choice. layer 1 is the liquid only layer (renumbered down
 // from 2, since there is no more separate shadow pass), so a plain tile
-// never shows there.
+// never shows there. c0.0.20a_02 added layer 2 for unlit cross-quad plants,
+// a plain tile never shows there either.
 static int Tile_default_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
     (void)self; (void)face;
-    if (layer == 1) return 0;
+    if (layer == 1 || layer == 2) return 0;
     return !Level_isSolidTile(lvl, x, y, z);
 }
 
@@ -78,54 +79,6 @@ static void Tile_default_renderFace(const Tile* self, Tessellator* t, int x, int
         Tessellator_vertexUV(t, x1, y0, z0, u1, v1);
         Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
         Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
-    }
-}
-
-// Reversed winding, older fractional UV padding. Used by liquids to draw a
-// back face for the surface so it's visible from both sides, matches the
-// original source keeping this formula while renderFace moved to the
-// integer pixel one.
-static void Tile_renderBackFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
-    int tex = self->getTexture(self, face);
-    float u0 = (tex % 16) / 16.0f;
-    float u1 = u0 + 0.0624375f;
-    float v0 = (tex / 16) / 16.0f;
-    float v1 = v0 + 0.0624375f;
-
-    float x0 = x + self->xx0, x1 = x + self->xx1;
-    float y0 = y + self->yy0, y1 = y + self->yy1;
-    float z0 = z + self->zz0, z1 = z + self->zz1;
-
-    if (face == 0) {
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z0, u1, v0);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
-    } else if (face == 1) {
-        Tessellator_vertexUV(t, x0, y1, z1, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v1);
-    } else if (face == 2) {
-        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x1, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
-    } else if (face == 3) {
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x0, y0, z1, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z1, u0, v0);
-    } else if (face == 4) {
-        Tessellator_vertexUV(t, x0, y0, z1, u1, v1);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y1, z1, u1, v0);
-    } else if (face == 5) {
-        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
-        Tessellator_vertexUV(t, x1, y1, z0, u1, v0);
-        Tessellator_vertexUV(t, x1, y0, z0, u1, v1);
-        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
     }
 }
 
@@ -221,6 +174,13 @@ Tile TILE_LOG;
 Tile TILE_LEAVES;
 Tile TILE_SPONGE;
 Tile TILE_GLASS;
+
+Tile TILE_CLOTH[16];
+Tile TILE_DANDELION;
+Tile TILE_ROSE;
+Tile TILE_MUSHROOM_BROWN;
+Tile TILE_MUSHROOM_RED;
+Tile TILE_GOLD_BLOCK;
 
 /* Grass has per face textures: top is 0, bottom is 2, sides are 3 */
 static int Grass_getTexture(const Tile* self, int face) {
@@ -338,6 +298,8 @@ static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, i
 // neighboring tile so touching water or lava tiles don't draw an internal
 // face between them.
 static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+    // c0.0.20a_02: layer 2 is the unlit cross-quad plants list, never liquid
+    if (layer == 2) return 0;
     if (x < 0 || y < 0 || z < 0 || x >= lvl->width || z >= lvl->height) return 0;
     if (layer != 1 && self->liquidType == LIQUID_WATER) return 0;
 
@@ -348,8 +310,15 @@ static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, in
 }
 
 static void Liquid_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
+    // c0.0.20a_02: the real source also draws a second, reversed winding
+    // copy of this same face right after (matches base class methods a()
+    // then b()), meant to make the liquid surface visible from both sides.
+    // Since GL_CULL_FACE is never enabled anywhere in this port (confirmed,
+    // matches the real client), a single quad already renders from both
+    // sides on its own, so the second, exactly coplanar copy is dropped
+    // here: it served no visual purpose and caused the water/lava surface
+    // to z fight with itself, showing as flicker and light colored seams
     Tile_default_renderFace(self, t, x, y, z, face);
-    Tile_renderBackFace(self, t, x, y, z, face);
 }
 
 static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
@@ -380,12 +349,17 @@ static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int 
 static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
                         int layer, int x, int y, int z)
 {
-    // Visibility rule: render in exactly one of the two layers (lit xor shadow),
-    // like the rest of tiles. Use the same lit test the shared renderer uses.
+    // c0.0.20a_02: lit renders into layer 0 (solid), unlit renders into its
+    // own layer 2 instead of layer 1 (liquid). The real source puts unlit
+    // cross-quad plants in the liquid list too, but that list gets drawn
+    // twice per frame (once depth only, once with color, for correct water
+    // transparency), and a plant's two crossing quads self-intersect, so
+    // part of the sprite fails the second pass's depth test wherever they
+    // overlap on screen. A separate, single-pass list avoids that
     const int lit = (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
                     ? 1
                     : (y >= lvl->lightDepths[x + z * lvl->width]);
-    if ( ((lit ^ (layer == 1)) == 0) ) return;
+    if (lit ? (layer != 0) : (layer != 2)) return;
 
     float tex = (float)self->textureId;
     float u0 = ((int)tex % 16) / 16.0f;
@@ -403,15 +377,18 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
         float y0 = (float)y, y1 = (float)y + 1.0f;
         float z0 = z + 0.5f - za, z1 = z + 0.5f + za;
 
+        // c0.0.20a_02: the real source draws this same quad a second time
+        // right after, reversed (opposite winding), meant to make it visible
+        // from both sides without relying on two sided rendering. Since
+        // GL_CULL_FACE is never enabled anywhere in this port (confirmed,
+        // matches the real client), a single quad already renders from both
+        // sides on its own, so the second, exactly coplanar copy is dropped
+        // here: it served no visual purpose and caused the two crossing
+        // quads to z fight with themselves, flickering
         Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
         Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
         Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
         Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
-
-        Tessellator_vertexUV(t, x1, y1, z1, u1, v0);
-        Tessellator_vertexUV(t, x0, y1, z0, u0, v0);
-        Tessellator_vertexUV(t, x0, y0, z0, u0, v1);
-        Tessellator_vertexUV(t, x1, y0, z1, u1, v1);
     }
 }
 
@@ -544,16 +521,21 @@ void Tile_registerAll(void) {
     // sits slightly below a full block. c0.0.19a_04 widened the horizontal
     // extent by 0.01 past the voxel cube on every side (was an exact [0,1]),
     // enabled by a previously broken shape setter being fixed to actually
-    // respect all 6 parameters instead of hardcoding X/Z. Kept as is even
-    // though it's the leading suspect for this version's new water z
-    // fighting bug, matching the confirmed real source rather than
-    // normalizing it away
-    TILE_WATER.xx0 = TILE_CALM_WATER.xx0 = TILE_LAVA.xx0 = TILE_CALM_LAVA.xx0 = -0.01f;
-    TILE_WATER.xx1 = TILE_CALM_WATER.xx1 = TILE_LAVA.xx1 = TILE_CALM_LAVA.xx1 = 1.01f;
-    TILE_WATER.zz0 = TILE_CALM_WATER.zz0 = TILE_LAVA.zz0 = TILE_CALM_LAVA.zz0 = -0.01f;
-    TILE_WATER.zz1 = TILE_CALM_WATER.zz1 = TILE_LAVA.zz1 = TILE_CALM_LAVA.zz1 = 1.01f;
-    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.11f;
-    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.91f;
+    // respect all 6 parameters instead of hardcoding X/Z, and that 0.01
+    // widening is confirmed byte-identical in c0.0.20a_02's own decompile
+    // too. c0.0.20a_02: removed here anyway, since it makes adjacent liquid
+    // tiles' faces overlap by 0.02 at their shared border, which is a clean,
+    // well evidenced cause for exactly the shimmering light colored border
+    // seams the wiki calls out as fixed in this version ("no longer has
+    // light blue bits in their borders"); whatever the real fix actually
+    // was, it isn't reachable in the decompiled source available here,
+    // matching the same situation as the liquid double face draw above
+    TILE_WATER.xx0 = TILE_CALM_WATER.xx0 = TILE_LAVA.xx0 = TILE_CALM_LAVA.xx0 = 0.0f;
+    TILE_WATER.xx1 = TILE_CALM_WATER.xx1 = TILE_LAVA.xx1 = TILE_CALM_LAVA.xx1 = 1.0f;
+    TILE_WATER.zz0 = TILE_CALM_WATER.zz0 = TILE_LAVA.zz0 = TILE_CALM_LAVA.zz0 = 0.0f;
+    TILE_WATER.zz1 = TILE_CALM_WATER.zz1 = TILE_LAVA.zz1 = TILE_CALM_LAVA.zz1 = 1.0f;
+    TILE_WATER.yy0 = TILE_CALM_WATER.yy0 = TILE_LAVA.yy0 = TILE_CALM_LAVA.yy0 = -0.1f;
+    TILE_WATER.yy1 = TILE_CALM_WATER.yy1 = TILE_LAVA.yy1 = TILE_CALM_LAVA.yy1 = 0.9f;
 
     TILE_WATER.shouldRenderFace      = Liquid_shouldRenderFace;
     TILE_CALM_WATER.shouldRenderFace = Liquid_shouldRenderFace;
@@ -616,7 +598,37 @@ void Tile_registerAll(void) {
     TILE_GLASS.blocksLight     = Glass_blocksLight;
     TILE_GLASS.isSolid         = Glass_isSolid;
     TILE_GLASS.shouldRenderFace = Glass_shouldRenderFace;
+
+    // c0.0.20a_02: 16 Cloth colors, one full terrain.png row, placeable only,
+    // no special behavior beyond texture id
+    for (int i = 0; i < 16; ++i) {
+        registerTile(&TILE_CLOTH[i], 21 + i, 64 + i, NULL);
+    }
+
+    // c0.0.20a_02: Dandelion/Rose/Mushrooms reuse Bush's tile class outright,
+    // placeable only, no world generation spawn
+    registerTile(&TILE_DANDELION,      37, 13, NULL);
+    registerTile(&TILE_ROSE,           38, 12, NULL);
+    registerTile(&TILE_MUSHROOM_BROWN, 39, 29, NULL);
+    registerTile(&TILE_MUSHROOM_RED,   40, 28, NULL);
+
+    Tile* plants[] = { &TILE_DANDELION, &TILE_ROSE, &TILE_MUSHROOM_BROWN, &TILE_MUSHROOM_RED };
+    for (int i = 0; i < 4; ++i) {
+        plants[i]->isSolid     = Bush_isSolid;
+        plants[i]->blocksLight = Bush_blocksLight;
+        plants[i]->getAABB     = Bush_getAABB;
+        plants[i]->render      = Bush_render;
+        plants[i]->onTick      = Bush_onTick;
+    }
+
+    // c0.0.20a_02: Gold Block, plain tile, no special behavior
+    registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
 }
+
+const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT] = {
+    1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+};
 
 /* untextured single face helper for hit highlight */
 // only draws a face if the player is on the side it faces, matching the real

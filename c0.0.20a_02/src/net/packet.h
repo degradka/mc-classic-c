@@ -17,12 +17,12 @@
 #define NET_PACKET_H
 
 enum {
-    PACKET_LOGIN          = 0,  // byte protocolVersion, String username/serverName, String session/motd
-    PACKET_PING           = 1,  // (no fields) -- sent periodically by the server, not just at connect
+    PACKET_LOGIN          = 0,  // byte protocolVersion, String username/serverName, String session/motd, byte userType
+    PACKET_PING           = 1,  // (no fields), sent periodically by the server, not just at connect
     PACKET_LEVEL_INIT     = 2,  // (no fields)
     PACKET_LEVEL_CHUNK    = 3,  // short length, byte[1024] chunk, byte percent
-    PACKET_LEVEL_FINALIZE = 4,  // short width, short depth, short height (depth = vertical, height = horizontal -- yes, really)
-    PACKET_SET_BLOCK_CS   = 5,  // short x,y,z, byte mode, byte type -- client to server only
+    PACKET_LEVEL_FINALIZE = 4,  // short width, short depth, short height (depth is vertical, height is horizontal, yes really)
+    PACKET_SET_BLOCK_CS   = 5,  // short x,y,z, byte mode, byte type, client to server only
     PACKET_SET_BLOCK_SC   = 6,  // short x,y,z, byte type
     PACKET_SPAWN_PLAYER   = 7,  // byte id, String name, short x,y,z, byte yaw, byte pitch
     PACKET_TELEPORT       = 8,  // byte id, short x,y,z, byte yaw, byte pitch

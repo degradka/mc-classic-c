@@ -28,6 +28,7 @@ extern void Minecraft_queueNetworkPlayerMoveLook(int id, int dx, int dy, int dz,
 extern void Minecraft_queueNetworkPlayerMove(int id, int dx, int dy, int dz);
 extern void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch);
 extern void Minecraft_despawnNetworkPlayer(int id);
+extern void Minecraft_setUserType(int userType);
 
 /* wire format helpers */
 
@@ -119,9 +120,10 @@ bool NetConnection_pollConnecting(NetConnection* c) {
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 5); // c0.0.19a_04: protocol version bumped from 4, wire shapes unchanged
+    writeByte(c, 6); // c0.0.20a_02: protocol version bumped from 5
     writeString(c, c->connectUsername);
     writeString(c, "--"); // session id placeholder, never actually used by the server
+    writeByte(c, 0); // c0.0.20a_02: new trailing userType byte, always 0 outgoing
     return true;
 }
 
@@ -173,12 +175,13 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
     const unsigned char* f = p + 1; // fields start after the id byte
 
     switch (id) {
-        case PACKET_LOGIN: { // server's login reply: serverName, motd
+        case PACKET_LOGIN: { // server's login reply: serverName, motd, userType
             char serverName[65], motd[65];
             readString(f + 1, serverName, sizeof serverName);
             readString(f + 1 + PACKET_STRING_LEN, motd, sizeof motd);
             Minecraft_beginLevelLoading(serverName);
             Minecraft_levelLoadUpdate(motd);
+            Minecraft_setUserType(f[1 + PACKET_STRING_LEN + PACKET_STRING_LEN]);
             break;
         }
         case PACKET_PING:

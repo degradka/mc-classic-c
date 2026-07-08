@@ -8,6 +8,7 @@ void Player_init(Player* p, Level* level) {
     p->e.heightOffset = 1.62f;
     for (int i = 0; i < 5; ++i) p->keys[i] = false;
     p->jumping = false;
+    p->userType = 0;
 }
 
 void Player_setKey(Player* p, int id, bool state) {
