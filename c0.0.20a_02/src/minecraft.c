@@ -570,9 +570,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.19a_04", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.20a_02", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.19a_04", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.20a_02", NULL, NULL);
     }
 
     if (!window) {
