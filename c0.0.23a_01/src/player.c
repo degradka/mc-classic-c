@@ -19,12 +19,12 @@ void Player_releaseAllKeys(Player* p) {
     for (int i = 0; i < 5; ++i) p->keys[i] = false;
 }
 
-void Player_pollKeys(Player* p, GLFWwindow* w) {
-    Player_setKey(p, PLAYER_KEY_UP,    glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(w, GLFW_KEY_UP)    == GLFW_PRESS);
-    Player_setKey(p, PLAYER_KEY_DOWN,  glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(w, GLFW_KEY_DOWN)  == GLFW_PRESS);
-    Player_setKey(p, PLAYER_KEY_LEFT,  glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(w, GLFW_KEY_LEFT)  == GLFW_PRESS);
-    Player_setKey(p, PLAYER_KEY_RIGHT, glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(w, GLFW_KEY_RIGHT) == GLFW_PRESS);
-    Player_setKey(p, PLAYER_KEY_JUMP,  glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS);
+void Player_pollKeys(Player* p, GLFWwindow* w, const Options* opts) {
+    Player_setKey(p, PLAYER_KEY_UP,    glfwGetKey(w, opts->keys[OPT_KEY_FORWARD].glfwKey) == GLFW_PRESS);
+    Player_setKey(p, PLAYER_KEY_DOWN,  glfwGetKey(w, opts->keys[OPT_KEY_BACK].glfwKey)    == GLFW_PRESS);
+    Player_setKey(p, PLAYER_KEY_LEFT,  glfwGetKey(w, opts->keys[OPT_KEY_LEFT].glfwKey)    == GLFW_PRESS);
+    Player_setKey(p, PLAYER_KEY_RIGHT, glfwGetKey(w, opts->keys[OPT_KEY_RIGHT].glfwKey)   == GLFW_PRESS);
+    Player_setKey(p, PLAYER_KEY_JUMP,  glfwGetKey(w, opts->keys[OPT_KEY_JUMP].glfwKey)    == GLFW_PRESS);
 }
 
 void Player_turn(Player* p, GLFWwindow* window, float dx, float dy) {

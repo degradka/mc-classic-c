@@ -120,6 +120,19 @@ Released June 20 2009, accumulating five real point releases (0.0.19a_05 through
 * The 100 FPS cap added last version is removed again
 * Water no longer flickers or shows light colored seams at tile borders, and no longer sometimes looks fully opaque
 
+### c0.0.23a_01
+
+Released over several months across 2010-2011, accumulating ten real point releases (0.0.21a through 0.0.23a_01), by far the largest jump this project has done. Client only, no paired server release this time.
+
+* Sound and music: footsteps and block breaking now make a sound matching the tile (stone, grass, gravel, wood, cloth, or a metallic clink for glass and gold block), and an ambient music track plays every 5 to 20 minutes
+* New Options menu (from the pause menu): toggle music, sound, mouse Y invert, and the FPS/chunk-updates counter (now hidden by default), plus a Render distance setting
+* New Controls screen (from the Options menu): every key binding, including movement, is now remappable
+* Block reach is now a straight 5 blocks in the look direction, matching vanilla's well known reach distance (was effectively unlimited before)
+* Lava is noticeably brighter
+* A 200 FPS cap replaces the removed-last-version 100 FPS one
+* Buttons across every menu now use a real textured graphic (3 states: normal, hovered, disabled) instead of flat color fills
+* The inventory/select-block screen's background is now a smaller centered box instead of a full screen fade, and the hovered slot gets a bright highlight behind it
+
 ## Building
 
 ### Windows
@@ -151,7 +164,7 @@ The built exe needs these DLLs next to it: `zlib1.dll`, `libwinpthread-1.dll`, `
 Not tested yet
 
 ```
-sudo pacman -S glew glfw
+sudo pacman -S glew glfw alsa-lib
 ```
 
 ```
@@ -161,6 +174,8 @@ make
 ```
 
 The `resources/` folder from the same version needs to sit next to the built binary.
+
+Starting with c0.0.23a_01, the Makefile also has a macOS (Darwin) linker block, using CoreAudio's AudioQueue API for sound. Neither the Linux (ALSA) nor the macOS (CoreAudio) audio backend has actually been built or run on real hardware — both were written directly against each platform's documented API, the same way this port's Windows only GLFW/OpenGL code always has been, but with no real machine available to verify them on this time. If sound doesn't work (or the build fails) on either platform, `c0.0.23a_01/src/audio/audio_backend_alsa.c` or `audio_backend_coreaudio.c` is the first place to look.
 
 ## Running the dedicated server
 
@@ -195,3 +210,13 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.20a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a)
 * [Java Edition Classic 0.0.20a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_01)
 * [Java Edition Classic 0.0.20a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_02)
+* [Java Edition Classic 0.0.21a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a)
+* [Java Edition Classic 0.0.21a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a_01)
+* [Java Edition Classic 0.0.22a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a)
+* [Java Edition Classic 0.0.22a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_01)
+* [Java Edition Classic 0.0.22a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_02)
+* [Java Edition Classic 0.0.22a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_03)
+* [Java Edition Classic 0.0.22a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_04)
+* [Java Edition Classic 0.0.22a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_05)
+* [Java Edition Classic 0.0.23a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a)
+* [Java Edition Classic 0.0.23a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a_01)

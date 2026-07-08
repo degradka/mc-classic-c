@@ -53,12 +53,23 @@ static void InventoryScreen_render(Screen* self, int xMouse, int yMouse) {
     // behind its own icons
     glPushMatrix();
     glTranslatef(0.0f, 0.0f, -95.0f);
-    Screen_fillGradient(0, 0, self->width, self->height, 0x60050500u, 0xA0303060u);
+    // c0.0.23a_01: matches the real source exactly, a fixed 240x150 box
+    // centered horizontally (not a full screen fade), colors read directly
+    // from its own fillGradient call (-1878719232, -1070583712 as signed ARGB)
+    Screen_fillGradient(self->width / 2 - 120, 30, self->width / 2 + 120, 180, 0x90050500u, 0xC0303060u);
+
+    int hovered = hitTest(self, xMouse, yMouse);
+    if (hovered >= 0) {
+        int hx = self->width / 2 + (hovered % GRID_COLUMNS) * 24 - 96;
+        int hy = self->height / 2 + (hovered / GRID_COLUMNS) * 24 - 48;
+        // c0.0.23a_01: bright white wash behind the hovered slot, on top of
+        // the background but still behind the icons (same real source call,
+        // -1862270977/-1056964609 as signed ARGB)
+        Screen_fillGradient(hx - 3, hy - 8, hx + 23, hy + 24 - 6, 0x90FFFFFFu, 0xC0FFFFFFu);
+    }
     glPopMatrix();
 
     Screen_drawCenteredString(self, "Select block", self->width / 2, 40, 0xFFFFFFu);
-
-    int hovered = hitTest(self, xMouse, yMouse);
 
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_TEXTURE_2D);
@@ -105,4 +116,8 @@ void InventoryScreen_open(Font* font, int width, int height, Level* level, int* 
     s->textureId = textureId;
 
     Minecraft_setScreen((Screen*)s);
+}
+
+bool InventoryScreen_isThis(const Screen* screen) {
+    return screen == (const Screen*)&instance;
 }

@@ -41,8 +41,6 @@ void LevelRenderer_render(LevelRenderer* renderer, const Player* player, int lay
 void LevelRenderer_destroy(LevelRenderer* renderer);
 
 void LevelRenderer_cull(LevelRenderer* renderer, const Frustum* frustum);
-// c0.0.17a: reverse cycles backward when either Shift key is held
-void LevelRenderer_toggleDrawDistance(LevelRenderer* renderer, bool reverse);
 float LevelRenderer_getFogEndDistance(const LevelRenderer* renderer);
 void LevelRenderer_renderSurroundingGround(const LevelRenderer* renderer);
 void LevelRenderer_renderSurroundingWater(const LevelRenderer* renderer);

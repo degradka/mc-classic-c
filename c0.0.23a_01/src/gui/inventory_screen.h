@@ -5,6 +5,7 @@
 
 #include "screen.h"
 #include "../level/level.h"
+#include <stdbool.h>
 
 typedef struct {
     Screen screen; // first member: an InventoryScreen* can be passed where a Screen* is expected
@@ -15,5 +16,10 @@ typedef struct {
 } InventoryScreen;
 
 void InventoryScreen_open(Font* font, int width, int height, Level* level, int* hotbar, int* selectedSlot, int textureId);
+
+// true if screen is the Select block screen's own singleton instance. c0.0.21a:
+// this is the one screen that keeps gameplay movement/hotbar switching alive
+// while open (the real source's Screen.e passthrough flag, set only here)
+bool InventoryScreen_isThis(const Screen* screen);
 
 #endif

@@ -9,6 +9,7 @@
 extern void Minecraft_setScreen(Screen* screen);
 extern void Minecraft_sendChat(const char* text);
 extern const char* Minecraft_getUserName(void);
+extern const char* Minecraft_getHoveredTabName(void);
 
 static ChatInputScreen instance;
 
@@ -74,6 +75,31 @@ static void ChatInputScreen_keyPressed(Screen* self, char eventCharacter, int ev
     }
 }
 
+// c0.0.23a_01 (wiki confirmed, matches c/b.java): clicking a name hovered in
+// the Tab overlay pastes it into the message being typed, with a separating
+// space if the current text is non-empty and doesn't already end with one
+static void ChatInputScreen_mouseClicked(Screen* self, int x, int y, int button) {
+    (void)x; (void)y;
+    ChatInputScreen* s = (ChatInputScreen*)self;
+    if (button != 0) return;
+
+    const char* hovered = Minecraft_getHoveredTabName();
+    if (!hovered) return;
+
+    int cap = 64 - (int)strlen(Minecraft_getUserName()) + 2;
+    if (cap > 64) cap = 64;
+    if (cap < 0) cap = 0;
+
+    if (s->length > 0 && s->length < cap && s->text[s->length - 1] != ' ') {
+        s->text[s->length++] = ' ';
+    }
+
+    for (int i = 0; hovered[i] != '\0' && s->length < cap; ++i) {
+        s->text[s->length++] = hovered[i];
+    }
+    s->text[s->length] = '\0';
+}
+
 void ChatInputScreen_open(Font* font, int width, int height) {
     ChatInputScreen* s = &instance;
     s->screen.width  = width;
@@ -83,7 +109,7 @@ void ChatInputScreen_open(Font* font, int width, int height) {
     s->screen.init = NULL;
     s->screen.tick = NULL;
     s->screen.keyPressed = ChatInputScreen_keyPressed;
-    s->screen.mouseClicked = NULL;
+    s->screen.mouseClicked = ChatInputScreen_mouseClicked;
     s->screen.destroy = NULL;
 
     s->text[0] = '\0';

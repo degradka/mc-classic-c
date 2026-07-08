@@ -235,12 +235,6 @@ void LevelRenderer_cull(LevelRenderer* r, const Frustum* frustum_) {
     }
 }
 
-void LevelRenderer_toggleDrawDistance(LevelRenderer* r, bool reverse) {
-    // c0.0.17a: reverse cycles when either Shift key is held, using & 3
-    // instead of % 4 so decrementing from 0 wraps to 3 correctly
-    r->drawDistance = (r->drawDistance + (reverse ? -1 : 1)) & 0x3;
-}
-
 void LevelRenderer_renderSurroundingGround(const LevelRenderer* r) {
     glCallList(r->surroundLists + 0);
 }

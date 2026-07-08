@@ -26,6 +26,12 @@ typedef struct Entity {
     bool   horizontalCollision;
     float  heightOffset;
     bool   removed;
+
+    // c0.0.23a_01: horizontal distance walked, accumulated in Entity_move and
+    // used to space out footstep sounds. makeStepSound defaults true, Particle
+    // is the only entity in the real source that disables it
+    float walkDist;
+    bool  makeStepSound;
 } Entity;
 
 void Entity_init(Entity* e, Level* level);

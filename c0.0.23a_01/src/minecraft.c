@@ -26,6 +26,8 @@
 #include "renderer/texture_fx.h"
 #include "particle/particle_engine.h"
 #include "player.h"
+#include "options.h"
+#include "audio/sound.h"
 #include "user.h"
 #include "character/zombie.h"
 #include "timer.h"
@@ -61,7 +63,6 @@ static int prevMiddle = GLFW_RELEASE;
 static int prevEnter = GLFW_RELEASE;
 static int prevNumKeys[9]; // GLFW_KEY_1..GLFW_KEY_9, initialized to GLFW_RELEASE in init()
 static int prevG    = GLFW_RELEASE;
-static int prevY    = GLFW_RELEASE;
 static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
 static int prevT    = GLFW_RELEASE;
@@ -83,7 +84,11 @@ static int gTickCount = 0;
 static int gLastMineTick = 0;
 
 static int gEditMode = 0;              // 0=destroy, 1=place
-static int gYMouseAxis = 1;            // toggled by Y key, 1 or negative 1
+
+// c0.0.23a_01: remappable keybindings and toggles, persisted to options.txt.
+// Replaces the old fixed Y key mouse invert, F key draw distance, and
+// always on FPS display
+static Options gOptions;
 
 // c0.0.16a_02: chat backlog, max 8 lines, each aged out after 10 real
 // seconds (200 ticks at 20 TPS). Populated by incoming Message packets once
@@ -125,6 +130,11 @@ static int gWinWidth  = 854;
 static int gWinHeight = 480;
 static int gIsFullscreen = 0;
 
+// c0.0.23a_01 (wiki confirmed, matches c/m.java): name currently hovered in
+// the Tab "connected players" overlay, empty when none/not held. Read by
+// ChatInputScreen's own mouseClicked to paste it into the message being typed
+static char gHoveredTabName[65] = "";
+
 static GLfloat fogColorDaylight[4] = { 0.5f, 0.8f, 1.0f, 1.0f };
 static GLfloat fogColorShadow  [4] = {  14.0f/255.0f,  11.0f/255.0f,  10.0f/255.0f, 1.0f };
 
@@ -150,7 +160,7 @@ static void releaseMouseAndOpenPause(void) {
     glfwGetFramebufferSize(window, &fbw, &fbh);
     int screenWidth  = fbw * 240 / fbh;
     int screenHeight = 240;
-    PauseScreen_init(&gPauseScreen, &gFont, screenWidth, screenHeight);
+    PauseScreen_init(&gPauseScreen, &gFont, screenWidth, screenHeight, &gOptions);
     Minecraft_setScreen((Screen*)&gPauseScreen);
 }
 
@@ -176,6 +186,7 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, size, size, 64);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
+    levelRenderer.drawDistance = gOptions.viewDistance;
 
     Entity_resetPosition(&player.e);
     mobCount = 0;
@@ -223,6 +234,7 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     LevelRenderer_destroy(&levelRenderer);
     Level_setDataFromNetwork(&level, w, h, d, blocks);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
+    levelRenderer.drawDistance = gOptions.viewDistance;
     mobCount = 0;
     netPlayerCount = 0;
     gLoading = false;
@@ -416,6 +428,18 @@ bool Minecraft_isConnected(void) {
     return gConnected;
 }
 
+// c0.0.23a_01: lets gui/screen.c's shared button renderer bind gui.png's new
+// button texture strip without every screen needing its own copy of texGui
+int Minecraft_getGuiTexture(void) {
+    return texGui;
+}
+
+// c0.0.23a_01: returns the name currently hovered in the Tab overlay, or
+// NULL if none/not held, for ChatInputScreen's own click handler to paste
+const char* Minecraft_getHoveredTabName(void) {
+    return gHoveredTabName[0] ? gHoveredTabName : NULL;
+}
+
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)w; (void)scancode; (void)mods;
 
@@ -453,7 +477,10 @@ static void charCallback(GLFWwindow* w, unsigned int codepoint) {
 // before (subtracts instead of adds), matching the real source exactly.
 static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     (void)w; (void)xoffset;
-    if (activeScreen) return;
+    // c0.0.21a: the Select block screen is the one exception that still lets
+    // the mouse wheel cycle the hotbar while it's open (see the matching
+    // note on InventoryScreen_isThis above)
+    if (activeScreen && !InventoryScreen_isThis(activeScreen)) return;
 
     int dir = (yoffset > 0.0) ? 1 : (yoffset < 0.0) ? -1 : 0;
     if (dir == 0) return;
@@ -570,9 +597,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.19a_04", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.23a_01", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.19a_04", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.23a_01", NULL, NULL);
     }
 
     if (!window) {
@@ -622,6 +649,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetCharCallback(window, charCallback);
 
     Tile_registerAll();
+    Options_init(&gOptions);
+    Sound_init(gOptions.music, gOptions.sound);
 
     for (int i = 0; i < 9; ++i) gHotbar[i] = PLACEABLE_TILE_IDS[i];
 
@@ -650,6 +679,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     Level_init(lvl, 256, 256, 64);
     LevelRenderer_init(lr, lvl, texTerrain);
+    lr->drawDistance = gOptions.viewDistance; // c0.0.23a_01: persisted option, not always 0 (FAR) on init
     calcLightDepths(lvl, 0, 0, lvl->width, lvl->height);
 
     Player_init(p, lvl);
@@ -688,6 +718,7 @@ static void destroy(Level* lvl) {
     if (!gConnected) Level_save(lvl);
     if (gConnected) NetConnection_close(&gConn);
     Level_destroy(lvl);
+    Sound_shutdown();
     glfwDestroyWindow(window);
     glfwTerminate();
 }
@@ -722,7 +753,9 @@ static void setupCamera(Player* p, float t) {
 // own blit helper's UV math exactly (divide U by 256, V by 64)
 static void drawGuiBlit(int x, int y, int u, int v, int w, int h) {
     float u0 = u / 256.0f, u1 = (u + w) / 256.0f;
-    float v0 = v / 64.0f,  v1 = (v + h) / 64.0f;
+    // c0.0.23a_01: gui.png grew from a 256x64 atlas to the real 256x256 one
+    // (adding the button texture strip further down), so v is now also /256
+    float v0 = v / 256.0f, v1 = (v + h) / 256.0f;
     Tessellator_begin(&hudTess);
     Tessellator_vertexUV(&hudTess, (float)x,     (float)(y + h), -90.0f, u0, v1);
     Tessellator_vertexUV(&hudTess, (float)(x+w), (float)(y + h), -90.0f, u1, v1);
@@ -761,9 +794,10 @@ static void drawGui(float partialTicks) {
     // only 3D icon rendering is the hotbar slot loop below, no separate
     // corner preview exists anymore (the highlighted hotbar slot is now
     // the only "what am I holding" indicator). Background bar and
-    // selection highlight come from gui.png (a 256x64 atlas: bar sprite at
-    // (0,0) 182x22, highlight sprite at (0,22) 24x22, sliding 20px per
-    // slot). Item icons are real tiny 3D isometric block renders using the
+    // selection highlight come from gui.png (256x256 as of c0.0.23a_01,
+    // was 256x64 before the button texture strip was added lower down):
+    // bar sprite at (0,0) 182x22, highlight sprite at (0,22) 24x22, sliding
+    // 20px per slot. Item icons are real tiny 3D isometric block renders using the
     // terrain atlas, not flat sprites
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -803,11 +837,13 @@ static void drawGui(float partialTicks) {
     glDisable(GL_TEXTURE_2D);
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.20a_02", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.23a_01", 2, 2, 0xFFFFFF);
 
-    char stats[64];
-    snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
-    Font_drawShadow(&gFont, &hudTess, stats, 2, 12, 0xFFFFFF);
+    if (gOptions.showFrameRate) {
+        char stats[64];
+        snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
+        Font_drawShadow(&gFont, &hudTess, stats, 2, 12, 0xFFFFFF);
+    }
 
     int cx = screenWidth / 2;
     int cy = screenHeight / 2;
@@ -841,11 +877,35 @@ static void drawGui(float partialTicks) {
         for (int i = 0; i < netPlayerCount; i++) {
             if (netPlayers[i].used) names[nameCount++] = netPlayers[i].name;
         }
+
+        // c0.0.23a_01: hovering a name here highlights it and lets an open
+        // chat screen's own click handler paste it into the message being
+        // typed (confirmed against c/m.java + c/b.java, wiki calls this out
+        // as new for this version). The real source only ever computes this
+        // while a screen is open at all (the boolean passed into Hud.render
+        // is literally "this.o != null"), matching the practical reality
+        // that the mouse cursor is only visible/usable while a screen (in
+        // practice, chat) already has it released: without that, the cursor
+        // is a hidden, arbitrary accumulated position and hovering off it
+        // would highlight a name you have no way to see yourself pointing at
+        bool canHover = (activeScreen != NULL);
+        int xm = 0, ym = 0;
+        if (canHover) computeGuiMouse(&xm, &ym);
+        gHoveredTabName[0] = '\0';
+
         for (int b = 0; b < nameCount; b++) {
             int x = cx - 120 + (b % 2) * 120;
             int y = cy - 64 + ((b / 2) << 3);
-            Font_draw(&gFont, &hudTess, names[b], x, y, 0xFFFFFF);
+            bool hovered = canHover && (xm >= x && ym >= y && xm < x + 120 && ym < y + 8);
+            if (hovered) {
+                snprintf(gHoveredTabName, sizeof gHoveredTabName, "%s", names[b]);
+                Font_draw(&gFont, &hudTess, names[b], x + 2, y, 0xFFFFFF);
+            } else {
+                Font_draw(&gFont, &hudTess, names[b], x, y, 0xEEEEEE);
+            }
         }
+    } else {
+        gHoveredTabName[0] = '\0';
     }
 
     // chat backlog, newest line just above the hotbar, older lines stacked
@@ -960,36 +1020,45 @@ static void pick(float t) {
     // nudge origin to match the 0.3 view space translate
     x += dx * 0.3; y += dy * 0.3; z += dz * 0.3;
 
-    const int reachBlocks = 3; // axis aligned reach cube
-
+    // c0.0.23a_01: real source's reach is a straight 5.0 block cast (Level.clip),
+    // matching vanilla Minecraft's well known reach distance. The old axis
+    // aligned 3 block cube check this replaces could reject a valid hit near
+    // 5 blocks away when looking nearly along one axis (sqrt(a^2+b^2+c^2)<=5
+    // does not imply each axis alone is <=3), so the raycast's own distance
+    // cap is now the sole reach authority, matching the real single mechanism
     HitResult hr;
-    if (raycast_block(&level, x, y, z, dx, dy, dz, 100.0, &hr)) {
-        int px = (int)floor(player.e.x);
-        int py = (int)floor(player.e.y);
-        int pz = (int)floor(player.e.z);
-        if (abs(hr.x - px) <= reachBlocks &&
-            abs(hr.y - py) <= reachBlocks &&
-            abs(hr.z - pz) <= reachBlocks) {
-            hitResult = hr;
-            isHitNull = 0;
-            return;
-        }
+    if (raycast_block(&level, x, y, z, dx, dy, dz, 5.0, &hr)) {
+        hitResult = hr;
+        isHitNull = 0;
+        return;
     }
     isHitNull = 1;
 }
 
 /* input actions */
 
+// c0.0.21a: pulled out of handleGameplayKeys so the Select block screen can
+// also call it directly, since that's the one screen that keeps hotbar
+// switching alive while open (see run()'s main loop)
+static void handleHotbarNumberKeys(GLFWwindow* w) {
+    for (int i = 0; i < 9; ++i) {
+        int k = glfwGetKey(w, GLFW_KEY_1 + i);
+        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) gSelectedSlot = i;
+        prevNumKeys[i] = k;
+    }
+}
+
 static void handleGameplayKeys(GLFWwindow* w) {
-    // R = reset position
-    int r = glfwGetKey(w, GLFW_KEY_R);
+    // R = reset position (c0.0.23a_01: remappable, "Load location")
+    int r = glfwGetKey(w, gOptions.keys[OPT_KEY_LOAD_LOC].glfwKey);
     if (r == GLFW_PRESS && prevR == GLFW_RELEASE) {
         Entity_resetPosition(&player.e);
     }
     prevR = r;
 
     // c0.0.14a_08: Enter no longer saves, it sets the spawn point instead
-    int enter = glfwGetKey(w, GLFW_KEY_ENTER);
+    // c0.0.23a_01: remappable, "Save location"
+    int enter = glfwGetKey(w, gOptions.keys[OPT_KEY_SAVE_LOC].glfwKey);
     if (enter == GLFW_PRESS && prevEnter == GLFW_RELEASE) {
         Level_setSpawnPos(&level, (int)player.e.x, (int)player.e.y, (int)player.e.z, player.e.yRotation);
         Entity_resetPosition(&player.e);
@@ -997,14 +1066,11 @@ static void handleGameplayKeys(GLFWwindow* w) {
     prevEnter = enter;
 
     // 1..9 = select hotbar slot directly
-    for (int i = 0; i < 9; ++i) {
-        int k = glfwGetKey(w, GLFW_KEY_1 + i);
-        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) gSelectedSlot = i;
-        prevNumKeys[i] = k;
-    }
+    handleHotbarNumberKeys(w);
 
-    // c0.0.20a_02: B opens the full inventory/select block screen
-    int kB = glfwGetKey(w, GLFW_KEY_B);
+    // c0.0.20a_02: opens the full inventory/select block screen
+    // c0.0.23a_01: remappable, "Build"
+    int kB = glfwGetKey(w, gOptions.keys[OPT_KEY_BUILD].glfwKey);
     if (kB == GLFW_PRESS && prevB == GLFW_RELEASE) {
         int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
         InventoryScreen_open(&gFont, fbw * 240 / fbh, 240, &level, gHotbar, &gSelectedSlot, texTerrain);
@@ -1019,19 +1085,22 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevG = g;
 
-    // Y = invert mouse Y axis
-    int kY = glfwGetKey(w, GLFW_KEY_Y);
-    if (kY == GLFW_PRESS && prevY == GLFW_RELEASE) {
-        gYMouseAxis *= -1;
-    }
-    prevY = kY;
+    // c0.0.23a_01: Y no longer does anything at all as a direct key press
+    // (confirmed absent from the real source's key handling entirely, not
+    // just moved to a binding), matching the wiki's "no longer inverts the
+    // mouse" note. invertMouseY is Options screen only now
 
-    // F = cycle draw distance. c0.0.17a: reverse cycles when either Shift is held
-    int kF = glfwGetKey(w, GLFW_KEY_F);
+    // F = cycle draw distance. c0.0.17a: reverse cycles when either Shift is
+    // held. c0.0.23a_01: cycles gOptions.viewDistance directly (the now
+    // persisted, canonical value) and syncs it into levelRenderer.drawDistance,
+    // and the key itself is remappable ("Toggle fog")
+    int kF = glfwGetKey(w, gOptions.keys[OPT_KEY_TOGGLE_FOG].glfwKey);
     if (kF == GLFW_PRESS && prevF == GLFW_RELEASE) {
         bool shiftHeld = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
                          glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-        LevelRenderer_toggleDrawDistance(&levelRenderer, shiftHeld);
+        gOptions.viewDistance = (gOptions.viewDistance + (shiftHeld ? -1 : 1)) & 0x3;
+        levelRenderer.drawDistance = gOptions.viewDistance;
+        Options_save(&gOptions);
     }
     prevF = kF;
 
@@ -1040,8 +1109,9 @@ static void handleGameplayKeys(GLFWwindow* w) {
     // c0.0.17a: T now does nothing at all without an active connection,
     // instead of opening a chat screen whose Enter handler would crash.
     // This is the real client's own fix for that singleplayer NPE dead end,
-    // not a deviation this port needs to keep working around anymore
-    int kT = glfwGetKey(w, GLFW_KEY_T);
+    // not a deviation this port needs to keep working around anymore.
+    // c0.0.23a_01: remappable, "Chat"
+    int kT = glfwGetKey(w, gOptions.keys[OPT_KEY_CHAT].glfwKey);
     if (kT == GLFW_PRESS && prevT == GLFW_RELEASE && gConnected) {
         int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
         ChatInputScreen_open(&gFont, fbw * 240 / fbh, 240);
@@ -1118,6 +1188,16 @@ static void mineOrPlace(void) {
             // type field is the currently selected tile even on destroy,
             // matching the real source; the server ignores it for mode 0
             if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, gHotbar[gSelectedSlot]);
+            // c0.0.23a_01: block break sound, same "step." family as
+            // footsteps, matching the real source's own volume/pitch formula
+            // exactly ((volume+1)/2, pitch*0.8, both already jittered)
+            if (t->soundType != SOUND_NONE) {
+                char name[32];
+                snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
+                Sound_play(name, (SoundType_getVolume(t->soundType) + 1.0f) / 2.0f,
+                           SoundType_getPitch(t->soundType) * 0.8f,
+                           hitResult.x + 0.5f, hitResult.y + 0.5f, hitResult.z + 0.5f);
+            }
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
         }
     } else {
@@ -1197,13 +1277,18 @@ static void handleScreenClicks(GLFWwindow* w) {
 // chat message read as a fresh press the frame gameplay polling resumes,
 // setting the spawn point right after chat closes.
 static void syncGameplayKeyEdges(GLFWwindow* w) {
-    prevR     = glfwGetKey(w, GLFW_KEY_R);
-    prevEnter = glfwGetKey(w, GLFW_KEY_ENTER);
-    for (int i = 0; i < 9; ++i) prevNumKeys[i] = glfwGetKey(w, GLFW_KEY_1 + i);
+    prevR     = glfwGetKey(w, gOptions.keys[OPT_KEY_LOAD_LOC].glfwKey);
+    prevEnter = glfwGetKey(w, gOptions.keys[OPT_KEY_SAVE_LOC].glfwKey);
+    // c0.0.21a: the Select block screen keeps number key hotbar switching
+    // live every frame via its own handleHotbarNumberKeys call (see run()'s
+    // main loop), so resyncing prevNumKeys here too would erase each
+    // frame's edge before that call ever got a chance to see it
+    if (!(activeScreen && InventoryScreen_isThis(activeScreen))) {
+        for (int i = 0; i < 9; ++i) prevNumKeys[i] = glfwGetKey(w, GLFW_KEY_1 + i);
+    }
     prevG = glfwGetKey(w, GLFW_KEY_G);
-    prevY = glfwGetKey(w, GLFW_KEY_Y);
-    prevF = glfwGetKey(w, GLFW_KEY_F);
-    prevT = glfwGetKey(w, GLFW_KEY_T);
+    prevF = glfwGetKey(w, gOptions.keys[OPT_KEY_TOGGLE_FOG].glfwKey);
+    prevT = glfwGetKey(w, gOptions.keys[OPT_KEY_CHAT].glfwKey);
 }
 
 /* frame */
@@ -1220,6 +1305,16 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         releaseMouseAndOpenPause();
     }
 
+    Sound_setListener(p->e.x, p->e.y, p->e.z, p->e.yRotation);
+
+    // c0.0.23a_01: keeps the renderer and the sound module in sync whenever
+    // gOptions.viewDistance/music/sound change, regardless of source (F key,
+    // or the Options screen's toggle buttons, neither of which has a
+    // reference back into this file's own levelRenderer/Sound module to sync
+    // directly at the point of the click)
+    levelRenderer.drawDistance = gOptions.viewDistance;
+    Sound_setEnabled(gOptions.music, gOptions.sound);
+
     int grabbed = (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED);
     if (grabbed) {
         double mx, my;
@@ -1231,7 +1326,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         float dx = (float)(mx - cx);
         float dy = (float)(my - cy);
 
-        dy = -dy * (float)gYMouseAxis;
+        dy = -dy * (gOptions.invertMouseY ? -1.0f : 1.0f);
 
         Player_turn(p, window, dx, dy);
 
@@ -1329,8 +1424,11 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     glfwSwapBuffers(window);
 
-    // c0.0.20a_02: the 100fps cap added in c0.0.19a_04 (Display.sync(100) in
-    // the real source) is removed with no replacement, uncapped again
+    // c0.0.23a_01: a 200fps cap returns (0.0.22a), a flat 5ms sleep per frame
+    // (1000/5 = 200) rather than the old c0.0.19a_04 cap's Display.sync-style
+    // budget tracking. timeBeginPeriod(1) in timer.c already requests the 1ms
+    // Sleep() granularity this needs to actually land on 200fps on Windows
+    sleepMillis(5);
 }
 
 /* main loop */
@@ -1372,13 +1470,27 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
                 // so recheck before polling raw key state back into the player,
                 // otherwise the still held movement key gets re-armed the same
                 // frame Player_releaseAllKeys just cleared it
-                if (!activeScreen) Player_pollKeys(p, window);
+                if (!activeScreen) Player_pollKeys(p, window, &gOptions);
             } else {
                 handleScreenClicks(window);
                 syncGameplayKeyEdges(window);
                 // handleScreenClicks's button callback can close the screen,
                 // setting activeScreen to null mid frame, so recheck before use.
                 if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
+
+                // c0.0.21a: walking and switching hotbar slots both still
+                // work while the Select block screen is open, confirmed
+                // against the real source's Screen.e passthrough flag
+                // (o.java gates its mouse wheel/movement continuation on
+                // this.o==null || this.o.e, and only the Select block
+                // screen's own constructor sets e=true). Left/right/middle
+                // click still don't reach the world here though, matching
+                // the real source nesting those under a stricter
+                // this.o==null only check that this screen doesn't satisfy
+                if (activeScreen && InventoryScreen_isThis(activeScreen)) {
+                    handleHotbarNumberKeys(window);
+                    Player_pollKeys(p, window, &gOptions);
+                }
             }
 
             int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
@@ -1443,6 +1555,8 @@ static void tick(Player* p, GLFWwindow* w) {
     for (int i = 0; i < chatLineCount; i++) {
         chatLines[i].age++;
     }
+
+    Sound_tickMusic();
 
     // matches f(): drains queued packets, then unconditionally broadcasts
     // the local player's own position every tick, no dirty check, no rate

@@ -5,6 +5,7 @@
 
 #include "common.h"
 #include "entity.h"
+#include "options.h"
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
 
@@ -33,7 +34,10 @@ void Player_turn(Player* player, GLFWwindow* window, float dx, float dy);
 
 void Player_setKey(Player* player, int id, bool state);
 void Player_releaseAllKeys(Player* player);
-// syncs the 5 movement/jump keys from live GLFW state into player->keys[]
-void Player_pollKeys(Player* player, GLFWwindow* window);
+// syncs the 5 movement/jump keys from live GLFW state into player->keys[],
+// reading each key's remappable binding from Options rather than a hardcoded
+// key. c0.0.23a_01: the real source checks only the single configured key
+// per action, no fallback to a second hardcoded key, matching here too
+void Player_pollKeys(Player* player, GLFWwindow* window, const Options* opts);
 
 #endif  // PLAYER_H

@@ -10,6 +10,28 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// c0.0.23a_01: Tile$SoundType table, matching the real source's enum exactly
+const SoundTypeDef SOUND_TYPES[SOUND_TYPE_COUNT] = {
+    { "-",      0.0f, 0.0f }, // SOUND_NONE
+    { "grass",  0.6f, 1.0f }, // SOUND_GRASS
+    { "grass",  0.7f, 1.2f }, // SOUND_CLOTH
+    { "gravel", 1.0f, 1.0f }, // SOUND_GRAVEL
+    { "stone",  1.0f, 1.0f }, // SOUND_STONE
+    { "stone",  1.0f, 2.0f }, // SOUND_METAL
+    { "wood",   1.0f, 1.0f }, // SOUND_WOOD
+};
+
+// matches Tile$SoundType.getVolume()/getPitch(): both apply their own random
+// jitter on every call, not just once at registration
+float SoundType_getVolume(SoundType t) {
+    float r = (float)rand() / (float)RAND_MAX;
+    return SOUND_TYPES[t].volume / (r * 0.4f + 1.0f) * 0.5f;
+}
+float SoundType_getPitch(SoundType t) {
+    float r = (float)rand() / (float)RAND_MAX;
+    return SOUND_TYPES[t].pitch / (r * 0.2f + 0.9f);
+}
+
 static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
 static int Tile_default_mayPick(const Tile* self)    { (void)self; return 1; }
@@ -133,6 +155,7 @@ static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, in
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
+    t->soundType = SOUND_NONE;
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
     t->tickDelay = 0;
     t->particleGravity = 1.0f;
@@ -483,6 +506,15 @@ void Tile_registerAll(void) {
     registerTile(&TILE_BUSH,       6, 15,  NULL);
     registerTile(&TILE_BEDROCK,    7, 17,  NULL);
 
+    // c0.0.23a_01: Tile$SoundType assignments, read directly from the real
+    // source's per tile constructor calls (not inferred)
+    TILE_ROCK.soundType       = SOUND_STONE;
+    TILE_GRASS.soundType      = SOUND_GRASS;
+    TILE_DIRT.soundType       = SOUND_GRASS;
+    TILE_STONEBRICK.soundType = SOUND_STONE;
+    TILE_WOOD.soundType       = SOUND_WOOD;
+    TILE_BEDROCK.soundType    = SOUND_STONE;
+
     TILE_GRASS.onTick     = Grass_onTick;
 
     TILE_BUSH.isSolid     = Bush_isSolid;
@@ -574,7 +606,12 @@ void Tile_registerAll(void) {
     registerTile(&TILE_GOLD_ORE,   14, 32, NULL);
     registerTile(&TILE_IRON_ORE,   15, 33, NULL);
     registerTile(&TILE_COAL_ORE,   16, 34, NULL);
-    registerTile(&TILE_LOG,        17,  0, Log_getTexture);
+    // c0.0.23a_01: textureId (used for break particles, see Particle_init)
+    // is 20, not 0. Confirmed directly against the real source's Log
+    // subclass, which explicitly sets its base texture field to 20 (the bark
+    // texture) in its constructor, on top of its own per face getTexture
+    // override; Grass's equivalent field was already correct (3)
+    registerTile(&TILE_LOG,        17, 20, Log_getTexture);
     registerTile(&TILE_LEAVES,     18, 22, NULL);
 
     TILE_SAND.onTick   = TILE_GRAVEL.onTick   = FallingTile_onTick;
@@ -583,6 +620,17 @@ void Tile_registerAll(void) {
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
     TILE_LEAVES.particleGravity = 0.4f; // c0.0.16a_02: leaf break particles fall slower
+
+    TILE_SAND.soundType     = SOUND_GRAVEL;
+    TILE_GRAVEL.soundType   = SOUND_GRAVEL;
+    TILE_GOLD_ORE.soundType = SOUND_STONE;
+    TILE_IRON_ORE.soundType = SOUND_STONE;
+    TILE_COAL_ORE.soundType = SOUND_STONE;
+    TILE_LOG.soundType      = SOUND_WOOD;
+    // c0.0.23a_01: Leaves uses SOUND_GRASS, matching the real source's own
+    // per tile constructor call exactly (not SOUND_NONE, despite Leaves being
+    // otherwise a fairly "insubstantial" non solid, non light blocking tile)
+    TILE_LEAVES.soundType   = SOUND_GRASS;
 
     // c0.0.19a_04: texture 48 is inferred, not directly present in the
     // decompiled bytecode (the constructor call never assigns one there).
@@ -594,15 +642,24 @@ void Tile_registerAll(void) {
 
     TILE_SPONGE.onPlace   = Sponge_onPlace;
     TILE_SPONGE.onRemoved = Sponge_onRemoved;
+    TILE_SPONGE.soundType = SOUND_CLOTH;
+    // c0.0.23a_01: read directly from the real source's own constructor call
+    // (0.9, not the default 1.0), the only other tile besides Leaves with a
+    // non default particle gravity
+    TILE_SPONGE.particleGravity = 0.9f;
 
     TILE_GLASS.blocksLight     = Glass_blocksLight;
     TILE_GLASS.isSolid         = Glass_isSolid;
     TILE_GLASS.shouldRenderFace = Glass_shouldRenderFace;
+    // c0.0.23a_01: confirmed real quirk, glass makes a metallic clink, not a
+    // glass shatter sound, in the original game
+    TILE_GLASS.soundType       = SOUND_METAL;
 
     // c0.0.20a_02: 16 Cloth colors, one full terrain.png row, placeable only,
     // no special behavior beyond texture id
     for (int i = 0; i < 16; ++i) {
         registerTile(&TILE_CLOTH[i], 21 + i, 64 + i, NULL);
+        TILE_CLOTH[i].soundType = SOUND_CLOTH;
     }
 
     // c0.0.20a_02: Dandelion/Rose/Mushrooms reuse Bush's tile class outright,
@@ -623,6 +680,7 @@ void Tile_registerAll(void) {
 
     // c0.0.20a_02: Gold Block, plain tile, no special behavior
     registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
+    TILE_GOLD_BLOCK.soundType = SOUND_METAL;
 }
 
 const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT] = {

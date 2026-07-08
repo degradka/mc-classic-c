@@ -15,11 +15,14 @@ static float randf(void) { return (float)rand() / (float)RAND_MAX; }
 static int wrap16(int v) { return v & 15; }
 
 static void Lava_toRGBA(LavaTextureFX* fx) {
+    // c0.0.23a_01: lava made noticeably brighter, the simulated value is now
+    // doubled before the color ramp, and the red channel ramp raises the
+    // floor from 55 to 155 while halving its slope
     for (int i = 0; i < TEXTURE_FX_SIZE * TEXTURE_FX_SIZE; ++i) {
-        float t = fx->current[i];
+        float t = fx->current[i] * 2.0f;
         if (t > 1.0f) t = 1.0f;
         if (t < 0.0f) t = 0.0f;
-        fx->base.pixels[i * 4 + 0] = (unsigned char)(int)(t * 200.0f + 55.0f);
+        fx->base.pixels[i * 4 + 0] = (unsigned char)(int)(t * 100.0f + 155.0f);
         fx->base.pixels[i * 4 + 1] = (unsigned char)(int)(t * t * 255.0f);
         fx->base.pixels[i * 4 + 2] = (unsigned char)(int)(t * t * t * t * 128.0f);
         fx->base.pixels[i * 4 + 3] = 255;

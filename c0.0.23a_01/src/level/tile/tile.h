@@ -15,10 +15,36 @@ typedef struct Tile Tile;
 #define LIQUID_WATER 1
 #define LIQUID_LAVA  2
 
+// c0.0.23a_01: Tile$SoundType, gates footstep/break sounds. Real source pairs
+// each with a base volume/pitch, both further randomized per play (see
+// SoundType_getVolume/getPitch)
+typedef enum {
+    SOUND_NONE = 0,
+    SOUND_GRASS,
+    SOUND_CLOTH,
+    SOUND_GRAVEL,
+    SOUND_STONE,
+    SOUND_METAL,
+    SOUND_WOOD,
+    SOUND_TYPE_COUNT
+} SoundType;
+
+typedef struct {
+    const char* name; // "step.<name>" is the sound lookup key
+    float volume;
+    float pitch;
+} SoundTypeDef;
+
+extern const SoundTypeDef SOUND_TYPES[SOUND_TYPE_COUNT];
+
+float SoundType_getVolume(SoundType t);
+float SoundType_getPitch(SoundType t);
+
 struct Tile {
     int id;
     int textureId;
     int liquidType; // LIQUID_NONE / LIQUID_WATER / LIQUID_LAVA
+    SoundType soundType;
 
     // Liquid only instance data, zero for regular tiles. Flowing and calm
     // variant ids, and how many tiles a spread can travel before stopping.

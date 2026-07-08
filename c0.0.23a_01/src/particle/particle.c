@@ -11,6 +11,7 @@ void Particle_init(Particle* p, Level* level,
                    float mx, float my, float mz, const Tile* tile)
 {
     Entity_init(&p->base, level);
+    p->base.makeStepSound = false; // c0.0.23a_01: particles never play footstep sounds
     p->textureId = tile->textureId;
     p->gravity = tile->particleGravity;
 

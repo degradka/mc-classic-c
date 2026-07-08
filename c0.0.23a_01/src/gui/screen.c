@@ -7,6 +7,7 @@
 
 // implemented in minecraft.c
 extern void Minecraft_closeScreenAndGrabMouse(void);
+extern int  Minecraft_getGuiTexture(void);
 
 static Tessellator TESSELLATOR;
 
@@ -86,26 +87,50 @@ void Screen_drawString(Screen* s, const char* str, int x, int y, unsigned int co
     Font_drawShadow(s->font, &TESSELLATOR, str, x, y, (int)color);
 }
 
+// draws one half of a button from gui.png's button strip: u/v/w/h are all in
+// texel units against the 256x256 atlas (matches the real source's shared
+// h.b() helper, 1/256 = 0.00390625f)
+static void drawButtonHalf(int textureId, int x, int y, int u, int v, int w, int h) {
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    float u0 = u / 256.0f, v0 = v / 256.0f;
+    float u1 = (u + w) / 256.0f, v1 = (v + h) / 256.0f;
+    glBegin(GL_QUADS);
+    glTexCoord2f(u0, v1); glVertex2f((float)x,     (float)(y + h));
+    glTexCoord2f(u1, v1); glVertex2f((float)(x + w), (float)(y + h));
+    glTexCoord2f(u1, v0); glVertex2f((float)(x + w), (float)y);
+    glTexCoord2f(u0, v0); glVertex2f((float)x,     (float)y);
+    glEnd();
+}
+
+// c0.0.23a_01: buttons are now drawn from gui.png's button texture strip
+// (200x20 per state, stacked at v=46/66/86 for disabled/normal/hover) instead
+// of flat color fills, matching the real source's o.java exactly: each
+// button draws as two textured halves, the left sampling the strip's left
+// edge and the right sampling its right edge (u=200-halfWidth), so buttons
+// narrower than 200px never stretch the middle of the texture
 void Screen_renderButtons(Screen* self, Button* buttons, int count, int xMouse, int yMouse) {
+    int guiTex = Minecraft_getGuiTexture();
+
     for (int i = 0; i < count; ++i) {
         Button* b = &buttons[i];
         if (!b->visible) continue;
 
-        if (!b->enabled) {
-            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF8080A0u);
-            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF909090u);
-            Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFA0A0A0u);
-            continue;
-        }
-
-        Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF000000u);
         int hovered = (xMouse >= b->x && yMouse >= b->y && xMouse < b->x + b->w && yMouse < b->y + b->h);
-        if (hovered) {
-            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFFA0A0A0u);
-            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF8080A0u);
+        int state = !b->enabled ? 0 : (hovered ? 2 : 1); // 0=disabled, 1=normal, 2=hover
+
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        int halfW = b->w / 2;
+        int v = 46 + state * 20;
+        drawButtonHalf(guiTex, b->x, b->y, 0, v, halfW, b->h);
+        drawButtonHalf(guiTex, b->x + halfW, b->y, 200 - halfW, v, halfW, b->h);
+        glDisable(GL_TEXTURE_2D);
+
+        if (!b->enabled) {
+            Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFA0A0A0u);
+        } else if (hovered) {
             Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0x00FFFFA0u);
         } else {
-            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF707070u);
             Screen_drawCenteredString(self, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0x00E0E0E0u);
         }
     }

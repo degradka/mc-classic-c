@@ -2,8 +2,10 @@
 
 #include "entity.h"
 #include "level/tile/tile.h"
+#include "audio/sound.h"
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #define DEG2RAD(d) ((d) * M_PI / 180.0)
 
@@ -18,6 +20,8 @@ void Entity_init(Entity* e, Level* level) {
     e->boundingBoxWidth  = 0.6f;
     e->boundingBoxHeight = 1.8f;
     e->removed = false;
+    e->walkDist = 0.0f;
+    e->makeStepSound = true;
 
     e->prevX = e->x;
     e->prevY = e->y;
@@ -75,6 +79,7 @@ void Entity_onTick(Entity* e) {
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
     const float ox = dx, oy = dy, oz = dz;
+    const float startX = e->x, startZ = e->z;
 
     AABB expanded = AABB_expand(&e->boundingBox, dx, dy, dz);
     ArrayList_AABB hits = Level_getCubes(e->level, &expanded);
@@ -98,6 +103,25 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
     e->x = (e->boundingBox.minX + e->boundingBox.maxX) * 0.5f;
     e->y =  e->boundingBox.minY + e->heightOffset;
     e->z = (e->boundingBox.minZ + e->boundingBox.maxZ) * 0.5f;
+
+    // c0.0.23a_01: footstep sounds, matching the real source's Entity.move()
+    // tail exactly: walkDist accumulates the actual post-collision horizontal
+    // displacement (not the requested pre-collision delta), scaled by 0.6,
+    // and fires once it passes 1.0, reading the tile 0.2 units below the feet
+    float ddx = e->x - startX;
+    float ddz = e->z - startZ;
+    e->walkDist += sqrtf(ddx * ddx + ddz * ddz) * 0.6f;
+    if (e->makeStepSound) {
+        int tileId = Level_getTile(e->level, (int)e->x, (int)(e->y - 0.2f - e->heightOffset), (int)e->z);
+        const Tile* t = (tileId > 0 && tileId < 256) ? gTiles[tileId] : NULL;
+        if (e->walkDist > 1.0f && t && t->soundType != SOUND_NONE) {
+            e->walkDist -= (float)(int)e->walkDist;
+            char name[32];
+            snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
+            Sound_play(name, SoundType_getVolume(t->soundType) * 0.75f, SoundType_getPitch(t->soundType),
+                       e->x, e->y, e->z);
+        }
+    }
 
     if (hits.aabbs) free(hits.aabbs);
 }
