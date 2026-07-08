@@ -8,7 +8,7 @@ INCLUDE := -I.
 # debug (default) or release
 BUILD ?= debug
 
-SRC = minecraft.c player.c timer.c  hitresult.c jrandom.c java_sort.c java_hashmap.c \
+SRC = minecraft.c player.c timer.c  hitresult.c jrandom.c java_sort.c java_hashmap.c keys.c options.c \
       level/chunk.c level/level.c level/level_io.c level/javaser.c jgzip.c level/level_renderer.c \
       level/tile/tile.c phys/aabb.c entity.c character/zombie.c \
       character/polygon.c character/cube.c \
@@ -18,11 +18,11 @@ SRC = minecraft.c player.c timer.c  hitresult.c jrandom.c java_sort.c java_hashm
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c renderer/textures.c renderer/tessellator.c \
       renderer/frustum.c renderer/texture_fx.c gui/font.c gui/screen.c gui/pause_screen.c gui/new_level_screen.c \
-      gui/chat_screen.c gui/error_screen.c gui/block_select_screen.c \
-      net/net_socket.c net/packet.c net/connection.c net/network_player.c
+      gui/chat_screen.c gui/error_screen.c gui/inventory_screen.c gui/options_screen.c gui/controls_screen.c \
+      net/net_socket.c net/packet.c net/connection.c net/network_player.c \
+      audio/sound.c
 
-OBJ := $(SRC:.c=.o)
-DEP := $(OBJ:.o=.d)
+# stb_vorbis.c is included by sound.c
 
 UNAME_S := $(shell uname -s)
 
@@ -37,24 +37,31 @@ endif
 
 ifeq ($(UNAME_S),Linux)
     EXE     := minecraft
-    LDFLAGS := -lglfw -lGLEW -lGL -lGLU -lm -lz
+    SRC     += audio/audio_backend_alsa.c
+    LDFLAGS := -lglfw -lGLEW -lGL -lGLU -lm -lz -lpthread -lasound
 endif
 
 ifeq ($(UNAME_S),Darwin)
     EXE     := minecraft
     # Homebrew glfw/glew: -lglfw -lGLEW, OpenGL(+GLU) comes via framework
-    LDFLAGS := -lglfw -lGLEW -framework OpenGL -lz
+    SRC     += audio/audio_backend_coreaudio.c
+    LDFLAGS := -lglfw -lGLEW -framework OpenGL -framework AudioToolbox -lz -lpthread
 endif
 
 ifeq ($(OS),Windows_NT)
     EXE := minecraft.exe
-    # MSYS2 / MinGW (assumes -lglfw3 -lglew32 in your env)
+    SRC += audio/audio_backend_win.c
+    # MSYS2 / MinGW (assumes -lglfw3 -lglew32 in your env), -lwinmm for the 1 ms timer and audio
     ifeq ($(BUILD),release)
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -mwindows
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm -mwindows
     else
-        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32
+        LDFLAGS := -lglfw3 -lglew32 -lopengl32 -lglu32 -lz -lws2_32 -lwinmm
     endif
 endif
+
+# after the platform blocks, they add the audio backend to SRC
+OBJ := $(SRC:.c=.o)
+DEP := $(OBJ:.o=.d)
 
 .PHONY: all
 all: $(EXE)

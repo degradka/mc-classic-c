@@ -5,6 +5,28 @@
 #include "../../particle/particle.h"
 #include <string.h>
 #include <math.h>
+#include "../../jrandom.h"
+
+const SoundType SOUND_TYPES[7] = {
+    { "-", 0.0f, 0.0f },
+    { "grass", 0.6f, 1.0f },
+    { "grass", 0.7f, 1.2f },
+    { "gravel", 1.0f, 1.0f },
+    { "stone", 1.0f, 1.0f },
+    { "stone", 1.0f, 2.0f },
+    { "wood", 1.0f, 1.0f },
+};
+
+// Tile.random, only the sound types use it
+static JRandom tileRandom;
+
+float SoundType_getVolume(const SoundType* st) {
+    return st->volume / (JRandom_nextFloat(&tileRandom) * 0.4f + 1.0f) * 0.5f;
+}
+
+float SoundType_getPitch(const SoundType* st) {
+    return st->pitch / (JRandom_nextFloat(&tileRandom) * 0.2f + 0.9f);
+}
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -12,7 +34,6 @@
 
 static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
-static int Tile_default_mayPick(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_getAABB(const Tile* self, int x,int y,int z, AABB* out) {
     (void)self;
     if (out) *out = AABB_create(x, y, z, x+1, y+1, z+1);
@@ -224,7 +245,7 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->isSolid     = Tile_default_isSolid;
     t->blocksLight = Tile_default_blocksLight;
     t->getAABB     = Tile_default_getAABB;
-    t->mayPick     = Tile_default_mayPick;
+    t->soundType = SOUND_NONE;
     t->neighborChanged = Tile_default_neighborChanged;
     t->onPlace = Tile_default_onPlace;
     t->onAdded = Tile_default_onAdded;
@@ -311,9 +332,15 @@ static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 
 // sand and gravel drop straight down to the first tile below
+// sand and gravel sink through water and lava too, swapping places with it
 static void Falling_fall(Level* lvl, int x, int y, int z) {
     int ny = y;
-    while (Level_getTile(lvl, x, ny - 1, z) == 0 && ny > 0) ny--;
+    for (;;) {
+        int id = Level_getTile(lvl, x, ny - 1, z);
+        bool through = id == 0 || gTiles[id]->liquidType == LIQUID_WATER || gTiles[id]->liquidType == LIQUID_LAVA;
+        if (!through || ny <= 0) break;
+        ny--;
+    }
     if (ny != y) Level_swap(lvl, x, y, z, x, ny, z);
 }
 
@@ -332,7 +359,6 @@ static int Liquid_getAABB(const Tile* self, int x,int y,int z, AABB* out){
     (void)self; (void)x; (void)y; (void)z; (void)out;
     return 0;
 }
-static int Liquid_mayPick(const Tile* self) { (void)self; return 0; }
 
 static void Liquid_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
     Level_addToTickNextTick(lvl, x, y, z, self->tileId);
@@ -458,7 +484,6 @@ static void setupLiquid(Tile* t, int id, int liquidType, bool calm) {
     t->shouldTick = !calm;
     t->isSolid = Liquid_isSolid;
     t->getAABB = Liquid_getAABB;
-    t->mayPick = Liquid_mayPick;
     t->shouldRenderFace = Liquid_shouldRenderFace;
     t->renderFace = Liquid_renderFace;
     t->onPlace = Liquid_onPlace;
@@ -564,6 +589,17 @@ void Tile_registerAll(void) {
     registerTile(&TILE_BROWN_MUSHROOM, 39, 29, NULL);
     registerTile(&TILE_RED_MUSHROOM,   40, 28, NULL);
     registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
+
+    JRandom_initRandom(&tileRandom);
+    static const int sounds[42] = {
+        SOUND_NONE, SOUND_STONE, SOUND_GRASS, SOUND_GRASS, SOUND_STONE, SOUND_WOOD, SOUND_NONE, SOUND_STONE,
+        SOUND_NONE, SOUND_NONE, SOUND_NONE, SOUND_NONE, SOUND_GRAVEL, SOUND_GRAVEL,
+        SOUND_STONE, SOUND_STONE, SOUND_STONE, SOUND_WOOD, SOUND_GRASS, SOUND_CLOTH, SOUND_METAL,
+        SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH,
+        SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH, SOUND_CLOTH,
+        SOUND_NONE, SOUND_NONE, SOUND_NONE, SOUND_NONE, SOUND_METAL,
+    };
+    for (int i = 1; i < 42; i++) ((Tile*)gTiles[i])->soundType = sounds[i];
 
     TILE_GRASS.shouldTick = true;
     TILE_GRASS.onTick     = Grass_onTick;

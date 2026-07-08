@@ -56,14 +56,14 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* nam
     memset(np, 0, sizeof *np);
     Entity_init(&np->base, level);
     np->id = id;
-    snprintf(np->name, sizeof np->name, "%s", name);
+    snprintf(np->displayName, sizeof np->displayName, "%s", name);
+    Font_removeColorCodes(name, np->name, sizeof np->name);
     np->xp = x;
     np->yp = y;
     np->zp = z;
     Entity_setPosition(&np->base, (float)x / 32.0f, (float)y / 32.0f, (float)z / 32.0f);
     np->base.xRotation = xRot;
     np->base.yRotation = yRot;
-    np->base.heightOffset = 1.62f;
 
     if (!sModelInit) { ZombieModel_init(&sModel); sModelInit = 1; }
     if (!texChar) texChar = loadTexture("resources/char.png", GL_NEAREST);
@@ -159,7 +159,7 @@ void NetworkPlayer_render(NetworkPlayer* np, float a) {
     float x = np->base.prevX + (np->base.x - np->base.prevX) * a;
     float y = np->base.prevY + (np->base.y - np->base.prevY) * a;
     float z = np->base.prevZ + (np->base.z - np->base.prevZ) * a;
-    glTranslatef(x, y - np->base.heightOffset, z);
+    glTranslatef(x, y - 1.62f, z);
     glScalef(1.0f, -1.0f, 1.0f);
     glTranslatef(0.0f, yy * size, 0.0f);
     glRotatef(bodyYRot, 0.0f, 1.0f, 0.0f);
@@ -176,15 +176,15 @@ void NetworkPlayer_render(NetworkPlayer* np, float a) {
     glRotatef(-Minecraft_getPlayerYRot(), 0.0f, 1.0f, 0.0f);
     float s = 0.05f;
     glScalef(0.05f, -s, s);
-    glTranslatef((float)(-Font_width(font, np->name)) / 2.0f, 0.0f, 0.0f);
+    glTranslatef((float)(-Font_width(font, np->displayName)) / 2.0f, 0.0f, 0.0f);
     // the entity light is on here, the front name is drawn without it
     glNormal3f(1.0f, -1.0f, 1.0f);
     glDisable(GL_LIGHTING);
     glDisable(GL_LIGHT0);
     if (equalsIgnoreCase(np->name, "Notch")) {
-        Font_draw(font, &sNameTess, np->name, 0, 0, 0xFFFF00);
+        Font_draw(font, &sNameTess, np->displayName, 0, 0, 0xFFFF00);
     } else {
-        Font_draw(font, &sNameTess, np->name, 0, 0, 0xFFFFFF);
+        Font_draw(font, &sNameTess, np->displayName, 0, 0, 0xFFFFFF);
     }
     glEnable(GL_LIGHT0);
     glEnable(GL_LIGHTING);

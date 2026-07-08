@@ -25,6 +25,7 @@ void Particle_init(Particle* p, Level* level,
     p->xd = p->xd / dd * speed * 0.4f;
     p->yd = p->yd / dd * speed * 0.4f + 0.1f;
     p->zd = p->zd / dd * speed * 0.4f;
+    p->base.makeStepSound = false;
 
     p->textureUOffset = (float)JRandom_mathRandom() * 3.0f;
     p->textureVOffset = (float)JRandom_mathRandom() * 3.0f;

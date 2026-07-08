@@ -5,12 +5,7 @@
 
 #include "screen.h"
 
-typedef struct {
-    Screen screen; // must be first so ErrorScreen* can be used as Screen*
-    char title[128];
-    char message[128];
-} ErrorScreen;
-
-void ErrorScreen_init(ErrorScreen* s, Font* font, int width, int height, const char* title, const char* message);
+Screen* ErrorScreen_new(const char* title, const char* message);
+bool ErrorScreen_isOpen(const Screen* s);
 
 #endif

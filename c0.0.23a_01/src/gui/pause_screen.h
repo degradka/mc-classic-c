@@ -5,10 +5,7 @@
 
 #include "screen.h"
 
-typedef struct {
-    Screen screen; // must be first so PauseScreen* can be used as Screen*
-} PauseScreen;
-
-void PauseScreen_init(PauseScreen* ps, Font* font, int width, int height);
+Screen* PauseScreen_new(void);
+bool PauseScreen_isOpen(const Screen* s);
 
 #endif

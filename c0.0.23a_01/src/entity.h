@@ -25,6 +25,11 @@ typedef struct Entity {
     bool  horizontalCollision;
     float heightOffset;
     bool  removed;
+    float walkDist;
+    bool  makeStepSound;
+    // sounds still following it, the level hands it to the sound code instead of freeing it
+    int   soundRefs;
+    bool  soundReleased;
 } Entity;
 
 void Entity_init(Entity* e, Level* level);
@@ -48,5 +53,6 @@ void Entity_setSize(Entity* e, float width, float height);
 bool Entity_isFree(const Entity* e, float dx, float dy, float dz);
 bool Entity_isInWater(const Entity* e);
 bool Entity_isInLava(const Entity* e);
+void Entity_playSound(Entity* e, const char* name, float volume, float pitch);
 
 #endif

@@ -17,6 +17,8 @@ void Font_init(Font* f, const char* path);
 void Font_draw(Font* f, Tessellator* t, const char* s, int x, int y, int color);
 void Font_drawShadow(Font* f, Tessellator* t, const char* s, int x, int y, int color);
 int  Font_width(Font* f, const char* s);
+// drops every & and the character after it
+void Font_removeColorCodes(const char* s, char* out, int size);
 
 // set when drawing throws, the frame isn't shown then
 extern bool Font_threw;

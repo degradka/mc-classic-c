@@ -5,13 +5,7 @@
 
 #include "screen.h"
 
-typedef struct {
-    Screen screen; // must be first so ChatScreen* can be used as Screen*
-    char text[72];
-    int length;
-    int counter;
-} ChatScreen;
-
-void ChatScreen_init(ChatScreen* s, Font* font, int width, int height);
+Screen* ChatScreen_new(void);
+bool ChatScreen_isOpen(const Screen* s);
 
 #endif

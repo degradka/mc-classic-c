@@ -5,6 +5,7 @@
 #include "level/tile/tile.h"
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 void Entity_init(Entity* e, Level* level) {
     e->level = level;
@@ -19,6 +20,10 @@ void Entity_init(Entity* e, Level* level) {
     e->boundingBoxWidth  = 0.6f;
     e->boundingBoxHeight = 1.8f;
     e->removed = false;
+    e->walkDist = 0.0f;
+    e->makeStepSound = true;
+    e->soundRefs = 0;
+    e->soundReleased = false;
 
     Entity_setPosition(e, 0.0f, 0.0f, 0.0f);
 }
@@ -87,6 +92,8 @@ void Entity_onTick(Entity* e) {
 }
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
+    float x0 = e->x;
+    float z0 = e->z;
     float ox = dx, oy = dy, oz = dz;
 
     AABB expanded = AABB_expand(&e->boundingBox, dx, dy, dz);
@@ -113,6 +120,25 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
     e->z = (e->boundingBox.minZ + e->boundingBox.maxZ) / 2.0f;
 
     free(hits.aabbs);
+
+    float xd = e->x - x0;
+    float zd = e->z - z0;
+    e->walkDist = (float)((double)e->walkDist + sqrt(xd * xd + zd * zd) * 0.6);
+    if (e->makeStepSound) {
+        int id = Level_getTile(e->level, (int)e->x, (int)(e->y - 0.2f - e->heightOffset), (int)e->z);
+        if (e->walkDist > 1.0f && id > 0 && gTiles[id]->soundType != SOUND_NONE) {
+            const SoundType* st = &SOUND_TYPES[gTiles[id]->soundType];
+            e->walkDist -= (float)(int)e->walkDist;
+            char name[32];
+            snprintf(name, sizeof name, "step.%s", st->name);
+            float volume = SoundType_getVolume(st) * 0.75f;
+            Entity_playSound(e, name, volume, SoundType_getPitch(st));
+        }
+    }
+}
+
+void Entity_playSound(Entity* e, const char* name, float volume, float pitch) {
+    Level_playSoundEntity(e->level, name, e, volume, pitch);
 }
 
 void Entity_moveRelative(Entity* e, float x, float z, float speed) {

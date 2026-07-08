@@ -17,6 +17,8 @@ typedef unsigned char byte;
 struct LevelRenderer; typedef struct LevelRenderer LevelRenderer;
 struct Zombie;
 struct NetworkPlayer;
+struct Entity;
+struct HitResult;
 
 // a scheduled tile tick, only run if the tile there still has this id
 typedef struct {
@@ -40,11 +42,12 @@ typedef struct Level {
 
     // zombies and network players never touch each other, so they're kept in two lists
     // minecraft.c owns the network players, the id map can still hold them after they leave a level
-    struct Zombie* entities;
+    // each zombie is malloced, a step sound can outlive its place in the list
+    struct Zombie** entities;
     int entityCount, entityCapacity;
     struct NetworkPlayer** players;
     int playerCount, playerCapacity;
-    // the length of the array behind the entity list, level.dat keeps it
+    // the length of the array behind that one list, level.dat keeps it
     int listCapacity;
 
     // a server's level, the local tile updates are off
@@ -108,10 +111,16 @@ bool  Level_containsAnyLiquid(const Level* level, const AABB* box);
 bool  Level_containsLiquid(const Level* level, const AABB* box, int liquidId);
 
 void  Level_addToTickNextTick(Level* level, int x, int y, int z, int id);
-void  Level_addEntity(Level* level, const struct Zombie* z);
+// takes a malloced zombie
+void  Level_addEntity(Level* level, struct Zombie* z);
 void  Level_addPlayer(Level* level, struct NetworkPlayer* p);
 void  Level_removePlayer(Level* level, struct NetworkPlayer* p);
 void  Level_tickEntities(Level* level);
 void  Level_onTick(Level* level);
+
+// the block the line from a to b runs into first, liquids don't count, false for none
+bool  Level_clip(const Level* level, float ax, float ay, float az, float bx, float by, float bz, struct HitResult* out);
+void  Level_playSoundEntity(Level* level, const char* name, struct Entity* e, float volume, float pitch);
+void  Level_playSound(Level* level, const char* name, float x, float y, float z, float volume, float pitch);
 
 #endif  // LEVEL_H

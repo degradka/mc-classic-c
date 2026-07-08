@@ -243,6 +243,7 @@ static bool handle(NetConnection* c, int id, const unsigned char* f) {
             char reason[65];
             readString(f, reason);
             Minecraft_showErrorScreen("Connection lost", reason);
+            NetConnection_close(c);
             break;
         }
     }

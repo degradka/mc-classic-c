@@ -23,5 +23,8 @@ void       Timer_advanceTime(Timer* timer);
 // System.currentTimeMillis
 long long  currentTimeMillis(void);
 long long  getCurrentTimeInNanoseconds(void);
+// Thread.sleep, windows gets the 1 ms timer
+void       Timer_highResolution(void);
+void       Timer_sleepMillis(int ms);
 
 #endif /* TIMER_H */

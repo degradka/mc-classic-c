@@ -143,3 +143,14 @@ int Font_width(Font* f, const char* s) {
     }
     return len;
 }
+void Font_removeColorCodes(const char* s, char* out, int size) {
+    int n = 0;
+    for (int i = 0; s[i] != '\0'; ++i) {
+        if (s[i] == '&') {
+            if (s[++i] == '\0') break;
+            continue;
+        }
+        if (n < size - 1) out[n++] = s[i];
+    }
+    out[n] = '\0';
+}

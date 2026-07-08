@@ -4,19 +4,21 @@
 #include <math.h>
 #include <string.h>
 
-void Player_init(Player* p, Level* level) {
+void Player_init(Player* p, Level* level, const Options* options) {
     Entity_init(&p->e, level);
     memset(&p->input, 0, sizeof(p->input));
+    p->input.options = options;
     p->e.heightOffset = 1.62f;
 }
 
 void Player_setKey(Player* p, int key, bool state) {
     int id = -1;
-    if (key == GLFW_KEY_UP || key == GLFW_KEY_W) id = 0;
-    if (key == GLFW_KEY_DOWN || key == GLFW_KEY_S) id = 1;
-    if (key == GLFW_KEY_LEFT || key == GLFW_KEY_A) id = 2;
-    if (key == GLFW_KEY_RIGHT || key == GLFW_KEY_D) id = 3;
-    if (key == GLFW_KEY_SPACE || key == GLFW_KEY_LEFT_SUPER) id = 4;
+    const Options* o = p->input.options;
+    if (key == o->forward.key) id = 0;
+    if (key == o->back.key) id = 1;
+    if (key == o->left.key) id = 2;
+    if (key == o->right.key) id = 3;
+    if (key == o->jump.key) id = 4;
     if (id >= 0) p->input.keys[id] = state;
 }
 

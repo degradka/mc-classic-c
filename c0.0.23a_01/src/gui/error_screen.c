@@ -3,23 +3,35 @@
 #include "error_screen.h"
 #include <stdio.h>
 
-static void ErrorScreen_render(Screen* self, int xm, int ym) {
-    ErrorScreen* s = (ErrorScreen*)self;
-    Screen_fillGradient(0, 0, self->width, self->height, 0xFF402020u, 0xFF501010u);
-    Screen_drawCenteredString(self, s->title, self->width / 2, 90, 0xFFFFFF);
-    Screen_drawCenteredString(self, s->message, self->width / 2, 110, 0xFFFFFF);
-    Screen_render(self, xm, ym);
+static Screen errorScreen;
+static char title[128];
+static char message[128];
+
+static void ErrorScreen_render(Screen* s, int xm, int ym) {
+    Screen_fillGradient(0, 0, s->width, s->height, 0xFF402020u, 0xFF501010u);
+    Screen_drawCenteredString(s->font, title, s->width / 2, 90, 0xFFFFFF);
+    Screen_drawCenteredString(s->font, message, s->width / 2, 110, 0xFFFFFF);
+    Screen_render(s, xm, ym);
 }
 
 // keyPressed is empty, escape doesn't close it
-static void ErrorScreen_keyPressed(Screen* self, char c, int key) {
-    (void)self; (void)c; (void)key;
+static void ErrorScreen_keyPressed(Screen* s, char c, int key) {
+    (void)s; (void)c; (void)key;
 }
 
-void ErrorScreen_init(ErrorScreen* s, Font* font, int width, int height, const char* title, const char* message) {
-    Screen_initBase(&s->screen, font, width, height);
-    s->screen.render = ErrorScreen_render;
-    s->screen.keyPressed = ErrorScreen_keyPressed;
-    snprintf(s->title, sizeof s->title, "%s", title);
-    snprintf(s->message, sizeof s->message, "%s", message);
+extern Screen* Minecraft_getScreen(void);
+
+// nothing replaces an open error screen, so a second one must leave the first alone
+Screen* ErrorScreen_new(const char* t, const char* m) {
+    if (ErrorScreen_isOpen(Minecraft_getScreen())) return &errorScreen;
+    Screen_construct(&errorScreen);
+    errorScreen.render = ErrorScreen_render;
+    errorScreen.keyPressed = ErrorScreen_keyPressed;
+    snprintf(title, sizeof title, "%s", t);
+    snprintf(message, sizeof message, "%s", m);
+    return &errorScreen;
+}
+
+bool ErrorScreen_isOpen(const Screen* s) {
+    return s == &errorScreen;
 }

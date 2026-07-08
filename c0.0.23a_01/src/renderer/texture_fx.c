@@ -37,10 +37,10 @@ static void LavaFX_step(TextureFX* fx) {
     memcpy(fx->current, tmp, sizeof tmp);
 
     for (int i = 0; i < 256; ++i) {
-        float f = fx->current[i];
+        float f = fx->current[i] * 2.0f;
         if (f > 1.0f) f = 1.0f;
         if (f < 0.0f) f = 0.0f;
-        fx->pixels[i << 2]       = (unsigned char)(int)(f * 200.0f + 55.0f);
+        fx->pixels[i << 2]       = (unsigned char)(int)(f * 100.0f + 155.0f);
         fx->pixels[(i << 2) + 1] = (unsigned char)(int)(f * f * 255.0f);
         fx->pixels[(i << 2) + 2] = (unsigned char)(int)(f * f * f * f * 128.0f);
         fx->pixels[(i << 2) + 3] = 255;

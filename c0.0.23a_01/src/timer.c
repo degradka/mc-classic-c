@@ -7,6 +7,7 @@
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
+  #include <mmsystem.h>
 #elif defined(__APPLE__)
   #include <mach/mach_time.h>
   #include <time.h>
@@ -100,4 +101,19 @@ void Timer_advanceTime(Timer* timer) {
     if (timer->ticks > 100) timer->ticks = 100;
     timer->passedTime -= (float)timer->ticks;
     timer->partialTicks = timer->passedTime;
+}
+
+void Timer_highResolution(void) {
+#if defined(_WIN32)
+    timeBeginPeriod(1);
+#endif
+}
+
+void Timer_sleepMillis(int ms) {
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L };
+    nanosleep(&t, NULL);
+#endif
 }

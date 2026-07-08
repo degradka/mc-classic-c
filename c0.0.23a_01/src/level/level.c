@@ -5,6 +5,8 @@
 #include "tile/tile.h"
 #include "../character/zombie.h"
 #include "../net/network_player.h"
+#include "../hitresult.h"
+#include "../audio/sound.h"
 #include <string.h>
 
 #include <zlib.h>
@@ -149,6 +151,7 @@ void Level_destroy(Level* level) {
     free(level->blocks);
     free(level->lightDepths);
     free(level->tickList);
+    for (int i = 0; i < level->entityCount; ++i) Sound_releaseEntity(&level->entities[i]->base);
     free(level->entities);
     free(level->players);
     level->players = NULL;
@@ -488,7 +491,7 @@ bool Level_isSolid(const Level* level, float x, float y, float z, float r) {
 
 bool Level_isFree(const Level* level, const AABB* box) {
     for (int i = 0; i < level->entityCount; ++i) {
-        if (AABB_intersects(&level->entities[i].base.boundingBox, box)) return false;
+        if (AABB_intersects(&level->entities[i]->base.boundingBox, box)) return false;
     }
     for (int i = 0; i < level->playerCount; ++i) {
         if (AABB_intersects(&level->players[i]->base.boundingBox, box)) return false;
@@ -507,21 +510,21 @@ void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
     level->tickList[level->tickListSize++] = e;
 }
 
-void Level_addEntity(Level* level, const Zombie* z) {
-    growList(level);
+void Level_addEntity(Level* level, Zombie* z) {
     if (level->entityCount == level->entityCapacity) {
         level->entityCapacity = level->entityCapacity ? level->entityCapacity * 2 : 16;
-        level->entities = (Zombie*)realloc(level->entities, (size_t)level->entityCapacity * sizeof(Zombie));
+        level->entities = (Zombie**)realloc(level->entities, (size_t)level->entityCapacity * sizeof(Zombie*));
     }
-    level->entities[level->entityCount++] = *z;
+    growList(level);
+    level->entities[level->entityCount++] = z;
 }
 
 void Level_addPlayer(Level* level, NetworkPlayer* p) {
-    growList(level);
     if (level->playerCount == level->playerCapacity) {
         level->playerCapacity = level->playerCapacity ? level->playerCapacity * 2 : 16;
         level->players = (NetworkPlayer**)realloc(level->players, (size_t)level->playerCapacity * sizeof(NetworkPlayer*));
     }
+    growList(level);
     level->players[level->playerCount++] = p;
 }
 
@@ -536,9 +539,10 @@ void Level_removePlayer(Level* level, NetworkPlayer* p) {
 
 void Level_tickEntities(Level* level) {
     for (int i = 0; i < level->entityCount; ++i) {
-        Zombie_onTick(&level->entities[i]);
-        if (level->entities[i].base.removed) {
-            memmove(&level->entities[i], &level->entities[i + 1], (size_t)(level->entityCount - i - 1) * sizeof(Zombie));
+        Zombie_onTick(level->entities[i]);
+        if (level->entities[i]->base.removed) {
+            Sound_releaseEntity(&level->entities[i]->base);
+            memmove(&level->entities[i], &level->entities[i + 1], (size_t)(level->entityCount - i - 1) * sizeof(Zombie*));
             level->entityCount--;
             i--;
         }
@@ -602,4 +606,75 @@ void Level_onTick(Level* level) {
         int id = level->blocks[(y * level->height + z) * level->width + x];
         if (gTiles[id] && gTiles[id]->shouldTick && gTiles[id]->onTick) gTiles[id]->onTick(gTiles[id], level, x, y, z);
     }
+}
+
+bool Level_clip(const Level* level, float ax, float ay, float az, float bx, float by, float bz, HitResult* out) {
+    if (isnan(ax) || isnan(ay) || isnan(az)) return false;
+    if (isnan(bx) || isnan(by) || isnan(bz)) return false;
+    int x1 = (int)floor(bx);
+    int y1 = (int)floor(by);
+    int z1 = (int)floor(bz);
+    int x0 = (int)floor(ax);
+    int y0 = (int)floor(ay);
+    int z0 = (int)floor(az);
+    int steps = 20;
+    while (steps-- >= 0) {
+        if (isnan(ax) || isnan(ay) || isnan(az)) return false;
+        if (x0 == x1 && y0 == y1 && z0 == z1) return false;
+        float nx = 999.0f, ny = 999.0f, nz = 999.0f;
+        if (x1 > x0) nx = (float)x0 + 1.0f;
+        if (x1 < x0) nx = (float)x0;
+        if (y1 > y0) ny = (float)y0 + 1.0f;
+        if (y1 < y0) ny = (float)y0;
+        if (z1 > z0) nz = (float)z0 + 1.0f;
+        if (z1 < z0) nz = (float)z0;
+        float tx = 999.0f, ty = 999.0f, tz = 999.0f;
+        float dx = bx - ax;
+        float dy = by - ay;
+        float dz = bz - az;
+        if (nx != 999.0f) tx = (nx - ax) / dx;
+        if (ny != 999.0f) ty = (ny - ay) / dy;
+        if (nz != 999.0f) tz = (nz - az) / dz;
+        int face;
+        if (tx < ty && tx < tz) {
+            face = x1 > x0 ? 4 : 5;
+            ax = nx;
+            ay += dy * tx;
+            az += dz * tx;
+        } else if (ty < tz) {
+            face = y1 > y0 ? 0 : 1;
+            ax += dx * ty;
+            ay = ny;
+            az += dz * ty;
+        } else {
+            face = z1 > z0 ? 2 : 3;
+            ax += dx * tz;
+            ay += dy * tz;
+            az = nz;
+        }
+        x0 = (int)floor(ax);
+        if (face == 5) x0--;
+        y0 = (int)floor(ay);
+        if (face == 1) y0--;
+        z0 = (int)floor(az);
+        if (face == 3) z0--;
+        int id = Level_getTile(level, x0, y0, z0);
+        if (id <= 0 || gTiles[id]->liquidType != LIQUID_NONE) continue;
+        hitresult_create(out, x0, y0, z0, 0, face);
+        return true;
+    }
+    return false;
+}
+
+extern void Minecraft_playSoundEntity(const char* name, Entity* e, float volume, float pitch);
+extern void Minecraft_playSoundAt(const char* name, float x, float y, float z, float volume, float pitch);
+
+void Level_playSoundEntity(Level* level, const char* name, Entity* e, float volume, float pitch) {
+    (void)level;
+    Minecraft_playSoundEntity(name, e, volume, pitch);
+}
+
+void Level_playSound(Level* level, const char* name, float x, float y, float z, float volume, float pitch) {
+    (void)level;
+    Minecraft_playSoundAt(name, x, y, z, volume, pitch);
 }

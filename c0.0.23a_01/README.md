@@ -1,24 +1,25 @@
-# Classic 0.0.20a_02
+# Classic 0.0.23a_01
 
 [Back to all versions](../README.md)
 
-Released June 20, 2009. 0.0.19a_05 to 0.0.20a_01 are folded in here.
+Released July 11, 2009. 0.0.21a to 0.0.23a are folded in here.
 
 ## What changed
 
-- New tiles
-  - 16 colors of cloth
-  - Gold block
-  - Dandelion, rose, brown and red mushroom
-- **B** opens a screen with every placeable tile
-- Bedrock only breaks for operators
-- The mouse wheel goes through the hotbar the other way
-- Players and zombies are lit from a direction instead of flat, and zombies are the right way out again
-- No frame rate cap anymore
+- Sound
+  - Footsteps and breaking sounds that depend on the tile, glass sounds like metal
+  - Music every 5 to 20 minutes
+- An Options menu: music, sound, invert mouse, show FPS and render distance
+- A Controls screen, every key can be changed
+- Reach is a 5 block raycast
+- Lava is brighter
+- Textured buttons
+- The block select screen is a smaller box in the middle, the slot under the mouse lights up
 
 ## How it was ported
 
 - Obfuscated, ported on top of the previous version by diffing the decompiled jars
+- RetroMCP has names for this version
 
 ## Differences from the original
 
@@ -27,7 +28,6 @@ Released June 20, 2009. 0.0.19a_05 to 0.0.20a_01 are folded in here.
 - Save level.. and Load level.. need you to be logged in on minecraft.net, which is gone, so they're always greyed out
 - After playing on a server the original saves that level in its network mode and never turns it off, so the next
   single player start can't change anything. Here a loaded level always starts out of network mode
-- Plants have their own render list. In the original they share the liquid list, which is drawn twice, and their crossed quads cut into each other there
 
 ## Multiplayer
 
@@ -55,7 +55,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.0.20a_02/src
+cd mc-classic-c/c0.0.23a_01/src
 make
 ```
 
@@ -78,8 +78,13 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.0.20a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_02)
-- [minecraft.wiki: Java Edition Classic 0.0.19a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_05)
-- [minecraft.wiki: Java Edition Classic 0.0.19a_06](https://minecraft.wiki/w/Java_Edition_Classic_0.0.19a_06)
-- [minecraft.wiki: Java Edition Classic 0.0.20a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a)
-- [minecraft.wiki: Java Edition Classic 0.0.20a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.20a_01)
+- [minecraft.wiki: Java Edition Classic 0.0.23a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a_01)
+- [minecraft.wiki: Java Edition Classic 0.0.21a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a)
+- [minecraft.wiki: Java Edition Classic 0.0.21a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a_01)
+- [minecraft.wiki: Java Edition Classic 0.0.22a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a)
+- [minecraft.wiki: Java Edition Classic 0.0.22a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_01)
+- [minecraft.wiki: Java Edition Classic 0.0.22a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_02)
+- [minecraft.wiki: Java Edition Classic 0.0.22a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_03)
+- [minecraft.wiki: Java Edition Classic 0.0.22a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_04)
+- [minecraft.wiki: Java Edition Classic 0.0.22a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_05)
+- [minecraft.wiki: Java Edition Classic 0.0.23a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a)

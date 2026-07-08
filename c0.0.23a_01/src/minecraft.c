@@ -1,4 +1,4 @@
-// minecraft.c: window, main loop, input, camera, picking, chat, the level loading screen and the server glue
+// minecraft.c: window, main loop, input, camera, picking, hud, the level loading screen and the server glue
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,13 +30,15 @@
 #include "hitresult.h"
 #include "java_hashmap.h"
 #include "renderer/texture_fx.h"
+#include "options.h"
+#include "keys.h"
+#include "audio/sound.h"
 #include "gui/font.h"
 #include "gui/screen.h"
 #include "gui/pause_screen.h"
-#include "gui/new_level_screen.h"
 #include "gui/chat_screen.h"
 #include "gui/error_screen.h"
-#include "gui/block_select_screen.h"
+#include "gui/inventory_screen.h"
 
 static GLFWwindow*    window;
 // the level can be gone while a server level downloads
@@ -46,15 +48,15 @@ static LevelRenderer  levelRenderer;
 static Player         player;
 static Timer          timer;
 static ParticleEngine particleEngine;
+static Options        options;
 
 static int editMode = 0;
-static int yMouseAxis = 1;
-// what B offers, the inventory starts with the first 9
-const int Minecraft_blockList[] = { 1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
-                                    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36 };
-const int Minecraft_blockListCount = 32;
-// the player's 9 slots and the selected one
-static int inventory[9];
+// what the build key offers, the inventory starts with the first 9
+const int Minecraft_creativeTiles[] = { 1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
+                                        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36 };
+const int Minecraft_creativeTileCount = 32;
+// the player's Inventory
+static int slots[9];
 static int selectedSlot = 0;
 // from the server's login, 100 and up may break bedrock
 static int userType = 0;
@@ -72,6 +74,9 @@ static Font gFont;
 static char fpsString[64] = "";
 static char title[64] = "";
 static char loadStatus[64] = "";
+// the tab list name under the mouse, the chat screen adds it on a click
+static char hoveredUsername[65];
+static bool hasHoveredUsername = false;
 
 static int gWinWidth  = 854;
 static int gWinHeight = 480;
@@ -79,24 +84,21 @@ static int gIsFullscreen = 0;
 
 // the clear and fog color, set again every frame
 static float fogRed = 0.5f, fogGreen = 0.8f, fogBlue = 1.0f;
-static float fogEnd = 0.0f;
+static float renderDistance = 0.0f;
+// pauses when the window loses focus, not while it's out of focus
+static bool displayActive = false;
 
-static int       isHitNull = 1;
+static bool      hasHit = false;
 static HitResult hitResult;
-
-static GLuint selectBuffer[2000];
 
 static bool mouseGrabbed = false;
 // ticks since boot, and the tick of the last click for holding the button
 static int ticksRan = 0;
-static int lastClickTick = 0;
+static int prevFrameTime = 0;
 
-static PauseScreen    pauseScreen;
-static BlockSelectScreen blockSelectScreen;
-static NewLevelScreen newLevelScreen;
-static ChatScreen     chatScreen;
-static ErrorScreen    errorScreen;
-static Screen*        screen = NULL;
+static Screen* screen = NULL;
+// nothing is drawn while connecting and while the server level downloads
+static bool hideGui = false;
 
 // set when the frame throws, the rest of it is skipped
 static bool broke = false;
@@ -111,19 +113,17 @@ static NetConnection connection;
 static bool networked = false;
 // our position only goes out once the level is here
 static bool levelReceived = false;
-// true while connecting and while the server level downloads, nothing is rendered then
-static bool downloading = false;
 // id to NetworkPlayer map, the players stay alive while the map or the level holds them
 static JHashMap netPlayers;
 
 // newest first
 #define MAX_CHAT_LINES 50
-typedef struct { char text[72]; int age; } ChatLine;
+typedef struct { char text[72]; int counter; } ChatLine;
 static ChatLine chatLines[MAX_CHAT_LINES + 1];
 static int chatLineCount = 0;
 
 // glfw callbacks queue the events and the tick drains them
-// a typed character comes as its own key event with key 0
+// keys are the game's codes, a typed character joins the key event it came from
 #define MAX_EVENTS 256
 typedef struct { int key; char c; bool state; double x, y; int wheel; } InputEvent;
 static InputEvent mouseEvents[MAX_EVENTS];
@@ -131,21 +131,33 @@ static int        mouseEventCount = 0;
 static InputEvent keyEvents[MAX_EVENTS];
 static int        keyEventCount = 0;
 static bool       keyRepeat = false;
+static bool       lastKeyDropped = false;
+static bool       lastKeyTakesChar = false;
 
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)w; (void)scancode; (void)mods;
-    if ((action == GLFW_REPEAT && !keyRepeat) || keyEventCount >= MAX_EVENTS) return;
-    keyEvents[keyEventCount].key = key;
+    lastKeyDropped = (action == GLFW_REPEAT && !keyRepeat) || keyEventCount >= MAX_EVENTS;
+    lastKeyTakesChar = false;
+    if (lastKeyDropped) return;
+    keyEvents[keyEventCount].key = Keys_fromGlfw(key);
     keyEvents[keyEventCount].c = '\0';
     keyEvents[keyEventCount].state = action != GLFW_RELEASE;
     keyEventCount++;
+    lastKeyTakesChar = action != GLFW_RELEASE;
 }
 
 static void charCallback(GLFWwindow* w, unsigned int codepoint) {
     (void)w;
+    char c = codepoint < 128 ? (char)codepoint : '\0';
+    if (lastKeyDropped) return;
+    if (lastKeyTakesChar) {
+        keyEvents[keyEventCount - 1].c = c;
+        lastKeyTakesChar = false;
+        return;
+    }
     if (keyEventCount >= MAX_EVENTS) return;
     keyEvents[keyEventCount].key = 0;
-    keyEvents[keyEventCount].c = codepoint < 128 ? (char)codepoint : '\0';
+    keyEvents[keyEventCount].c = c;
     keyEvents[keyEventCount].state = true;
     keyEventCount++;
 }
@@ -173,6 +185,12 @@ static void scrollCallback(GLFWwindow* w, double xoff, double yoff) {
 
 void Minecraft_setKeyRepeat(bool on) {
     keyRepeat = on;
+}
+
+// Keyboard.isKeyDown
+static bool isKeyDown(int key) {
+    int g = Keys_toGlfw(key);
+    return g >= 0 && glfwGetKey(window, g) == GLFW_PRESS;
 }
 
 static void getSize(int* width, int* height) {
@@ -206,22 +224,49 @@ const char* Minecraft_getUserName(void) {
     return userName;
 }
 
+bool Minecraft_hasUser(void) {
+    return userName[0] != '\0';
+}
+
 bool Minecraft_isNetworked(void) {
     return networked;
 }
 
-/* screens */
-
-static bool errorShown(void) {
-    return screen == (Screen*)&errorScreen;
+Options* Minecraft_getOptions(void) {
+    return &options;
 }
+
+Screen* Minecraft_getScreen(void) {
+    return screen;
+}
+
+int Minecraft_getGuiTexture(void) {
+    return texGui;
+}
+
+const char* Minecraft_hoveredUsername(void) {
+    return hasHoveredUsername ? hoveredUsername : NULL;
+}
+
+/* gl errors */
+
+static void checkGlError(const char* where) {
+    GLenum err = glGetError();
+    if (err == GL_NO_ERROR) return;
+    printf("########## GL ERROR ##########\n");
+    printf("@ %s\n", where);
+    printf("%d: %s\n", (int)err, (const char*)gluErrorString(err));
+    exit(0);
+}
+
+/* screens */
 
 void Minecraft_grabMouse(void);
 
 // nothing replaces an error screen
 void Minecraft_setScreen(Screen* s) {
-    if (errorShown()) return;
-    if (screen && screen->removed) screen->removed(screen);
+    if (ErrorScreen_isOpen(screen)) return;
+    if (screen && screen->closeScreen) screen->closeScreen(screen);
     screen = s;
     if (s) {
         if (mouseGrabbed) {
@@ -229,82 +274,23 @@ void Minecraft_setScreen(Screen* s) {
             mouseGrabbed = false;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
-        if (s->opened) s->opened(s);
+        int sw, sh;
+        guiSize(&sw, &sh);
+        Screen_setup(s, &gFont, sw, sh);
+        hideGui = false;
         return;
     }
     Minecraft_grabMouse();
 }
 
-static int inventoryIndexOf(int id) {
-    for (int i = 0; i < 9; i++) {
-        if (inventory[i] == id) return i;
-    }
-    return -1;
-}
-
-// a block already in another slot swaps places with the selected one
-void Minecraft_inventoryReplace(int id) {
-    int i = inventoryIndexOf(id);
-    if (i >= 0) inventory[i] = inventory[selectedSlot];
-    inventory[selectedSlot] = id;
-}
-
-const Level* Minecraft_getLevel(void) {
-    return &level;
-}
-
-int Minecraft_getTerrainTexture(void) {
-    return texTerrain;
-}
-
-void Minecraft_setUserType(int type) {
-    userType = type;
-}
-
-void Minecraft_showPauseScreen(void) {
-    if (errorShown()) return;
-    int sw, sh;
-    guiSize(&sw, &sh);
-    PauseScreen_init(&pauseScreen, &gFont, sw, sh);
-    Minecraft_setScreen((Screen*)&pauseScreen);
-}
-
-void Minecraft_showNewLevelScreen(void) {
-    if (errorShown()) return;
-    int sw, sh;
-    guiSize(&sw, &sh);
-    NewLevelScreen_init(&newLevelScreen, &gFont, sw, sh);
-    Minecraft_setScreen((Screen*)&newLevelScreen);
-}
-
 void Minecraft_showErrorScreen(const char* t, const char* message) {
-    if (errorShown()) return;
-    int sw, sh;
-    guiSize(&sw, &sh);
-    ErrorScreen_init(&errorScreen, &gFont, sw, sh, t, message);
-    Minecraft_setScreen((Screen*)&errorScreen);
+    Minecraft_setScreen(ErrorScreen_new(t, message));
 }
 
 // leaves an open pause screen alone
-static void pause(void) {
-    if (screen == (Screen*)&pauseScreen) return;
-    Minecraft_showPauseScreen();
-}
-
-static void showBlockSelectScreen(void) {
-    if (errorShown()) return;
-    int sw, sh;
-    guiSize(&sw, &sh);
-    BlockSelectScreen_init(&blockSelectScreen, &gFont, sw, sh);
-    Minecraft_setScreen((Screen*)&blockSelectScreen);
-}
-
-static void showChatScreen(void) {
-    if (errorShown()) return;
-    int sw, sh;
-    guiSize(&sw, &sh);
-    ChatScreen_init(&chatScreen, &gFont, sw, sh);
-    Minecraft_setScreen((Screen*)&chatScreen);
+static void pauseGame(void) {
+    if (PauseScreen_isOpen(screen)) return;
+    Minecraft_setScreen(PauseScreen_new());
 }
 
 // the frame's catch, every throw that can happen here is a NullPointerException
@@ -320,7 +306,60 @@ void Minecraft_grabMouse(void) {
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
     Minecraft_setScreen(NULL);
-    lastClickTick = ticksRan + 10000;
+    prevFrameTime = ticksRan + 10000;
+}
+
+/* inventory */
+
+static int containsTileAt(int id) {
+    for (int i = 0; i < 9; i++) {
+        if (slots[i] == id) return i;
+    }
+    return -1;
+}
+
+// a block already in another slot swaps places with the selected one
+void Minecraft_inventorySetTile(int id) {
+    int i = containsTileAt(id);
+    if (i >= 0) slots[i] = slots[selectedSlot];
+    slots[selectedSlot] = id;
+}
+
+static void scrollHotbar(int n) {
+    if (n > 0) n = 1;
+    if (n < 0) n = -1;
+    selectedSlot -= n;
+    while (selectedSlot < 0) selectedSlot += 9;
+    while (selectedSlot >= 9) selectedSlot -= 9;
+}
+
+static bool isCreativeTile(int id) {
+    for (int k = 0; k < Minecraft_creativeTileCount; ++k) {
+        if (Minecraft_creativeTiles[k] == id) return true;
+    }
+    return false;
+}
+
+const Level* Minecraft_getLevel(void) {
+    return &level;
+}
+
+int Minecraft_getTerrainTexture(void) {
+    return texTerrain;
+}
+
+void Minecraft_setUserType(int type) {
+    userType = type;
+}
+
+/* sounds */
+
+void Minecraft_playSoundEntity(const char* name, Entity* e, float volume, float pitch) {
+    Sound_playEntity(name, e, &player.e, volume, pitch);
+}
+
+void Minecraft_playSoundAt(const char* name, float x, float y, float z, float volume, float pitch) {
+    Sound_playAt(name, x, y, z, &player.e, volume, pitch);
 }
 
 /* level loading screen */
@@ -452,7 +491,7 @@ void Minecraft_installNetworkLevel(int w, int d, int h, unsigned char* blocks) {
     Level_setData(&level, w, d, h, blocks);
     level.networkMode = true;
     setLevel(true);
-    downloading = false;
+    hideGui = false;
     levelReceived = true;
 }
 
@@ -473,7 +512,6 @@ void Minecraft_networkSelfTeleport(int x, int y, int z, int yaw, int pitch) {
     Entity_moveTo(&player.e, (float)x / 32.0f, (float)y / 32.0f, (float)z / 32.0f,
                   (float)(yaw * 360) / 256.0f, (float)(pitch * 360) / 256.0f);
 }
-
 
 // false where it throws, the spawn goes in the map before the missing level is touched
 bool Minecraft_spawnNetworkPlayer(int id, const char* name, int x, int y, int z, float yRot, float xRot) {
@@ -521,7 +559,7 @@ bool Minecraft_despawnNetworkPlayer(int id) {
 void Minecraft_addChatLine(const char* text) {
     memmove(&chatLines[1], &chatLines[0], sizeof(ChatLine) * (size_t)chatLineCount);
     snprintf(chatLines[0].text, sizeof chatLines[0].text, "%s", text);
-    chatLines[0].age = 0;
+    chatLines[0].counter = 0;
     chatLineCount++;
     if (chatLineCount > MAX_CHAT_LINES) chatLineCount = MAX_CHAT_LINES;
 }
@@ -558,7 +596,7 @@ static void setupFog(void) {
         GLfloat a[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         glFogi(GL_FOG_MODE, GL_LINEAR);
         glFogf(GL_FOG_START, 0.0f);
-        glFogf(GL_FOG_END, fogEnd);
+        glFogf(GL_FOG_END, renderDistance);
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
     }
     glEnable(GL_COLOR_MATERIAL);
@@ -567,7 +605,7 @@ static void setupFog(void) {
 }
 
 // entities get one light from above and to the side
-static void setupEntityLight(bool on) {
+static void toggleLight(bool on) {
     if (!on) {
         glDisable(GL_LIGHTING);
         glDisable(GL_LIGHT0);
@@ -593,6 +631,9 @@ static void setupEntityLight(bool on) {
 /* boot and shutdown */
 
 static int init(void) {
+    // a thread started once the gl context exists makes nvidia's driver stall a sync for seconds,
+    // so every thread is running before the window opens
+    Sound_init(&options);
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
         return 0;
@@ -605,9 +646,9 @@ static int init(void) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
 
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.20a_02", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.23a_01", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.20a_02", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.23a_01", NULL, NULL);
     }
 
     if (!window) {
@@ -623,12 +664,15 @@ static int init(void) {
         fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
         return 0;
     }
+    // glew's lookup leaves an error behind on some drivers
+    glGetError();
 
     glfwSetKeyCallback(window, keyCallback);
     glfwSetCharCallback(window, charCallback);
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
     glfwSetScrollCallback(window, scrollCallback);
 
+    checkGlError("Pre startup");
     glEnable(GL_TEXTURE_2D);
     glShadeModel(GL_SMOOTH);
     glClearDepth(1.0);
@@ -640,13 +684,14 @@ static int init(void) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glMatrixMode(GL_MODELVIEW);
+    checkGlError("Startup");
 
     Tile_registerAll();
     LavaFX_init(&lavaFX, TILE_LAVA.textureId);
     lavaFX.step(&lavaFX);
     WaterFX_init(&waterFX, TILE_WATER.textureId);
     waterFX.step(&waterFX);
-    for (int i = 0; i < 9; i++) inventory[i] = Minecraft_blockList[i];
+    for (int i = 0; i < 9; i++) slots[i] = Minecraft_creativeTiles[i];
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texGui     = loadTexture("resources/gui.png", GL_NEAREST);
@@ -660,11 +705,7 @@ static int init(void) {
     Timer_init(&timer, 20.0f);
 
     JHashMap_init(&netPlayers);
-    if (connectHost[0]) {
-        downloading = true;
-        NetConnection_open(&connection, connectHost, connectPort, userName, mppass);
-        networked = true;
-    } else {
+    if (!connectHost[0]) {
         // a missing file shows no loading screen
         Level_init(&level);
         bool success = false;
@@ -688,14 +729,24 @@ static int init(void) {
 
     LevelRenderer_init(&levelRenderer, texTerrain);
     ParticleEngine_init(&particleEngine, &level, (GLuint)texTerrain);
-    Player_init(&player, hasLevel ? &level : NULL);
+    Options_init(&options);
+    Player_init(&player, hasLevel ? &level : NULL, &options);
     Entity_resetPosition(&player.e);
     if (hasLevel) LevelRenderer_setLevel(&levelRenderer, &level);
 
+    checkGlError("Post startup");
+
+    if (connectHost[0]) {
+        hideGui = true;
+        NetConnection_open(&connection, connectHost, connectPort, userName, mppass);
+        networked = true;
+    }
+    Timer_highResolution();
     return 1;
 }
 
 static void destroy(void) {
+    Sound_shutdown();
     // whatever level is here gets saved on the way out, a server's level too
     if (hasLevel) LevelIO_save(&level, "level.dat");
     else Level_saveNull("level.dat");
@@ -725,19 +776,7 @@ static void moveCameraToPlayer(float a) {
 static void setupCamera(float a, int width, int height) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(70.0f, (float)width / (float)height, 0.05f, fogEnd);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    moveCameraToPlayer(a);
-}
-
-static void setupPickCamera(float a, int x, int y, int width, int height) {
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    GLint viewport[4];
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    gluPickMatrix((float)x, (float)y, 5.0f, 5.0f, viewport);
-    gluPerspective(70.0f, (float)width / (float)height, 0.2f, 10.0f);
+    gluPerspective(70.0f, (float)width / (float)height, 0.05f, renderDistance);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     moveCameraToPlayer(a);
@@ -745,99 +784,28 @@ static void setupPickCamera(float a, int x, int y, int width, int height) {
 
 /* picking */
 
-static float hitDistanceTo(const HitResult* h, int mode) {
-    int x = h->x, y = h->y, z = h->z;
-    if (mode == 1) {
-        if (h->f == 0) y--;
-        if (h->f == 1) y++;
-        if (h->f == 2) z--;
-        if (h->f == 3) z++;
-        if (h->f == 4) x--;
-        if (h->f == 5) x++;
-    }
-    float xd = (float)x - player.e.x;
-    float yd = (float)y - player.e.y;
-    float zd = (float)z - player.e.z;
-    return xd * xd + yd * yd + zd * zd;
-}
-
-// only faces whose front isn't covered by a solid tile can be picked
-static void pick(float a, int width, int height) {
-    glSelectBuffer(2000, selectBuffer);
-    glRenderMode(GL_SELECT);
-    setupPickCamera(a, width / 2, height / 2, width, height);
-    Frustum frustum;
-    frustum_calculate(&frustum);
-
-    float rr = 2.5f;
-    AABB box = AABB_grow(&player.e.boundingBox, rr, rr, rr);
-    int x0 = (int)box.minX;
-    int x1 = (int)(box.maxX + 1.0f);
-    int y0 = (int)box.minY;
-    int y1 = (int)(box.maxY + 1.0f);
-    int z0 = (int)box.minZ;
-    int z1 = (int)(box.maxZ + 1.0f);
-    glInitNames();
-    glPushName(0);
-    glPushName(0);
-    for (int x = x0; x < x1; x++) {
-        glLoadName(x);
-        glPushName(0);
-        for (int y = y0; y < y1; y++) {
-            glLoadName(y);
-            glPushName(0);
-            for (int z = z0; z < z1; z++) {
-                const Tile* tile = gTiles[Level_getTile(&level, x, y, z)];
-                AABB tileBox = AABB_create((float)x, (float)y, (float)z, (float)(x + 1), (float)(y + 1), (float)(z + 1));
-                if (!tile || !tile->mayPick(tile) || !frustum_isVisible(&frustum, &tileBox)) continue;
-                glLoadName(z);
-                glPushName(0);
-                for (int i = 0; i < 6; i++) {
-                    if (!Tile_isFaceVisible(&level, x, y, z, i)) continue;
-                    glLoadName(i);
-                    Tessellator_begin(&hudTess);
-                    Face_render(&hudTess, x, y, z, i, player.e.x, player.e.y, player.e.z);
-                    Tessellator_end(&hudTess);
-                }
-                glPopName();
-            }
-            glPopName();
-        }
-        glPopName();
-    }
-    glPopName();
-    glPopName();
-    int hits = glRenderMode(GL_RENDER);
-
-    int p = 0;
-    int names[10];
-    HitResult current;
-    HitResult best;
-    bool haveBest = false;
-    for (int i = 0; i < hits; i++) {
-        int nameCount = (int)selectBuffer[p++];
-        p += 2;
-        for (int j = 0; j < nameCount; j++) names[j] = (int)selectBuffer[p++];
-        hitresult_create(&current, names[1], names[2], names[3], names[0], names[4]);
-        if (!haveBest || hitDistanceTo(&current, editMode) < hitDistanceTo(&best, editMode)) {
-            best = current;
-            haveBest = true;
-        }
-    }
-
-    if (haveBest) {
-        hitResult = best;
-        isHitNull = 0;
-    } else {
-        isHitNull = 1;
-    }
+// a ray 5 blocks out from the eye
+static void pick(float a) {
+    float xRot = player.e.xRotO + (player.e.xRotation - player.e.xRotO) * a;
+    float yRot = player.e.yRotO + (player.e.yRotation - player.e.yRotO) * a;
+    float x = player.e.prevX + (player.e.x - player.e.prevX) * a;
+    float y = player.e.prevY + (player.e.y - player.e.prevY) * a;
+    float z = player.e.prevZ + (player.e.z - player.e.prevZ) * a;
+    float yc = (float)cos((double)(-yRot) * M_PI / 180.0 + M_PI);
+    float ys = (float)sin((double)(-yRot) * M_PI / 180.0 + M_PI);
+    float xc = (float)cos((double)(-xRot) * M_PI / 180.0);
+    float xs = (float)sin((double)(-xRot) * M_PI / 180.0);
+    ys *= xc;
+    yc *= xc;
+    float reach = 5.0f;
+    hasHit = Level_clip(&level, x, y, z, x + ys * reach, y + xs * reach, z + yc * reach, &hitResult);
 }
 
 /* input actions */
 
 // only air and liquids can be built into, the server hears about it first
-static void handleMouseClick(void) {
-    if (isHitNull) return;
+static void clickMouse(void) {
+    if (!hasHit) return;
     // the hit can outlive the level it came from
     if (!hasLevel) {
         clientError();
@@ -860,12 +828,20 @@ static void handleMouseClick(void) {
         if (oldTile == &TILE_UNBREAKABLE && userType < 100) return;
         bool changed = Level_netSetTile(&level, x, y, z, 0);
         if (oldTile && changed) {
-            if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, inventory[selectedSlot]);
-            Tile_onDestroy(oldTile, &level, x, y, z, &particleEngine);
+            if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, slots[selectedSlot]);
+            // tiles without a sound don't break into particles either
+            if (oldTile->soundType != SOUND_NONE) {
+                const SoundType* st = &SOUND_TYPES[oldTile->soundType];
+                char name[32];
+                snprintf(name, sizeof name, "step.%s", st->name);
+                float volume = (SoundType_getVolume(st) + 1.0f) / 2.0f;
+                Level_playSound(&level, name, (float)x, (float)y, (float)z, volume, SoundType_getPitch(st) * 0.8f);
+                Tile_onDestroy(oldTile, &level, x, y, z, &particleEngine);
+            }
         }
         return;
     }
-    int id = inventory[selectedSlot];
+    int id = slots[selectedSlot];
     const Tile* there = gTiles[Level_getTile(&level, x, y, z)];
     if (there && there != &TILE_WATER && there != &TILE_CALM_WATER && there != &TILE_LAVA && there != &TILE_CALM_LAVA) return;
     const Tile* tile = gTiles[id];
@@ -874,37 +850,50 @@ static void handleMouseClick(void) {
         if (AABB_intersects(&player.e.boundingBox, &aabb) || !Level_isFree(&level, &aabb)) return;
     }
     if (networked) NetConnection_sendSetBlock(&connection, x, y, z, editMode, id);
-    Level_netSetTile(&level, x, y, z, inventory[selectedSlot]);
+    Level_netSetTile(&level, x, y, z, slots[selectedSlot]);
     tile->onPlace(tile, &level, x, y, z);
 }
 
-// Screen.updateEvents, the screen keeps draining even if a click closes it
-static void screenUpdateEvents(Screen* s) {
+static void screenMouseEvent(Screen* s, const InputEvent* ev) {
+    if (!ev->state || ev->key < 0) return;
     int width, height;
     getSize(&width, &height);
-    for (int e = 0; e < mouseEventCount; e++) {
-        if (mouseEvents[e].state) {
-            int ex, ey;
-            lwjglMouse(mouseEvents[e].x, mouseEvents[e].y, &ex, &ey);
-            int xm = ex * s->width / width;
-            int ym = s->height - ey * s->height / height - 1;
-            if (mouseEvents[e].key < 0) continue;
-            s->mouseClicked(s, xm, ym, mouseEvents[e].key);
-        }
-    }
+    int ex, ey;
+    lwjglMouse(ev->x, ev->y, &ex, &ey);
+    int xm = ex * s->width / width;
+    int ym = s->height - ey * s->height / height - 1;
+    s->mousePressed(s, xm, ym, ev->key);
+}
+
+// Screen.updateEvents, the screen keeps draining even if a click replaces it
+static void screenUpdateEvents(Screen* s) {
+    for (int e = 0; e < mouseEventCount; e++) screenMouseEvent(s, &mouseEvents[e]);
     mouseEventCount = 0;
     int e = 0;
     while (e < keyEventCount && !broke) {
         InputEvent ev = keyEvents[e++];
-        if (ev.state && s->keyPressed) s->keyPressed(s, ev.c, ev.key);
+        if (ev.state) s->keyPressed(s, ev.c, ev.key);
     }
     // what's left after a throw waits for the next tick, which the error screen drains
     memmove(keyEvents, keyEvents + e, sizeof(InputEvent) * (size_t)(keyEventCount - e));
     keyEventCount -= e;
 }
 
+// a throw in the middle of the input loop leaves the rest of the events queued
+static void dropMouseEvents(int done) {
+    memmove(mouseEvents, mouseEvents + done, sizeof(InputEvent) * (size_t)(mouseEventCount - done));
+    mouseEventCount -= done;
+}
+
+static void dropKeyEvents(int done) {
+    memmove(keyEvents, keyEvents + done, sizeof(InputEvent) * (size_t)(keyEventCount - done));
+    keyEventCount -= done;
+}
+
 static void tick(void) {
-    for (int i = 0; i < chatLineCount; i++) chatLines[i].age++;
+    Sound_tick();
+
+    for (int i = 0; i < chatLineCount; i++) chatLines[i].counter++;
 
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     for (int i = 0; i < 2; i++) {
@@ -913,14 +902,14 @@ static void tick(void) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, fx->tex % 16 << 4, fx->tex / 16 << 4, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, fx->pixels);
     }
 
-    if (networked) {
+    if (networked && !ErrorScreen_isOpen(screen)) {
         if (!NetConnection_isOpen(&connection)) {
             Minecraft_beginLevelLoading("Connecting..");
             Minecraft_levelLoadProgress(0);
         } else {
             if (connection.loggedIn && connection.connected && NetConnection_tick(&connection) == NET_THROW) {
                 Minecraft_showErrorScreen("Disconnected!", "You've lost connection to the server");
-                downloading = false;
+                hideGui = false;
                 NetConnection_close(&connection);
                 networked = false;
                 // the position goes through the connection that was just dropped
@@ -932,116 +921,109 @@ static void tick(void) {
         // the connect finishes here, after the tick has drawn "Connecting.."
         // a connect left running alongside the loop stalls some drivers for seconds
         if (NetConnection_finishConnect(&connection) < 0) {
-            downloading = false;
+            hideGui = false;
             networked = false;
             Minecraft_showErrorScreen("Failed to connect", "You failed to connect to the server. It's probably down!");
         }
     }
 
-    if (!screen) {
+    if (!screen || screen->allowUserInput) {
         for (int e = 0; e < mouseEventCount; e++) {
-            int wheel = mouseEvents[e].wheel;
-            if (wheel != 0) {
-                selectedSlot -= wheel;
-                while (selectedSlot < 0) selectedSlot += 9;
-                while (selectedSlot >= 9) selectedSlot -= 9;
-            }
-            if (!mouseGrabbed && mouseEvents[e].state) {
-                Minecraft_grabMouse();
-                continue;
-            }
-            if (mouseEvents[e].key == GLFW_MOUSE_BUTTON_LEFT && mouseEvents[e].state) {
-                handleMouseClick();
-                if (broke) {
-                    memmove(mouseEvents, mouseEvents + e + 1, sizeof(InputEvent) * (size_t)(mouseEventCount - e - 1));
-                    mouseEventCount -= e + 1;
-                    return;
+            const InputEvent* ev = &mouseEvents[e];
+            if (ev->wheel != 0) scrollHotbar(ev->wheel);
+            if (!screen) {
+                if (!mouseGrabbed && ev->state) {
+                    Minecraft_grabMouse();
+                } else {
+                    if (ev->key == GLFW_MOUSE_BUTTON_LEFT && ev->state) {
+                        clickMouse();
+                        if (broke) {
+                            dropMouseEvents(e + 1);
+                            return;
+                        }
+                        prevFrameTime = ticksRan;
+                    }
+                    if (ev->key == GLFW_MOUSE_BUTTON_RIGHT && ev->state) editMode = (editMode + 1) % 2;
+                    if (ev->key == GLFW_MOUSE_BUTTON_MIDDLE && ev->state && hasHit) {
+                        if (!hasLevel) {
+                            clientError();
+                            dropMouseEvents(e + 1);
+                            return;
+                        }
+                        // a block in the slots gets selected, one from the list goes in the selected slot
+                        int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
+                        if (id == TILE_GRASS.id) id = TILE_DIRT.id;
+                        int slot = containsTileAt(id);
+                        if (slot >= 0) selectedSlot = slot;
+                        else if (id > 0 && isCreativeTile(id)) Minecraft_inventorySetTile(id);
+                    }
                 }
-                lastClickTick = ticksRan;
             }
-            if (mouseEvents[e].key == GLFW_MOUSE_BUTTON_RIGHT && mouseEvents[e].state) editMode = (editMode + 1) % 2;
-            if (mouseEvents[e].key == GLFW_MOUSE_BUTTON_MIDDLE && mouseEvents[e].state && !isHitNull) {
-                if (!hasLevel) {
-                    clientError();
-                    memmove(mouseEvents, mouseEvents + e + 1, sizeof(InputEvent) * (size_t)(mouseEventCount - e - 1));
-                    mouseEventCount -= e + 1;
-                    return;
-                }
-                // a block in the slots gets selected, one from the list goes in the selected slot
-                int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
-                if (id == TILE_GRASS.id) id = TILE_DIRT.id;
-                int slot = inventoryIndexOf(id);
-                if (slot >= 0) {
-                    selectedSlot = slot;
-                    continue;
-                }
-                bool listed = false;
-                for (int k = 0; k < Minecraft_blockListCount; ++k) {
-                    if (Minecraft_blockList[k] == id) listed = true;
-                }
-                if (id <= 0 || !listed) continue;
-                Minecraft_inventoryReplace(id);
-            }
+            if (screen) screenMouseEvent(screen, ev);
         }
         mouseEventCount = 0;
 
-        // a key can open a screen, the rest of the queue still goes here
+        // a key can open a screen, the rest of the queue goes to it then
         for (int e = 0; e < keyEventCount; e++) {
-            int key = keyEvents[e].key;
-            if (key == 0) continue;
-            Player_setKey(&player, key, keyEvents[e].state);
-            if (!keyEvents[e].state) continue;
-            if (key == GLFW_KEY_ESCAPE) pause();
-            if (key == GLFW_KEY_R) Entity_resetPosition(&player.e);
-            if (key == GLFW_KEY_ENTER) {
-                if (!hasLevel) {
-                    clientError();
-                    memmove(keyEvents, keyEvents + e + 1, sizeof(InputEvent) * (size_t)(keyEventCount - e - 1));
-                    keyEventCount -= e + 1;
+            const InputEvent ev = keyEvents[e];
+            Player_setKey(&player, ev.key, ev.state);
+            if (!ev.state) continue;
+            if (screen) {
+                screen->keyPressed(screen, ev.c, ev.key);
+                if (broke) {
+                    dropKeyEvents(e + 1);
                     return;
                 }
-                Level_setSpawnPos(&level, (int)player.e.x, (int)player.e.y, (int)player.e.z, player.e.yRotation);
-                Entity_resetPosition(&player.e);
+            }
+            if (!screen) {
+                if (ev.key == KEY_ESCAPE) pauseGame();
+                if (ev.key == options.load.key) Entity_resetPosition(&player.e);
+                if (ev.key == options.save.key) {
+                    if (!hasLevel) {
+                        clientError();
+                        dropKeyEvents(e + 1);
+                        return;
+                    }
+                    Level_setSpawnPos(&level, (int)player.e.x, (int)player.e.y, (int)player.e.z, player.e.yRotation);
+                    Entity_resetPosition(&player.e);
+                }
+                if (ev.key == KEY_G && !networked) {
+                    if (!hasLevel) {
+                        clientError();
+                        dropKeyEvents(e + 1);
+                        return;
+                    }
+                    if (level.entityCount + level.playerCount < 256) {
+                        Zombie* z = (Zombie*)malloc(sizeof(Zombie));
+                        Zombie_init(z, &level, player.e.x, player.e.y, player.e.z);
+                        Level_addEntity(&level, z);
+                    }
+                }
+                if (ev.key == options.build.key) Minecraft_setScreen(InventoryScreen_new());
+                if (ev.key == options.chat.key && networked && NetConnection_isOpen(&connection)) {
+                    Player_releaseAllKeys(&player);
+                    Minecraft_setScreen(ChatScreen_new());
+                }
             }
             for (int k = 0; k < 9; ++k) {
-                if (key == GLFW_KEY_1 + k) selectedSlot = k;
+                if (ev.key == KEY_1 + k) selectedSlot = k;
             }
-            if (key == GLFW_KEY_Y) yMouseAxis = -yMouseAxis;
-            if (key == GLFW_KEY_G && !networked) {
-                if (!hasLevel) {
-                    clientError();
-                    memmove(keyEvents, keyEvents + e + 1, sizeof(InputEvent) * (size_t)(keyEventCount - e - 1));
-                    keyEventCount -= e + 1;
-                    return;
-                }
-                if (level.entityCount + level.playerCount < 256) {
-                    Zombie z;
-                    Zombie_init(&z, &level, player.e.x, player.e.y, player.e.z);
-                    Level_addEntity(&level, &z);
-                }
-            }
-            if (key == GLFW_KEY_F) {
-                bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-                levelRenderer.drawDistance = (levelRenderer.drawDistance + (shift ? -1 : 1)) & 3;
-            }
-            if (key == GLFW_KEY_B) showBlockSelectScreen();
-            if (key == GLFW_KEY_T && networked && NetConnection_isOpen(&connection)) {
-                Player_releaseAllKeys(&player);
-                showChatScreen();
+            if (ev.key == options.toggleFog.key) {
+                Options_setOption(&options, 4, isKeyDown(KEY_LSHIFT) || isKeyDown(KEY_RSHIFT) ? -1 : 1);
             }
         }
         keyEventCount = 0;
 
         // holding the left button repeats every timer.ticksPerSecond / 4 ticks
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS &&
-            (float)(ticksRan - lastClickTick) >= timer.ticksPerSecond / 4.0f && mouseGrabbed) {
-            handleMouseClick();
+        if (!screen && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS &&
+            (float)(ticksRan - prevFrameTime) >= timer.ticksPerSecond / 4.0f && mouseGrabbed) {
+            clickMouse();
             if (broke) return;
-            lastClickTick = ticksRan;
+            prevFrameTime = ticksRan;
         }
-    } else {
-        lastClickTick = ticksRan + 10000;
     }
+
+    if (screen) prevFrameTime = ticksRan + 10000;
 
     if (screen) {
         screenUpdateEvents(screen);
@@ -1060,7 +1042,7 @@ static void tick(void) {
 
 /* frame */
 
-static void setupGuiCamera(void) {
+static void initGui(void) {
     int sw, sh;
     guiSize(&sw, &sh);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -1072,34 +1054,23 @@ static void setupGuiCamera(void) {
     glTranslatef(0.0f, 0.0f, -200.0f);
 }
 
-// a piece of gui.png, the texture u always starts at 0
-static void blitGui(int x, int y, int v, int w) {
-    float us = 0.00390625f;
-    float vs = 0.015625f;
-    Tessellator_begin(&hudTess);
-    Tessellator_vertexUV(&hudTess, (float)x, (float)(y + 22), -90.0f, 0.0f, (float)(v + 22) * vs);
-    Tessellator_vertexUV(&hudTess, (float)(x + w), (float)(y + 22), -90.0f, (float)(w + 0) * us, (float)(v + 22) * vs);
-    Tessellator_vertexUV(&hudTess, (float)(x + w), (float)y, -90.0f, (float)(w + 0) * us, (float)v * vs);
-    Tessellator_vertexUV(&hudTess, (float)x, (float)y, -90.0f, 0.0f, (float)v * vs);
-    Tessellator_end(&hudTess);
-}
-
-static bool drawGui(void) {
+// InGameHud.render, a hovered tab list name only counts while a screen is open
+static void renderHud(bool screenOpen, int xm, int ym) {
     int sw, sh;
     guiSize(&sw, &sh);
-    setupGuiCamera();
+    initGui();
 
     glBindTexture(GL_TEXTURE_2D, texGui);
     glEnable(GL_TEXTURE_2D);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glEnable(GL_BLEND);
-    blitGui(sw / 2 - 91, sh - 22, 0, 182);
-    blitGui(sw / 2 - 91 - 1 + selectedSlot * 20, sh - 22 - 1, 22, 24);
+    Screen_blit(sw / 2 - 91, sh - 22, 0, 0, 182, 22, -90.0f);
+    Screen_blit(sw / 2 - 91 - 1 + selectedSlot * 20, sh - 22 - 1, 0, 22, 24, 22, -90.0f);
     glDisable(GL_BLEND);
 
     for (int k = 0; k < 9; ++k) {
-        if (inventory[k] <= 0) continue;
-        const Tile* tile = gTiles[inventory[k]];
+        if (slots[k] <= 0) continue;
+        const Tile* tile = gTiles[slots[k]];
         glPushMatrix();
         glTranslatef((float)(sw / 2 - 90 + k * 20), (float)(sh - 16), -50.0f);
         glScalef(10.0f, 10.0f, 10.0f);
@@ -1117,15 +1088,15 @@ static bool drawGui(void) {
         glPopMatrix();
     }
 
-    Font_drawShadow(&gFont, &hudTess, "0.0.20a_02", 2, 2, 0xFFFFFF);
-    Font_drawShadow(&gFont, &hudTess, fpsString, 2, 12, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.0.23a_01", 2, 2, 0xFFFFFF);
+    if (options.showFPS) Font_drawShadow(&gFont, &hudTess, fpsString, 2, 12, 0xFFFFFF);
     // 10 lines for 10 seconds each, the chat screen shows 20 of any age
     int maxLines = 10;
-    bool chatOpen = screen == (Screen*)&chatScreen;
+    bool chatOpen = ChatScreen_isOpen(screen);
     if (chatOpen) maxLines = 20;
     for (int i = 0; i < chatLineCount && i < maxLines; i++) {
-        if (chatLines[i].age >= 200 && !chatOpen) continue;
-        Font_drawShadow(&gFont, &hudTess, chatLines[i].text, 2, sh - 8 - (i << 3) - 16, 0xFFFFFF);
+        if (chatLines[i].counter >= 200 && !chatOpen) continue;
+        Font_drawShadow(&gFont, &hudTess, chatLines[i].text, 2, sh - 8 - i * 9 - 20, 0xFFFFFF);
     }
 
     int wc = sw / 2;
@@ -1143,7 +1114,8 @@ static bool drawGui(void) {
     Tessellator_end(&hudTess);
 
     // tab lists the players in HashMap order after our own name
-    if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && networked && NetConnection_isOpen(&connection)) {
+    hasHoveredUsername = false;
+    if (isKeyDown(KEY_TAB) && networked && NetConnection_isOpen(&connection)) {
         void* values[256];
         int n = JHashMap_values(&netPlayers, values, 256);
         glEnable(GL_BLEND);
@@ -1161,17 +1133,24 @@ static bool drawGui(void) {
         Font_drawShadow(&gFont, &hudTess, t, wc - Font_width(&gFont, t) / 2, hc - 64 - 12, 0xFFFFFF);
         for (int i = 0; i <= n; i++) {
             const char* name = i == 0 ? userName : ((NetworkPlayer*)values[i - 1])->name;
-            Font_draw(&gFont, &hudTess, name, wc + i % 2 * 120 - 120, hc - 64 + (i / 2 << 3), 0xFFFFFF);
+            int x = wc + i % 2 * 120 - 120;
+            int y = hc - 64 + (i / 2 << 3);
+            if (screenOpen && xm >= x && ym >= y && xm < x + 120 && ym < y + 8) {
+                snprintf(hoveredUsername, sizeof hoveredUsername, "%s", name);
+                hasHoveredUsername = true;
+                Font_draw(&gFont, &hudTess, name, x + 2, y, 0xFFFFFF);
+                continue;
+            }
+            Font_draw(&gFont, &hudTess, name, x, y, 0xEEEEEE);
         }
     }
-    return true;
 }
 
-static bool renderLevel(float a, int width, int height) {
+static void renderLevel(float a, int width, int height, int xm, int ym) {
     glViewport(0, 0, width, height);
 
-    // the sky fades to white as the view distance shrinks
-    float f = 1.0f / (float)(4 - levelRenderer.drawDistance);
+    // the sky fades to white as the render distance shrinks
+    float f = 1.0f / (float)(4 - options.renderDistance);
     f = (float)pow(f, 0.25);
     fogRed   = 0.6f * (1.0f - f) + f;
     fogGreen = 0.8f * (1.0f - f) + f;
@@ -1191,9 +1170,9 @@ static bool renderLevel(float a, int width, int height) {
     glClearColor(fogRed, fogGreen, fogBlue, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    pick(a, width, height);
+    pick(a);
 
-    fogEnd = (float)(512 >> (levelRenderer.drawDistance << 1));
+    renderDistance = (float)(512 >> (options.renderDistance << 1));
     setupCamera(a, width, height);
     glEnable(GL_CULL_FACE);
     Frustum frustum;
@@ -1215,9 +1194,9 @@ static bool renderLevel(float a, int width, int height) {
             LevelRenderer_renderInside(&levelRenderer, x, y, z);
         }
     }
-    setupEntityLight(true);
+    toggleLight(true);
     LevelRenderer_renderEntities(&levelRenderer, &frustum, a);
-    setupEntityLight(false);
+    toggleLight(false);
     setupFog();
     ParticleEngine_render(&particleEngine, &player, a);
     LevelRenderer_renderSurroundingGround(&levelRenderer);
@@ -1228,10 +1207,10 @@ static bool renderLevel(float a, int width, int height) {
     setupFog();
     glEnable(GL_LIGHTING);
 
-    if (!isHitNull) {
+    if (hasHit) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, inventory[selectedSlot]);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, slots[selectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, editMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -1251,21 +1230,23 @@ static bool renderLevel(float a, int width, int height) {
     glDisable(GL_FOG);
     glDisable(GL_TEXTURE_2D);
 
-    if (!isHitNull) {
+    if (hasHit) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, inventory[selectedSlot]);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, editMode, slots[selectedSlot]);
         LevelRenderer_renderHitOutline(&hitResult, editMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
     }
 
-    return drawGui();
+    renderHud(screen != NULL, xm, ym);
 }
 
 // false where it throws, the frame isn't shown then
 static bool render(float a) {
-    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) pause();
+    bool active = glfwGetWindowAttrib(window, GLFW_FOCUSED) != 0;
+    if (displayActive && !active) pauseGame();
+    displayActive = active;
 
     if (mouseGrabbed) {
         double mx, my;
@@ -1276,17 +1257,25 @@ static bool render(float a) {
         // mouse deltas are whole pixels and y goes up
         int dx = (int)(mx - cx);
         int dy = (int)(cy - my);
-        Player_turn(&player, (float)dx, (float)(dy * yMouseAxis));
+        Player_turn(&player, (float)dx, (float)(dy * (options.invertMouse ? -1 : 1)));
         glfwSetCursorPos(window, cx, cy);
     }
 
-    // nothing is drawn while connecting or downloading, the loading screen draws itself
-    if (downloading) return true;
+    if (hideGui) return true;
 
     int width, height;
     getSize(&width, &height);
+    int sw, sh;
+    guiSize(&sw, &sh);
+    double cx, cy;
+    glfwGetCursorPos(window, &cx, &cy);
+    int mx, my;
+    lwjglMouse(cx, cy, &mx, &my);
+    int xm = mx * sw / width;
+    int ym = sh - my * sh / height - 1;
+
     if (hasLevel) {
-        if (!renderLevel(a, width, height)) return false;
+        renderLevel(a, width, height, xm, ym);
     } else {
         glViewport(0, 0, width, height);
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -1295,18 +1284,10 @@ static bool render(float a) {
         glLoadIdentity();
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
-        setupGuiCamera();
+        initGui();
     }
 
-    if (screen) {
-        int sw, sh;
-        guiSize(&sw, &sh);
-        double cx, cy;
-        glfwGetCursorPos(window, &cx, &cy);
-        int mx, my;
-        lwjglMouse(cx, cy, &mx, &my);
-        screen->render(screen, mx * sw / width, sh - my * sh / height - 1);
-    }
+    if (screen) screen->render(screen, xm, ym);
 
     if (Font_threw) return false;
     glfwSwapBuffers(window);
@@ -1343,7 +1324,14 @@ int main(int argc, char** argv) {
             tick();
         }
 
-        if (!broke && render(timer.partialTicks)) frames++;
+        if (!broke) {
+            checkGlError("Pre render");
+            if (render(timer.partialTicks)) {
+                Timer_sleepMillis(5);
+                checkGlError("Post render");
+                frames++;
+            }
+        }
 
         while (currentTimeMillis() >= lastTime + 1000LL) {
             snprintf(fpsString, sizeof fpsString, "%d fps, %d chunk updates", frames, Chunk_updates);

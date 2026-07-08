@@ -186,7 +186,7 @@ void LevelRenderer_renderSurroundingWater(const LevelRenderer* r) {
 
 void LevelRenderer_renderEntities(LevelRenderer* r, const Frustum* frustum, float a) {
     for (int i = 0; i < r->level->entityCount; ++i) {
-        const Zombie* z = &r->level->entities[i];
+        const Zombie* z = r->level->entities[i];
         if (frustum_isVisible(frustum, &z->base.boundingBox)) Zombie_render(z, a);
     }
     for (int i = 0; i < r->level->playerCount; ++i) {

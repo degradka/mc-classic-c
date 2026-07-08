@@ -10,6 +10,17 @@ struct ParticleEngine; typedef struct ParticleEngine ParticleEngine;
 
 typedef struct Tile Tile;
 
+// Tile.SoundType, cloth sounds like grass and metal like stone
+enum { SOUND_NONE, SOUND_GRASS, SOUND_CLOTH, SOUND_GRAVEL, SOUND_STONE, SOUND_METAL, SOUND_WOOD };
+typedef struct {
+    const char* name;
+    float volume, pitch;
+} SoundType;
+extern const SoundType SOUND_TYPES[7];
+// both draw from the tiles' shared random
+float SoundType_getVolume(const SoundType* st);
+float SoundType_getPitch(const SoundType* st);
+
 // Tile.getLiquidType
 #define LIQUID_NONE  0
 #define LIQUID_WATER 1
@@ -26,6 +37,7 @@ struct Tile {
     bool shouldTick;
     // how much gravity the destroy particles get
     float gravity;
+    int soundType;
     // extra tick list rounds before a scheduled tick runs, 5 for lava
     int tickDelay;
 
@@ -42,8 +54,6 @@ struct Tile {
     int  (*blocksLight)(const Tile* self);
     // 0 when there is no collision box
     int  (*getAABB)(const Tile* self, int x, int y, int z, AABB* out);
-    // false for liquids, you can't aim at them
-    int  (*mayPick)(const Tile* self);
 
     void (*neighborChanged)(const Tile* self, Level* lvl, int x, int y, int z, int type);
     // after the player places it

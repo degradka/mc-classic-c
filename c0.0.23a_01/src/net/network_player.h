@@ -10,7 +10,9 @@
 typedef struct NetworkPlayer {
     Entity base;
     int id;
+    // the name without color codes, and as the server sent it
     char name[65];
+    char displayName[65];
 
     float animStep, animStepO;
     float yBodyRot, yBodyRotO;

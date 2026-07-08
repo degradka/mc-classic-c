@@ -1,7 +1,7 @@
 // gui/chat_screen.c
 
 #include "chat_screen.h"
-#include <GLFW/glfw3.h>
+#include "../keys.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -9,30 +9,44 @@ extern void Minecraft_setScreen(Screen* screen);
 extern void Minecraft_sendChat(const char* text);
 extern void Minecraft_setKeyRepeat(bool on);
 extern const char* Minecraft_getUserName(void);
+extern const char* Minecraft_hoveredUsername(void);
 
 static const char* ALLOWED =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.:-_'*!\\\"#%/()=+?[]{}<>@|$;";
 
-static void ChatScreen_render(Screen* self, int xm, int ym) {
-    (void)xm; (void)ym;
-    ChatScreen* s = (ChatScreen*)self;
-    Screen_fill(2, self->height - 14, self->width - 2, self->height - 2, 0x80000000u);
-    char line[80];
-    // the cursor shows for 6 ticks, then hides for 6
-    snprintf(line, sizeof line, "> %s%s", s->text, s->counter / 6 % 2 == 0 ? "_" : "");
-    Screen_drawString(self, line, 4, self->height - 12, 0xE0E0E0u);
+static Screen chatScreen;
+static char typedMsg[128];
+static int counter;
+
+// the server puts "name: " in front, so the line leaves room for it
+static int maxLength(void) {
+    return 64 - ((int)strlen(Minecraft_getUserName()) + 2);
 }
 
-// glfw sends typed characters as their own events with key 0
-static void ChatScreen_keyPressed(Screen* self, char c, int key) {
-    ChatScreen* s = (ChatScreen*)self;
-    if (key == GLFW_KEY_ESCAPE) {
+static void ChatScreen_init(Screen* s) {
+    (void)s;
+    Minecraft_setKeyRepeat(true);
+}
+
+static void ChatScreen_closeScreen(Screen* s) {
+    (void)s;
+    Minecraft_setKeyRepeat(false);
+}
+
+static void ChatScreen_tick(Screen* s) {
+    (void)s;
+    counter++;
+}
+
+static void ChatScreen_keyPressed(Screen* s, char c, int key) {
+    (void)s;
+    if (key == KEY_ESCAPE) {
         Minecraft_setScreen(NULL);
         return;
     }
-    if (key == GLFW_KEY_ENTER) {
+    if (key == KEY_RETURN) {
         // String.trim
-        char* start = s->text;
+        char* start = typedMsg;
         while (*start != '\0' && (unsigned char)*start <= ' ') start++;
         int len = (int)strlen(start);
         while (len > 0 && (unsigned char)start[len - 1] <= ' ') len--;
@@ -41,38 +55,48 @@ static void ChatScreen_keyPressed(Screen* self, char c, int key) {
         Minecraft_setScreen(NULL);
         return;
     }
-    if (key == GLFW_KEY_BACKSPACE && s->length > 0) {
-        s->text[--s->length] = '\0';
-    }
-    // the server puts "name: " in front, so the line leaves room for it
-    if (c != '\0' && strchr(ALLOWED, c) && s->length < 64 - ((int)strlen(Minecraft_getUserName()) + 2)) {
-        s->text[s->length++] = c;
-        s->text[s->length] = '\0';
+    int length = (int)strlen(typedMsg);
+    if (key == KEY_BACK && length > 0) typedMsg[--length] = '\0';
+    if (c != '\0' && strchr(ALLOWED, c) && length < maxLength()) {
+        typedMsg[length] = c;
+        typedMsg[length + 1] = '\0';
     }
 }
 
-static void ChatScreen_tick(Screen* self) {
-    ((ChatScreen*)self)->counter++;
+static void ChatScreen_render(Screen* s, int xm, int ym) {
+    (void)xm; (void)ym;
+    Screen_fill(2, s->height - 14, s->width - 2, s->height - 2, 0x80000000u);
+    char line[140];
+    // the cursor shows for 6 ticks, then hides for 6
+    snprintf(line, sizeof line, "> %s%s", typedMsg, counter / 6 % 2 == 0 ? "_" : "");
+    Screen_drawString(s->font, line, 4, s->height - 12, 0xE0E0E0u);
 }
 
-static void ChatScreen_opened(Screen* self) {
-    (void)self;
-    Minecraft_setKeyRepeat(true);
+// a left click on a name in the tab list adds it to the line
+static void ChatScreen_mousePressed(Screen* s, int x, int y, int button) {
+    (void)s; (void)x; (void)y;
+    const char* name = Minecraft_hoveredUsername();
+    if (button != 0 || !name) return;
+    size_t len = strlen(typedMsg);
+    if (len > 0 && typedMsg[len - 1] != ' ') strcat(typedMsg, " ");
+    strncat(typedMsg, name, sizeof typedMsg - strlen(typedMsg) - 1);
+    int max = maxLength();
+    if ((int)strlen(typedMsg) > max) typedMsg[max] = '\0';
 }
 
-static void ChatScreen_removed(Screen* self) {
-    (void)self;
-    Minecraft_setKeyRepeat(false);
+Screen* ChatScreen_new(void) {
+    Screen_construct(&chatScreen);
+    chatScreen.init = ChatScreen_init;
+    chatScreen.closeScreen = ChatScreen_closeScreen;
+    chatScreen.tick = ChatScreen_tick;
+    chatScreen.keyPressed = ChatScreen_keyPressed;
+    chatScreen.render = ChatScreen_render;
+    chatScreen.mousePressed = ChatScreen_mousePressed;
+    typedMsg[0] = '\0';
+    counter = 0;
+    return &chatScreen;
 }
 
-void ChatScreen_init(ChatScreen* s, Font* font, int width, int height) {
-    Screen_initBase(&s->screen, font, width, height);
-    s->screen.render = ChatScreen_render;
-    s->screen.keyPressed = ChatScreen_keyPressed;
-    s->screen.tick = ChatScreen_tick;
-    s->screen.opened = ChatScreen_opened;
-    s->screen.removed = ChatScreen_removed;
-    s->text[0] = '\0';
-    s->length = 0;
-    s->counter = 0;
+bool ChatScreen_isOpen(const Screen* s) {
+    return s == &chatScreen;
 }

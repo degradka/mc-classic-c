@@ -27,13 +27,13 @@ static const JField LIST_FIELDS[] = { { 'I', "size", NULL } };
 static const JDesc LIST_DESC = { "java.util.ArrayList", 8683452581122892189LL, 3, 1, LIST_FIELDS, NULL };
 static const JField ENTITY_FIELDS[] = {
     { 'F', "bbHeight", NULL }, { 'F', "bbWidth", NULL }, { 'F', "heightOffset", NULL }, { 'Z', "horizontalCollision", NULL },
-    { 'Z', "onGround", NULL }, { 'Z', "removed", NULL },
+    { 'Z', "makeStepSound", NULL }, { 'Z', "onGround", NULL }, { 'Z', "removed", NULL }, { 'F', "walkDist", NULL },
     { 'F', "x", NULL }, { 'F', "xRot", NULL }, { 'F', "xRotO", NULL }, { 'F', "xd", NULL }, { 'F', "xo", NULL },
     { 'F', "y", NULL }, { 'F', "yRot", NULL }, { 'F', "yRotO", NULL }, { 'F', "yd", NULL }, { 'F', "yo", NULL },
     { 'F', "z", NULL }, { 'F', "zd", NULL }, { 'F', "zo", NULL },
     { 'L', "bb", "Lcom/mojang/minecraft/phys/AABB;" }, { 'L', "level", "Lcom/mojang/minecraft/level/Level;" }
 };
-static const JDesc ENTITY_DESC = { EN, 0, 2, 21, ENTITY_FIELDS, NULL };
+static const JDesc ENTITY_DESC = { EN, 0, 2, 23, ENTITY_FIELDS, NULL };
 static const JField ZOMBIE_FIELDS[] = { { 'F', "rot", NULL }, { 'F', "rotA", NULL }, { 'F', "speed", NULL }, { 'F', "timeOffs", NULL } };
 static const JDesc ZOMBIE_DESC = { ZB, 77479605454997290LL, 2, 4, ZOMBIE_FIELDS, &ENTITY_DESC };
 static const JField AABB_FIELDS[] = {
@@ -60,8 +60,10 @@ static void writeZombie(JWriter* w, const Zombie* z, const Level* level) {
     JW_f4(w, e->boundingBoxWidth);
     JW_f4(w, e->heightOffset);
     JW_u1(w, e->horizontalCollision);
+    JW_u1(w, e->makeStepSound);
     JW_u1(w, e->onGround);
     JW_u1(w, e->removed);
+    JW_f4(w, e->walkDist);
     JW_f4(w, e->x);
     JW_f4(w, e->xRotation);
     JW_f4(w, e->xRotO);
@@ -117,7 +119,7 @@ static bool writeLevel(JWriter* w, const Level* level) {
     unsigned char c[4] = { (unsigned char)(cap >> 24), (unsigned char)(cap >> 16), (unsigned char)(cap >> 8), (unsigned char)cap };
     JW_block(w, c, 4);
     if (level->playerCount > 0) return false;
-    for (int i = 0; i < level->entityCount; ++i) writeZombie(w, &level->entities[i], level);
+    for (int i = 0; i < level->entityCount; ++i) writeZombie(w, level->entities[i], level);
     JW_endBlock(w);
     writeString(w, level->name);
     return true;
@@ -189,16 +191,17 @@ static bool loadV2(Level* level, const uint8_t* p, size_t len) {
     for (int i = 0; list && i < list->nextra; ++i) {
         const JNode* n = list->extra[i];
         if (!n) continue;
-        Zombie zombie;
-        Zombie* z = &zombie;
+        Zombie* z = (Zombie*)malloc(sizeof *z);
         Zombie_init(z, level, 0.0f, 0.0f, 0.0f);
         Entity* e = &z->base;
         e->boundingBoxHeight = JNode_float(n, EN, "bbHeight");
         e->boundingBoxWidth = JNode_float(n, EN, "bbWidth");
         e->heightOffset = JNode_float(n, EN, "heightOffset");
         e->horizontalCollision = JNode_int(n, EN, "horizontalCollision") != 0;
+        e->makeStepSound = JNode_int(n, EN, "makeStepSound") != 0;
         e->onGround = JNode_int(n, EN, "onGround") != 0;
         e->removed = JNode_int(n, EN, "removed") != 0;
+        e->walkDist = JNode_float(n, EN, "walkDist");
         e->x = JNode_float(n, EN, "x");
         e->y = JNode_float(n, EN, "y");
         e->z = JNode_float(n, EN, "z");

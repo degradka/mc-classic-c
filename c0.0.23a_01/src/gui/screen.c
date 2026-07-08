@@ -1,11 +1,16 @@
 // gui/screen.c
 
 #include "screen.h"
+#include "../keys.h"
 #include "../renderer/tessellator.h"
 #include <GL/glew.h>
-#include <GLFW/glfw3.h>
+#include <stdlib.h>
 
 static Tessellator TESSELLATOR;
+
+extern void Minecraft_setScreen(Screen* screen);
+extern void Minecraft_grabMouse(void);
+extern int Minecraft_getGuiTexture(void);
 
 void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col) {
     float a = ((col >> 24) & 0xFF) / 255.0f;
@@ -53,70 +58,97 @@ void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsi
     glDisable(GL_BLEND);
 }
 
-void Screen_drawCenteredString(Screen* s, const char* str, int x, int y, unsigned int color) {
-    int w = Font_width(s->font, str);
-    Font_drawShadow(s->font, &TESSELLATOR, str, x - w / 2, y, (int)color);
+void Screen_drawCenteredString(Font* font, const char* str, int x, int y, unsigned int color) {
+    Font_drawShadow(font, &TESSELLATOR, str, x - Font_width(font, str) / 2, y, (int)color);
 }
 
-void Screen_drawString(Screen* s, const char* str, int x, int y, unsigned int color) {
-    Font_drawShadow(s->font, &TESSELLATOR, str, x, y, (int)color);
+void Screen_drawString(Font* font, const char* str, int x, int y, unsigned int color) {
+    Font_drawShadow(font, &TESSELLATOR, str, x, y, (int)color);
 }
 
-extern void Minecraft_setScreen(Screen* screen);
-extern void Minecraft_grabMouse(void);
+void Screen_blit(int x, int y, int u, int v, int w, int h, float zLevel) {
+    float us = 0.00390625f;
+    float vs = 0.00390625f;
+    Tessellator_begin(&TESSELLATOR);
+    Tessellator_vertexUV(&TESSELLATOR, (float)x, (float)(y + h), zLevel, (float)u * us, (float)(v + h) * vs);
+    Tessellator_vertexUV(&TESSELLATOR, (float)(x + w), (float)(y + h), zLevel, (float)(u + w) * us, (float)(v + h) * vs);
+    Tessellator_vertexUV(&TESSELLATOR, (float)(x + w), (float)y, zLevel, (float)(u + w) * us, (float)v * vs);
+    Tessellator_vertexUV(&TESSELLATOR, (float)x, (float)y, zLevel, (float)u * us, (float)v * vs);
+    Tessellator_end(&TESSELLATOR);
+}
 
-void Screen_initBase(Screen* s, Font* font, int width, int height) {
-    s->width = width;
-    s->height = height;
-    s->font = font;
+static void noInit(Screen* s) { (void)s; }
+
+void Screen_construct(Screen* s) {
     s->buttonCount = 0;
+    s->allowUserInput = false;
     s->render = Screen_render;
     s->keyPressed = Screen_keyPressed;
+    s->mousePressed = Screen_mousePressed;
     s->buttonClicked = NULL;
-    s->mouseClicked = Screen_mouseClicked;
+    s->init = noInit;
     s->tick = NULL;
-    s->opened = NULL;
-    s->removed = NULL;
+    s->closeScreen = NULL;
 }
 
-void Screen_addButton(Screen* s, int id, int x, int y, int w, int h, const char* msg) {
-    if (s->buttonCount < SCREEN_MAX_BUTTONS) Button_init(&s->buttons[s->buttonCount++], id, x, y, w, h, msg);
+void Screen_setup(Screen* s, Font* font, int width, int height) {
+    s->font = font;
+    s->width = width;
+    s->height = height;
+    s->init(s);
 }
 
-void Screen_mouseClicked(Screen* s, int x, int y, int button) {
+Button* Screen_addButton(Screen* s, int id, int x, int y, int w, const char* msg) {
+    if (s->buttonCount == s->buttonCapacity) {
+        s->buttonCapacity = s->buttonCapacity ? s->buttonCapacity * 2 : 16;
+        s->buttons = (Button*)realloc(s->buttons, (size_t)s->buttonCapacity * sizeof(Button));
+    }
+    Button* b = &s->buttons[s->buttonCount++];
+    Button_init(b, id, x, y, w, msg);
+    return b;
+}
+
+void Screen_clearButtons(Screen* s) {
+    s->buttonCount = 0;
+}
+
+// a click that changes the screen still goes on to the buttons after it
+void Screen_mousePressed(Screen* s, int x, int y, int button) {
     if (button != 0) return;
     for (int i = 0; i < s->buttonCount; i++) {
         Button* b = &s->buttons[i];
-        if (!b->enabled || x < b->x || y < b->y || x >= b->x + b->w || y >= b->y + b->h) continue;
+        if (!(b->enabled && x >= b->x && y >= b->y && x < b->x + b->w && y < b->y + b->h)) continue;
         if (s->buttonClicked) s->buttonClicked(s, b);
     }
 }
 
+// the left half and the right end of the 200 wide button in gui.png, the second row when hovered
 void Screen_render(Screen* s, int xm, int ym) {
     for (int i = 0; i < s->buttonCount; ++i) {
         Button* b = &s->buttons[i];
         if (!b->visible) continue;
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, Minecraft_getGuiTexture());
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        int state = 1;
+        bool hover = xm >= b->x && ym >= b->y && xm < b->x + b->w && ym < b->y + b->h;
+        if (!b->enabled) state = 0;
+        else if (hover) state = 2;
+        Screen_blit(b->x, b->y, 0, 46 + state * 20, b->w / 2, b->h, 0.0f);
+        Screen_blit(b->x + b->w / 2, b->y, 200 - b->w / 2, 46 + state * 20, b->w / 2, b->h, 0.0f);
         if (!b->enabled) {
-            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF8080A0u);
-            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF909090u);
-            Screen_drawCenteredString(s, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFA0A0A0u);
-            continue;
+            Screen_drawCenteredString(s->font, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFA0A0A0u);
+        } else if (hover) {
+            Screen_drawCenteredString(s->font, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFFFA0u);
+        } else {
+            Screen_drawCenteredString(s->font, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xE0E0E0u);
         }
-        Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFF000000u);
-        if (xm >= b->x && ym >= b->y && xm < b->x + b->w && ym < b->y + b->h) {
-            Screen_fill(b->x - 1, b->y - 1, b->x + b->w + 1, b->y + b->h + 1, 0xFFA0A0A0u);
-            Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF8080A0u);
-            Screen_drawCenteredString(s, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xFFFFA0u);
-            continue;
-        }
-        Screen_fill(b->x, b->y, b->x + b->w, b->y + b->h, 0xFF707070u);
-        Screen_drawCenteredString(s, b->msg, b->x + b->w / 2, b->y + (b->h - 8) / 2, 0xE0E0E0u);
     }
 }
 
 void Screen_keyPressed(Screen* s, char eventCharacter, int eventKey) {
     (void)s; (void)eventCharacter;
-    if (eventKey == GLFW_KEY_ESCAPE) {
+    if (eventKey == KEY_ESCAPE) {
         Minecraft_setScreen(NULL);
         Minecraft_grabMouse();
     }
