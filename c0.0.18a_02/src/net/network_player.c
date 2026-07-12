@@ -137,7 +137,11 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glScalef(size, size, size);
     float offY = -(fabsf(sinf(animStep * 0.6662f)) * 5.0f) - 23.0f;
     glTranslatef(0.0f, offY, 0.0f);
-    glRotatef(bodyYaw, 0.0f, 1.0f, 0.0f);
+    // real source rotates by (180-bodyYaw+rotOffs), not bodyYaw directly
+    // (Mob.render, inherited by NetworkPlayer via HumanoidMob; rotOffs is 0
+    // here) - was just bodyYaw, making other players visually face the
+    // opposite direction from their actual movement/facing
+    glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
     ZombieModel_render(&sModel, animStep, headYaw, headPitch);
     glPopMatrix();
 

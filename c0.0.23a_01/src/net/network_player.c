@@ -156,8 +156,11 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     float headYaw   = headYawO + (np->base.yRotation - headYawO) * partialTicks;
     float headPitch = headPitchO + (np->base.xRotation - headPitchO) * partialTicks;
     // head model rotation is relative to the body, which is rotated
-    // separately below; negated in c0.0.19a_04 to match the mirrored body
-    headYaw = -(headYaw - bodyYaw);
+    // separately below. Matches Mob.render's own "f7 -= f5" exactly (plain
+    // yRot-bodyYaw, no negation) - the negation this port had here was a
+    // workaround for the missing 180-degree body flip below, not a real fix;
+    // both corrected together now to match the real formula literally
+    headYaw -= bodyYaw;
     float animStep  = np->animStepO + (np->animStep - np->animStepO) * partialTicks;
 
     float b = Entity_getBrightness(&np->base);
@@ -176,7 +179,11 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     // run-speed-scaled cosine, matching "fixed the default player stance"
     float offY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
     glTranslatef(0.0f, offY, 0.0f);
-    glRotatef(bodyYaw, 0.0f, 1.0f, 0.0f);
+    // real source rotates by (180-bodyYaw+rotOffs), not bodyYaw directly
+    // (Mob.render, inherited by NetworkPlayer via HumanoidMob; rotOffs is 0
+    // here) - was just bodyYaw, making other players visually face the
+    // opposite direction from their actual movement/facing
+    glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
     glDisable(GL_ALPHA_TEST);
     glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: "fixed mirroring"
     ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);
