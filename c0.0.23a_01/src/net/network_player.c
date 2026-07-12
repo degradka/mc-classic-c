@@ -184,10 +184,15 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     // here) - was just bodyYaw, making other players visually face the
     // opposite direction from their actual movement/facing
     glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
-    glDisable(GL_ALPHA_TEST);
+    // real source's Mob.render() only disables GL_ALPHA_TEST for allowAlpha
+    // =false mobs (none exist here); the default (true) case disables
+    // GL_CULL_FACE instead, which is never actually enabled anywhere in this
+    // client anyway (a no-op). Alpha test must stay enabled (the ambient
+    // state set in init()) - harmless for char.png today since it has no
+    // alpha=0 regions, but was incorrect and would break any future skin
+    // with real transparency
     glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: "fixed mirroring"
     ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);
-    glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
     // name tag: floats above the head, billboarded to face the camera
