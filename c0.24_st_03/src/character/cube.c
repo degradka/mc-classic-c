@@ -60,8 +60,7 @@ Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
 }
 
 void Cube_setPos(Cube* c, float x, float y, float z) {
-    (void)z;
-    c->x = x; c->y = y; c->z = 0.0f;
+    c->x = x; c->y = y; c->z = z;
 }
 
 // c0.0.14a_08: bakes the raw (untranslated, unrotated) geometry into a GL

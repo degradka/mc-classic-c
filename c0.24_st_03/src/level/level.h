@@ -14,6 +14,7 @@
 typedef unsigned char byte;
 
 struct LevelRenderer; typedef struct LevelRenderer LevelRenderer;
+struct Entity; typedef struct Entity Entity;
 
 // a pending liquid/gravity-tile reaction scheduled for a future tick, see
 // Level_addToTickNextTick. delay is extra 5-tick drain cycles to wait before
@@ -55,6 +56,12 @@ typedef struct Level {
     // packet, actually changes tiles. Reset to false whenever a singleplayer
     // level is (re)generated
     bool networkMode;
+
+    // c0.24_st_03: the local singleplayer/own Player, used by mob AI to find
+    // a chase/attack target (real source's Level.player, set once from
+    // Player's own constructor). NULL until Minecraft's own init sets it,
+    // never reassigned afterward for the lifetime of the process
+    Entity* player;
 } Level;
 
 typedef struct {
@@ -128,5 +135,22 @@ void  Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId);
 // cell to re-evaluate its reaction logic without an actual neighbor changing.
 // Added for Sponge's onRemoved hook, which re-triggers this over a 5x5x5 area
 void  Level_updateNeighborsAt(Level* level, int x, int y, int z);
+
+// c0.24_st_03: mob AI's chase target. Set once, from Player_init's caller
+static inline void   Level_setPlayer(Level* level, Entity* player) { level->player = player; }
+static inline Entity* Level_getPlayer(const Level* level) { return level->player; }
+
+// line of sight test between two points, used to gate mob melee attacks
+// (matches Level.clip(Vec3,Vec3) != null): true if a solid tile blocks the
+// straight line between them before reaching the second point
+bool Level_clip(const Level* level, float x1, float y1, float z1, float x2, float y2, float z2);
+
+// attempts to grow a tree with its base at (x,y,z), matches
+// Level.maybeGrowTree() exactly: trunk 4 to 6 tall, a wider 5x5 canopy base
+// narrowing to a 3x3 top with randomly dropped corners, forced off on the
+// very top layer. Requires clear space for the whole shape and grass
+// directly underneath, returns false with nothing placed if either fails,
+// matching the real source's own check space first, place second order
+bool Level_maybeGrowTree(Level* level, int x, int y, int z);
 
 #endif  // LEVEL_H

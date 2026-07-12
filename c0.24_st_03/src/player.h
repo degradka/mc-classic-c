@@ -6,6 +6,8 @@
 #include "common.h"
 #include "entity.h"
 #include "options.h"
+#include "mob.h"
+#include "inventory.h"
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
 
@@ -25,9 +27,24 @@ typedef struct Player {
     // >=100 = operator, gates whether this player can break Bedrock. Stays 0
     // in singleplayer, since no Login reply is ever received there
     int userType;
+    // c0.24_st_03: shown on the Game over screen, reset to 0 on every new level
+    int score;
+    // c0.24_st_03: survival inventory, replaces the old Creative style fixed
+    // gHotbar[]/gSelectedSlot pair. Starts empty, matching player/d.java's
+    // own constructor - filling it back up is what breaking tiles and
+    // picking up the resulting Item entities is for
+    Inventory inventory;
 } Player;
 
 void Player_init(Player* player, Level* level);
+
+// c0.24_st_03: fired once via Entity's onDeath hook the tick health first
+// reaches <=0. Shrinks the bounding box to 0.2x0.2, knocks back slightly
+// away from the attacker (if any), and drops the eye height to 0.1 (a
+// ragdoll-ish "fell over" camera pose, no actual ragdoll model exists)
+void Player_die(Entity* self, Entity* attacker);
+
+void Player_awardKillScore(Player* player, int points);
 
 void Player_onTick(Player* player);
 void Player_turn(Player* player, GLFWwindow* window, float dx, float dy);

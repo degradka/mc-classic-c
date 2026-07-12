@@ -40,11 +40,14 @@ void GenerateNewLevelScreen_open(Screen* previousScreen) {
     s->screen.destroy = NULL;
     s->previousScreen = previousScreen;
 
+    // c0.24_st_03: layout changed from height/3+{0,32,64,96} to
+    // height/4+{0,24,48,120} (confirmed against the real source, same kind
+    // of relayout PauseScreen already got in c0.0.23a_01)
     int w = s->screen.width, h = s->screen.height;
-    Button_init(&s->buttons[0], 0, w / 2 - 100, h / 3 + 0,  200, 20, "Small");
-    Button_init(&s->buttons[1], 1, w / 2 - 100, h / 3 + 32, 200, 20, "Normal");
-    Button_init(&s->buttons[2], 2, w / 2 - 100, h / 3 + 64, 200, 20, "Huge");
-    Button_init(&s->buttons[3], 3, w / 2 - 100, h / 3 + 96, 200, 20, "Cancel");
+    Button_init(&s->buttons[0], 0, w / 2 - 100, h / 4 + 0,   200, 20, "Small");
+    Button_init(&s->buttons[1], 1, w / 2 - 100, h / 4 + 24,  200, 20, "Normal");
+    Button_init(&s->buttons[2], 2, w / 2 - 100, h / 4 + 48,  200, 20, "Huge");
+    Button_init(&s->buttons[3], 3, w / 2 - 100, h / 4 + 120, 200, 20, "Cancel");
 
     Minecraft_setScreen((Screen*)s);
 }

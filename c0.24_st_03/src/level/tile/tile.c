@@ -5,6 +5,7 @@
 #include "../../particle/particle.h"
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -152,6 +153,9 @@ static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, in
     (void)self; (void)lvl; (void)x; (void)y; (void)z; (void)type;
 }
 
+static int Tile_default_getDropCount(const Tile* self) { (void)self; return 1; }
+static int Tile_default_getDropResource(const Tile* self) { return self->id; }
+
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
     t->liquidType = LIQUID_NONE;
@@ -173,6 +177,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->renderFace = Tile_default_renderFace;
     t->onPlace = NULL;
     t->onRemoved = NULL;
+    t->getDropCount    = Tile_default_getDropCount;
+    t->getDropResource = Tile_default_getDropResource;
 
     gTiles[id] = t;
 }
@@ -210,6 +216,15 @@ static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
     return (face == 1) ? 0 : (face == 0) ? 2 : 3;
 }
+
+// breaking Grass drops Dirt, not Grass itself, matching real source exactly:
+// level/tile/k.java's Grass class overrides g() to return Dirt's own
+// getDropResource() rather than its own id. Without this, Grass had no
+// override at all and fell back to the generic drop self default, its own
+// id of 2, handing the player a Grass block item that then landed in its
+// own separate, never restacking hotbar slot instead of merging with
+// genuine Dirt drops
+static int Grass_getDropResource(const Tile* self) { (void)self; return TILE_DIRT.id; }
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
@@ -415,11 +430,24 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
     }
 }
 
+// c0.24_st_03: Bush is this codebase's own name for what the real source
+// calls Sapling (level\tile\i.java) - same tile, id 6, same class hierarchy
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
-    (void)self;
     int below = Level_getTile(lvl, x, y-1, z);
     if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
         level_setTile(lvl, x, y, z, 0);
+        return;
+    }
+    // c0.24_st_03: 1-in-5 chance per random tick to attempt growing into a
+    // tree. Silently clears/restores the sapling's own tile (setTileNoUpdate,
+    // no neighbor notification for this single swap), but the tree itself
+    // (Level_maybeGrowTree) sets every block through the normal notifying
+    // path, matching the real source's own mix of the two exactly
+    if (rand() % 5 == 0) {
+        Level_setTileNoUpdate(lvl, x, y, z, 0);
+        if (!Level_maybeGrowTree(lvl, x, y, z)) {
+            Level_setTileNoUpdate(lvl, x, y, z, self->id);
+        }
     }
 }
 
@@ -445,10 +473,20 @@ static int Log_getTexture(const Tile* self, int face) {
     return (face == 0 || face == 1) ? 21 : 20;
 }
 
+// c0.24_st_03: drops 3-5 planks, matches level\tile\d.java's f()/g() exactly
+static int Log_getDropCount(const Tile* self)    { (void)self; return rand() % 3 + 3; }
+static int Log_getDropResource(const Tile* self) { (void)self; return TILE_WOOD.id; }
+
 /* Leaves: new in c0.0.14a_08, non solid, non light blocking, planted by
    world generation's new tree pass */
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
+// c0.24_st_03: 1-in-6 chance of a single sapling, matches level\tile\e.java's
+// f()/g() exactly - returning a drop count of 0 the other 5/6 of the time
+// naturally yields "no drop" via Tile_dropItems' own count-driven loop, no
+// separate chance check needed on top of it
+static int Leaves_getDropCount(const Tile* self)    { (void)self; return (rand() % 6 == 0) ? 1 : 0; }
+static int Leaves_getDropResource(const Tile* self) { (void)self; return TILE_BUSH.id; }
 
 /* Sponge: new in c0.0.19a_04. Dries a 5x5x5 area of water on placement, and
    re-triggers neighbor evaluation over the same area when removed (working
@@ -516,6 +554,7 @@ void Tile_registerAll(void) {
     TILE_BEDROCK.soundType    = SOUND_STONE;
 
     TILE_GRASS.onTick     = Grass_onTick;
+    TILE_GRASS.getDropResource = Grass_getDropResource;
 
     TILE_BUSH.isSolid     = Bush_isSolid;
     TILE_BUSH.blocksLight = Bush_blocksLight;
@@ -621,6 +660,13 @@ void Tile_registerAll(void) {
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
     TILE_LEAVES.particleGravity = 0.4f; // c0.0.16a_02: leaf break particles fall slower
 
+    // c0.24_st_03: survival tile drops (task #60's generic plumbing, real
+    // per-tile values from level\tile\d.java/e.java)
+    TILE_LOG.getDropCount       = Log_getDropCount;
+    TILE_LOG.getDropResource    = Log_getDropResource;
+    TILE_LEAVES.getDropCount    = Leaves_getDropCount;
+    TILE_LEAVES.getDropResource = Leaves_getDropResource;
+
     TILE_SAND.soundType     = SOUND_GRAVEL;
     TILE_GRAVEL.soundType   = SOUND_GRAVEL;
     TILE_GOLD_ORE.soundType = SOUND_STONE;
@@ -683,11 +729,6 @@ void Tile_registerAll(void) {
     TILE_GOLD_BLOCK.soundType = SOUND_METAL;
 }
 
-const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT] = {
-    1, 4, 3, 5, 17, 18, 6, 37, 38, 39, 40, 12, 13, 20, 19, 41,
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
-};
-
 /* untextured single face helper for hit highlight */
 // only draws a face if the player is on the side it faces, matching the real
 // game's block highlight (was drawing all 6 faces unconditionally)
@@ -746,5 +787,22 @@ void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleE
         Particle p;
         Particle_init(&p, lvl, tx, ty, tz, mx, my, mz, self);
         ParticleEngine_add(engine, &p);
+    }
+}
+
+// implemented in minecraft.c: allocates a slot in items[] and spawns it.
+// tile.c has no access to that array (lives with the other entity arrays in
+// minecraft.c, this project's usual pattern for that layering problem, see
+// the equivalent for Arrow's own entity search in item/arrow.c)
+extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
+
+void Tile_dropItems(const Tile* self, Level* lvl, int x, int y, int z) {
+    int count = self->getDropCount(self);
+    int resource = self->getDropResource(self);
+    for (int i = 0; i < count; i++) {
+        float jx = (float)rand() / (float)RAND_MAX * 0.7f + 0.15f;
+        float jy = (float)rand() / (float)RAND_MAX * 0.7f + 0.15f;
+        float jz = (float)rand() / (float)RAND_MAX * 0.7f + 0.15f;
+        Minecraft_spawnItem(lvl, (float)x + jx, (float)y + jy, (float)z + jz, resource);
     }
 }

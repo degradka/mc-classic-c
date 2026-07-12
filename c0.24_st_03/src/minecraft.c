@@ -29,7 +29,10 @@
 #include "options.h"
 #include "audio/sound.h"
 #include "user.h"
-#include "character/zombie.h"
+#include "character/creature.h"
+#include "item/arrow.h"
+#include "item/item.h"
+#include "item/sign.h"
 #include "timer.h"
 #include "hitresult.h"
 #include "gui/font.h"
@@ -37,22 +40,31 @@
 #include "gui/pause_screen.h"
 #include "gui/chat_input_screen.h"
 #include "gui/message_screen.h"
-#include "gui/inventory_screen.h"
+#include "gui/game_over_screen.h"
 #include "net/network_player.h"
 
 #define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
 #define MAX_NET_PLAYERS 32
+#define MAX_ARROWS 64 // no cap in the real source; bounded here same as mobs/netPlayers
+#define MAX_ITEMS 256 // no cap in the real source either; same reasoning
+#define MAX_SIGNS 64 // no cap in the real source either; same reasoning
 
 static GLFWwindow*    window;
 static Level          level;
 static LevelRenderer  levelRenderer;
 static Player         player;
 static Timer          timer;
-static Zombie         mobs[MAX_MOBS];
+static Creature       mobs[MAX_MOBS];
+static Arrow          arrows[MAX_ARROWS];
+static Item           items[MAX_ITEMS];
+static Sign           signs[MAX_SIGNS];
 static ParticleEngine particleEngine;
 static User           user;
 
 static int mobCount = 0;
+static int arrowCount = 0;
+static int itemCount = 0;
+static int signCount = 0;
 
 static NetworkPlayer netPlayers[MAX_NET_PLAYERS];
 static int netPlayerCount = 0;
@@ -62,23 +74,19 @@ static int prevRight = GLFW_RELEASE;
 static int prevMiddle = GLFW_RELEASE;
 static int prevEnter = GLFW_RELEASE;
 static int prevNumKeys[9]; // GLFW_KEY_1..GLFW_KEY_9, initialized to GLFW_RELEASE in init()
-static int prevG    = GLFW_RELEASE;
 static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
 static int prevT    = GLFW_RELEASE;
-static int prevB    = GLFW_RELEASE; // c0.0.20a_02: opens the inventory screen
+static int prevTab  = GLFW_RELEASE; // c0.24_st_03: shoots an arrow, singleplayer only
+static int prevB    = GLFW_RELEASE; // c0.24_st_03: places a Sign, singleplayer only
 
-// c0.0.14a_08: hotbar expanded from 6 individually wired keys to a real 9
-// slot bar, selectable by keys 1-9, mouse wheel, or middle click pick block.
-// c0.0.19a_04: stonebrick and sand dropped in favor of the two new tiles
-// (rock, dirt, sponge, wood, sapling, log, leaves, glass, gravel), and this
-// is also the first version to actually draw the bar on screen (see the Hud)
-// c0.0.20a_02: the hotbar is now a mutable inventory, its slots overwritable
-// from the new full inventory screen (B key), so it defaults to the first 9
-// entries of PLACEABLE_TILE_IDS instead of a fixed named set, and selection
-// is tracked as a slot index rather than a remembered tile id
-static int gHotbar[9];
-static int gSelectedSlot = 0;
+// c0.24_st_03: the hotbar is now backed directly by player.inventory (real
+// survival inventory: 9 slots, each an id+count, starting empty), replacing
+// every earlier version's Creative style always-full gHotbar[]/gSelectedSlot
+// pair. No more free block picking (the B key full inventory/select block
+// screen and middle click "pick block" are both gone, matching the real
+// source having no such thing here) - the only way to get a tile into a
+// slot is to break one and walk over the Item it drops
 
 static int gTickCount = 0;
 static int gLastMineTick = 0;
@@ -112,6 +120,7 @@ static char gConnectUsername[64] = ""; // empty = fall back to "guest"
 static int texTerrain = 0;
 static int texDirt = 0;
 static int texGui = 0; // c0.0.19a_04: hotbar background/highlight atlas
+static int texIcons = 0; // c0.24_st_03: crosshair/hearts/air bubbles atlas
 
 // c0.0.19a_04: animated water/lava, one 16x16 patch per tile re-simulated
 // and re-uploaded into texTerrain once per tick
@@ -142,6 +151,7 @@ static int      isHitNull = 1;
 static HitResult hitResult;
 
 static PauseScreen gPauseScreen;
+static GameOverScreen gGameOverScreen;
 static Screen*     activeScreen = NULL; // not null means paused, showing a menu
 static int prevScreenClick = GLFW_RELEASE;
 
@@ -166,6 +176,15 @@ static void releaseMouseAndOpenPause(void) {
 
 // matches Minecraft.grabMouse(): grabs cursor again and closes any open screen
 void Minecraft_closeScreenAndGrabMouse(void) {
+    // c0.24_st_03: grabMouse() calls setScreen(null) itself as its last
+    // step, so a dead player's own setScreen(null) substitution back to the
+    // Game over screen applies here too. Without this, Escape on the Game
+    // over screen (routed here by Screen_defaultKeyPressed) would grab the
+    // mouse and hide the cursor with no screen left to show
+    if (player.e.health <= 0) {
+        Minecraft_setScreen(NULL);
+        return;
+    }
     activeScreen = NULL;
     // ticks keep advancing while paused, so without this the auto repeat
     // mining check sees a stale gLastMineTick and fires the instant the
@@ -183,19 +202,65 @@ void Minecraft_closeScreenAndGrabMouse(void) {
 void Minecraft_generateNewLevelSized(int sizePreset) {
     int size = 128 << sizePreset;
 
+    // must happen before Level_resize, not after. World gen's own
+    // "Spawning.." stage, level_gen.c's spawnMobs, now populates mobs[] as
+    // part of Level_resize's own Level_generateMap call below, via the same
+    // mobCount indexed array this resets. Clearing mobCount afterward would
+    // silently wipe every mob world gen just spawned
+    mobCount = 0;
+    arrowCount = 0;
+    itemCount = 0;
+    signCount = 0;
+
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, size, size, 64);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
     levelRenderer.drawDistance = gOptions.viewDistance;
 
+    // undo Player_die's shrunk hitbox, near zero heightOffset, and dead
+    // health state, so a fresh level after dying isn't stuck permanently
+    // dead. Matches real source's own Player.resetPos() override exactly:
+    // heightOffset=1.62f plus setSize(0.6,1.8) before resetPos's own
+    // position search runs. Player_die sets heightOffset to 0.1f for the
+    // keel over death pose, and every subsequent Entity_move computes eye
+    // height as feetY plus heightOffset, so restoring it here is what puts
+    // eye level back at standing height instead of pinned near the floor.
+    // Size must be restored before resetPosition, since that rebuilds the
+    // bounding box from whatever width and height is currently set
+    player.e.heightOffset = 1.62f;
+    Entity_setSize(&player.e, 0.6f, 1.8f);
+    Mob_init(&player.e);
+    player.score = 0;
+
+    // real source's own level change path, k.java's setLevel, constructs a
+    // brand new Player object every single time a level is generated or
+    // loaded, whether or not the previous one died. A fresh Player
+    // naturally has a fresh, empty inventory, Player.java's own field
+    // initializer. This port keeps one persistent Player struct instead of
+    // reallocating it, so the equivalent is resetting inventory explicitly
+    // here. Both cases, dying or not, should behave identically: hotbar
+    // always clears on regen
+    Inventory_init(&player.inventory);
+
     Entity_resetPosition(&player.e);
-    mobCount = 0;
 }
 
 // matches Minecraft.setScreen(): any screen release mouse look, letting the
 // player click and read text normally instead of aiming the camera. Chat
 // used to skip this, leaving the camera live behind the text box.
 void Minecraft_setScreen(Screen* screen) {
+    // c0.24_st_03: matches the real source's own substitution inside
+    // setScreen: a request to close down to no screen at all is overridden
+    // to the Game over screen whenever the player is dead, so it can't be
+    // escaped except through its own "Generate new level..." button
+    if (!screen && player.e.health <= 0) {
+        int fbw, fbh;
+        glfwGetFramebufferSize(window, &fbw, &fbh);
+        int screenWidth  = fbw * 240 / fbh;
+        int screenHeight = 240;
+        GameOverScreen_init(&gGameOverScreen, &gFont, screenWidth, screenHeight, player.score);
+        screen = (Screen*)&gGameOverScreen;
+    }
     if (!screen) {
         Minecraft_closeScreenAndGrabMouse();
         return;
@@ -236,6 +301,9 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
     levelRenderer.drawDistance = gOptions.viewDistance;
     mobCount = 0;
+    arrowCount = 0;
+    itemCount = 0;
+    signCount = 0;
     netPlayerCount = 0;
     gLoading = false;
 }
@@ -475,19 +543,18 @@ static void charCallback(GLFWwindow* w, unsigned int codepoint) {
 // c0.0.20a_02: selection is now a slot index into the mutable hotbar rather
 // than a remembered tile id, and the wheel direction is inverted relative to
 // before (subtracts instead of adds), matching the real source exactly.
+// c0.24_st_03: the c0.0.21a "Select block screen stays scrollable while
+// open" exception is gone along with that screen itself (see the removed
+// InventoryScreen note above) - this is back to a plain "only while no
+// screen is up" gate
 static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     (void)w; (void)xoffset;
-    // c0.0.21a: the Select block screen is the one exception that still lets
-    // the mouse wheel cycle the hotbar while it's open (see the matching
-    // note on InventoryScreen_isThis above)
-    if (activeScreen && !InventoryScreen_isThis(activeScreen)) return;
+    if (activeScreen) return;
 
     int dir = (yoffset > 0.0) ? 1 : (yoffset < 0.0) ? -1 : 0;
     if (dir == 0) return;
 
-    gSelectedSlot -= dir;
-    while (gSelectedSlot < 0) gSelectedSlot += 9;
-    while (gSelectedSlot >= 9) gSelectedSlot -= 9;
+    Inventory_scroll(&player.inventory, dir);
 }
 
 // c0.0.14a_08: daylight fog switched from exponential to linear, with its far
@@ -597,9 +664,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.0.23a_01", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.24_SURVIVAL_TEST_03", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.0.23a_01", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.24_SURVIVAL_TEST_03", NULL, NULL);
     }
 
     if (!window) {
@@ -652,7 +719,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Options_init(&gOptions);
     Sound_init(gOptions.music, gOptions.sound);
 
-    for (int i = 0; i < 9; ++i) gHotbar[i] = PLACEABLE_TILE_IDS[i];
+    // c0.24_st_03: no more pre-filled Creative hotbar - player.inventory
+    // (initialized in Player_init below) starts empty, matching the real
+    // source's own player/d.java constructor
 
     // c0.0.13a_03 defaults to "anonymous" instead of "noname" when no
     // session is set, matching Minecraft.run()'s fallback level owner name.
@@ -665,6 +734,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
     texGui     = loadTexture("resources/gui.png", GL_NEAREST);
+    texIcons   = loadTexture("resources/icons.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.png"); // c0.0.17a: was default.gif
 
     // c0.0.19a_04: register the water/lava animators against their tile's
@@ -677,17 +747,27 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     gTextureFX[0]->tick(gTextureFX[0]);
     gTextureFX[1]->tick(gTextureFX[1]);
 
+    // must happen before Level_init, not after. World gen's own
+    // "Spawning.." stage, level_gen.c's spawnMobs, populates mobs[] as part
+    // of Level_init's own Level_generateMap call below, when booting into a
+    // freshly generated map rather than loading a save. These are already 0
+    // from their own static initializers at this point in the program, but
+    // resetting them again after Level_init would silently wipe every mob
+    // world gen just spawned
+    mobCount = 0;
+    arrowCount = 0;
+    itemCount = 0;
+    signCount = 0;
+
     Level_init(lvl, 256, 256, 64);
     LevelRenderer_init(lr, lvl, texTerrain);
     lr->drawDistance = gOptions.viewDistance; // c0.0.23a_01: persisted option, not always 0 (FAR) on init
     calcLightDepths(lvl, 0, 0, lvl->width, lvl->height);
 
     Player_init(p, lvl);
+    Level_setPlayer(lvl, &p->e); // c0.24_st_03: mob AI chase/attack target
 
     ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain);
-
-    // c0.0.13a_03 no longer auto spawns any zombies at world start
-    mobCount = 0;
 
     Timer_init(&timer, 20.0f);
 
@@ -742,7 +822,16 @@ static void setupCamera(Player* p, float t) {
     int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(70.0, (double)fbw / (double)fbh, 0.05, 1000.0);
+
+    // c0.24_st_03: FOV narrows as the death animation plays, formula and
+    // constants matched exactly against the real source (k.java, the block
+    // right before its own gluPerspective call)
+    double fov = 70.0;
+    if (p->e.health <= 0) {
+        double deathTime = (double)p->e.deathTime + (double)t;
+        fov /= (1.0 - 500.0 / (deathTime + 500.0)) * 2.0 + 1.0;
+    }
+    gluPerspective(fov, (double)fbw / (double)fbh, 0.05, 1000.0);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     moveCameraToPlayer(p, t);
@@ -765,8 +854,6 @@ static void drawGuiBlit(int x, int y, int u, int v, int w, int h) {
 }
 
 static void drawGui(float partialTicks) {
-    (void)partialTicks;
-
     // Clear depth so HUD draws on top
     glClear(GL_DEPTH_BUFFER_BIT);
 
@@ -806,7 +893,57 @@ static void drawGui(float partialTicks) {
     glBindTexture(GL_TEXTURE_2D, texGui);
     drawGuiBlit(screenWidth / 2 - 91, screenHeight - 22, 0, 0, 182, 22);
 
-    drawGuiBlit(screenWidth / 2 - 91 - 1 + gSelectedSlot * 20, screenHeight - 22 - 1, 0, 22, 24, 22);
+    drawGuiBlit(screenWidth / 2 - 91 - 1 + player.inventory.selected * 20, screenHeight - 22 - 1, 0, 22, 24, 22);
+
+    // c0.24_st_03: crosshair, moved from a manual untextured quad draw (a
+    // leftover from before icons.png existed as an asset) to the real
+    // source's own 16x16 sprite at icons.png (0,0)
+    glBindTexture(GL_TEXTURE_2D, texIcons);
+    drawGuiBlit(screenWidth / 2 - 7, screenHeight / 2 - 7, 0, 0, 16, 16);
+
+    // c0.24_st_03: health hearts, matches c\l.java's own Hud.a() exactly.
+    // invulnerableTime flicker: on 2 ticks out of every 6 (invulnerableTime/3
+    // %2==1), except forced off during the last 10 ticks of the window, so
+    // the "ghost preview of pending damage" hearts (drawn from lastHealth)
+    // only show during the flicker-on frames early in a fresh hit
+    {
+        int flicker = (player.e.invulnerableTime / 3 % 2 == 1) ? 1 : 0;
+        if (player.e.invulnerableTime < 10) flicker = 0;
+        int health = player.e.health;
+        int lastHealth = player.e.lastHealth;
+        for (int i = 0; i < 10; ++i) {
+            int bgFrame = flicker ? 1 : 0;
+            int hx = screenWidth / 2 - 91 + (i << 3);
+            int hy = screenHeight - 32;
+            // c0.24_st_03: real source reseeds a fresh java.util.Random from
+            // a frame counter each call for this jitter; this port uses
+            // plain rand() instead (purely cosmetic, not save-file/network
+            // visible, so exact PRNG-sequence fidelity isn't needed here)
+            if (health <= 4 && (rand() % 2)) hy += 1;
+            drawGuiBlit(hx, hy, 16 + bgFrame * 9, 0, 9, 9);
+            if (flicker) {
+                if ((i << 1) + 1 < lastHealth) drawGuiBlit(hx, hy, 70, 0, 9, 9);
+                if ((i << 1) + 1 == lastHealth) drawGuiBlit(hx, hy, 79, 0, 9, 9);
+            }
+            if ((i << 1) + 1 < health) drawGuiBlit(hx, hy, 52, 0, 9, 9);
+            if ((i << 1) + 1 == health) drawGuiBlit(hx, hy, 61, 0, 9, 9);
+        }
+    }
+
+    // c0.24_st_03: air bubbles, only while actually submerged (eye level tile
+    // is water) - matches c/l.java:90 exactly. Standing in shallow/waist deep
+    // water with isInWater() true but eyes above the surface must not show
+    // or drain bubbles at all
+    if (Entity_isUnderWater(&player.e)) {
+        int full = (int)ceil((player.e.airSupply - 2) * 10.0 / 300.0);
+        int popping = (int)ceil(player.e.airSupply * 10.0 / 300.0) - full;
+        for (int i = 0; i < full + popping; ++i) {
+            int bx = screenWidth / 2 - 91 + (i << 3);
+            int by = screenHeight - 32 - 9;
+            if (i < full) drawGuiBlit(bx, by, 16, 18, 9, 9);
+            else          drawGuiBlit(bx, by, 25, 18, 9, 9);
+        }
+    }
 
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
@@ -816,8 +953,43 @@ static void drawGui(float partialTicks) {
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     glEnable(GL_TEXTURE_2D);
     for (int i = 0; i < 9; ++i) {
+        // c0.24_st_03: empty slots (id -1) draw nothing, matching the real
+        // source's own hotbar skipping unpopulated slots entirely
+        int slotId = player.inventory.id[i];
+        if (slotId < 0) continue;
+
+        int hx = screenWidth / 2 - 90 + i * 20;
+        int hy = screenHeight - 16;
+
+        // re-enable and re-bind every iteration, not just once before the
+        // loop. Font_drawShadow below, the stack count text once count[i]>1,
+        // calls Font_draw_internal, which disables GL_TEXTURE_2D at its own
+        // end in font.c, not just a different bind, texturing itself goes
+        // off. Without redoing both here, every hotbar slot rendered after
+        // the first stacked one in a given frame drew fully untextured,
+        // flat white with whatever glColor was last set to, instead of a
+        // wrong texture. Rebinding the texture alone is not enough since
+        // glBindTexture is a no op while GL_TEXTURE_2D itself is disabled
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texTerrain);
+
         glPushMatrix();
-        glTranslated((double)(screenWidth / 2 - 90 + i * 20), (double)(screenHeight - 16), -50.0);
+        glTranslatef((float)hx, (float)hy, -50.0f);
+
+        // c0.24_st_03: pickup "pop in" bounce/squash animation, driven by
+        // the slot's own flash timer (Inventory.flash[], matches d.c[]),
+        // matches the real source's exact formula
+        int flash = player.inventory.flash[i];
+        if (flash > 0) {
+            float f3 = ((float)flash - partialTicks) / 5.0f;
+            float f4 = -(float)sin((double)(f3 * f3) * M_PI) * 8.0f;
+            float f5 = (float)sin((double)(f3 * f3) * M_PI) + 1.0f;
+            float f6 = (float)sin((double)f3 * M_PI) + 1.0f;
+            glTranslatef(10.0f, f4 + 10.0f, 0.0f);
+            glScalef(f5, f6, 1.0f);
+            glTranslatef(-10.0f, -10.0f, 0.0f);
+        }
+
         glScalef(10.0f, 10.0f, 10.0f);
         glTranslatef(1.0f, 0.5f, 0.0f);
         glRotatef(-30.0f, 1, 0, 0);
@@ -826,18 +998,28 @@ static void drawGui(float partialTicks) {
         glScalef(-1.0f, -1.0f, -1.0f);
 
         Tessellator_begin(&hudTess);
-        const Tile* slotTile = gTiles[gHotbar[i]];
+        const Tile* slotTile = gTiles[slotId];
         if (slotTile && slotTile->render) {
             slotTile->render(slotTile, &hudTess, &level, 0, -2, 0, 0);
         }
         Tessellator_end(&hudTess);
 
         glPopMatrix();
+
+        // c0.24_st_03: stack count, right aligned like the real source,
+        // only shown once there's more than 1 (a single item needs no count)
+        if (player.inventory.count[i] > 1) {
+            char countStr[8];
+            snprintf(countStr, sizeof countStr, "%d", player.inventory.count[i]);
+            int tw = Font_width(&gFont, countStr);
+            Font_drawShadow(&gFont, &hudTess, countStr, hx + 19 - tw, hy + 6, 0xFFFFFF);
+        }
     }
     glDisable(GL_TEXTURE_2D);
 
     // top left corner: version and stats
-    Font_drawShadow(&gFont, &hudTess, "0.0.23a_01", 2, 2, 0xFFFFFF);
+    // c0.24_st_03: real source's own version string for this build
+    Font_drawShadow(&gFont, &hudTess, "0.24_SURVIVAL_TEST_03", 2, 2, 0xFFFFFF);
 
     if (gOptions.showFrameRate) {
         char stats[64];
@@ -848,19 +1030,9 @@ static void drawGui(float partialTicks) {
     int cx = screenWidth / 2;
     int cy = screenHeight / 2;
 
-    glColor4f(1, 1, 1, 1);
-    Tessellator_begin(&hudTess);
-    // vertical (height ~9)
-    Tessellator_vertex(&hudTess, (float)(cx + 1), (float)(cy - 4), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 0), (float)(cy - 4), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 0), (float)(cy + 5), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 1), (float)(cy + 5), 0.0f);
-    // horizontal (width ~9)
-    Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 0), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 0), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx - 4), (float)(cy + 1), 0.0f);
-    Tessellator_vertex(&hudTess, (float)(cx + 5), (float)(cy + 1), 0.0f);
-    Tessellator_end(&hudTess);
+    // c0.24_st_03: the crosshair itself is now drawn earlier, alongside the
+    // hearts/air bubbles, using the real icons.png sprite instead of a
+    // manual untextured quad (see above)
 
     // c0.0.17a: new Tab "Connected players" overlay, shown while held and
     // connected. Coordinates and colors match the real source exactly
@@ -953,7 +1125,7 @@ static int raycast_block(const Level* lvl,
                          double ox, double oy, double oz,
                          double dx, double dy, double dz,
                          double maxDist,
-                         HitResult* out) {
+                         HitResult* out, double* outDist) {
     int x = (int)floor(ox);
     int y = (int)floor(oy);
     int z = (int)floor(oz);
@@ -977,13 +1149,21 @@ static int raycast_block(const Level* lvl,
         if (x < 0 || y < 0 || z < 0 || x >= lvl->width || y >= lvl->depth || z >= lvl->height)
             return 0;
 
-        // any non air tile is pickable, including bushes, even if not solid,
-        // except liquids, which the ray passes straight through
+        // matches Level.clip() exactly, bytecode verified: the real
+        // source's own tile collision type getter defaults to SOLID for
+        // every tile and is only overridden by the liquid tile class, so
+        // clip()'s collision type equals SOLID check is really just testing
+        // for not a liquid, the same as this port's own mayPick, not the
+        // physical movement isSolid test. Using isSolid here would wrongly
+        // exclude any tile that is walkable but still solid for clip
+        // purposes, such as Leaves, flowers, saplings, and glass, from
+        // being targetable or breakable at all
         int id = Level_getTile(lvl, x, y, z);
         if (id != 0) {
             const Tile* tile = gTiles[id];
-            if (!tile || tile->mayPick(tile)) {
+            if (tile && tile->mayPick(tile)) {
                 if (out) hitresult_create(out, x, y, z, 0, (face < 0 ? 0 : face));
+                if (outDist) *outDist = t;
                 return 1;
             }
         }
@@ -1006,7 +1186,14 @@ static int raycast_block(const Level* lvl,
             }
         }
     }
+    if (outDist) *outDist = maxDist;
     return 0;
+}
+
+static bool aabbContainsPoint(const AABB* box, double x, double y, double z) {
+    return x >= box->minX && x <= box->maxX &&
+           y >= box->minY && y <= box->maxY &&
+           z >= box->minZ && z <= box->maxZ;
 }
 
 static void pick(float t) {
@@ -1026,24 +1213,109 @@ static void pick(float t) {
     // 5 blocks away when looking nearly along one axis (sqrt(a^2+b^2+c^2)<=5
     // does not imply each axis alone is <=3), so the raycast's own distance
     // cap is now the sole reach authority, matching the real single mechanism
+    const double reach = 5.0;
     HitResult hr;
-    if (raycast_block(&level, x, y, z, dx, dy, dz, 5.0, &hr)) {
+    double blockDist;
+    bool hasBlock = raycast_block(&level, x, y, z, dx, dy, dz, reach, &hr, &blockDist) != 0;
+    double bestDist = hasBlock ? blockDist : reach;
+
+    // c0.24_st_03: entity picking, matches the real source's own combined
+    // pick(): samples the ray in fixed 0.05 steps up to whichever distance
+    // is currently closest (the block hit, or a nearer entity already
+    // found), testing each candidate's own bounding box grown by 0.1. Only
+    // mobs are scanned, matching this task's scope (melee/arrows resolve
+    // against Creatures; connected NetworkPlayers have no server side
+    // damage model to report a hit back to)
+    Entity* hitEntity = NULL;
+    for (int i = 0; i < mobCount; i++) {
+        Entity* e = &mobs[i].e;
+        if (e->removed) continue;
+        AABB box = AABB_grow(&e->boundingBox, 0.1f, 0.1f, 0.1f);
+        for (double s = 0.0; s < bestDist; s += 0.05) {
+            if (aabbContainsPoint(&box, x + dx * s, y + dy * s, z + dz * s)) {
+                bestDist = s;
+                hitEntity = e;
+                break;
+            }
+        }
+    }
+
+    if (hitEntity) {
+        hitresult_createEntity(&hitResult, hitEntity);
+        isHitNull = 0;
+    } else if (hasBlock) {
         hitResult = hr;
         isHitNull = 0;
-        return;
+    } else {
+        isHitNull = 1;
     }
-    isHitNull = 1;
+}
+
+// c0.24_st_03: entity-vs-box overlap query for Arrow's own tick (item/arrow.c),
+// matching the real source's level.blockMap query narrowed to isShootable
+// entities. Linear scan of mobs[], same as pick()'s own entity search above;
+// this project has no spatial index, and this is the only other place that
+// needs one so far
+bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, Entity** outHit) {
+    for (int i = 0; i < mobCount; i++) {
+        Entity* e = &mobs[i].e;
+        if (e->removed || e == owner) continue;
+        if (AABB_intersects(&e->boundingBox, box)) {
+            *outHit = e;
+            return true;
+        }
+    }
+    return false;
+}
+
+// implemented for level_gen.c's own world gen mob population, level/a/a.java's
+// "Spawning.." stage, spawns into mobs[]. Matches the real source's own
+// order of constructing the mob, then discarding it without adding if its
+// bounding box isn't actually free. Initializes into a scratch Creature
+// first so the freeness check has a real bounding box to test against, the
+// same as every other placement check in this port, see Entity_isFree
+bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z) {
+    if (mobCount >= MAX_MOBS) return false;
+    Creature scratch;
+    Creature_init(&scratch, (CreatureKind)kind, lvl, x, y, z);
+    if (!Entity_isFree(&scratch.e, 0.0f, 0.0f, 0.0f)) return false;
+    mobs[mobCount++] = scratch;
+    mobs[mobCount - 1].e.ai = &mobs[mobCount - 1].ai; // reanchor self referential pointer after the copy
+    return true;
+}
+
+// implemented for tile.c's own Tile_dropItems, spawns into items[]
+void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource) {
+    if (itemCount >= MAX_ITEMS) return;
+    Item_init(&items[itemCount++], lvl, x, y, z, resource);
+}
+
+// c0.24_st_03: matches Player.aiStep()'s own
+// level.findEntities(this, bb.grow(1,0,1)).playerTouch(this) loop, narrowed
+// to Item specifically since that's this port's only playerTouch consumer.
+// Called from Player_onTick every tick
+void Minecraft_checkItemPickups(Entity* playerEntity) {
+    AABB box = AABB_grow(&playerEntity->boundingBox, 1.0f, 0.0f, 1.0f);
+    for (int i = 0; i < itemCount; i++) {
+        Item* it = &items[i];
+        if (it->e.removed || it->pickedUp) continue;
+        if (!AABB_intersects(&it->e.boundingBox, &box)) continue;
+        if (Inventory_addResource(&player.inventory, it->resource)) {
+            Item_startPickup(it, playerEntity);
+        }
+    }
 }
 
 /* input actions */
 
-// c0.0.21a: pulled out of handleGameplayKeys so the Select block screen can
-// also call it directly, since that's the one screen that keeps hotbar
-// switching alive while open (see run()'s main loop)
+// c0.0.21a: pulled out of handleGameplayKeys so the (since removed, see
+// c0.24_st_03's own InventoryScreen removal note above) Select block screen
+// could also call it directly. Kept as its own function since
+// handleGameplayKeys still calls it the same way
 static void handleHotbarNumberKeys(GLFWwindow* w) {
     for (int i = 0; i < 9; ++i) {
         int k = glfwGetKey(w, GLFW_KEY_1 + i);
-        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) gSelectedSlot = i;
+        if (k == GLFW_PRESS && prevNumKeys[i] == GLFW_RELEASE) player.inventory.selected = i;
         prevNumKeys[i] = k;
     }
 }
@@ -1068,22 +1340,32 @@ static void handleGameplayKeys(GLFWwindow* w) {
     // 1..9 = select hotbar slot directly
     handleHotbarNumberKeys(w);
 
-    // c0.0.20a_02: opens the full inventory/select block screen
-    // c0.0.23a_01: remappable, "Build"
+    // c0.24_st_03: the "Build" key used to open the full inventory/select
+    // block screen (c0.0.20a_02). That screen doesn't exist in the real
+    // source for this version at all - Survival Test has no Creative style
+    // free block picker - the exact same binding (`this.B.n.b`, "Build" is
+    // literally the field name in the real Options class) is repurposed to
+    // place a Sign instead, singleplayer only, matching the real source's
+    // own `this.y == null` gate exactly like the Tab/Arrow binding above
     int kB = glfwGetKey(w, gOptions.keys[OPT_KEY_BUILD].glfwKey);
-    if (kB == GLFW_PRESS && prevB == GLFW_RELEASE) {
-        int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
-        InventoryScreen_open(&gFont, fbw * 240 / fbh, 240, &level, gHotbar, &gSelectedSlot, texTerrain);
+    if (kB == GLFW_PRESS && prevB == GLFW_RELEASE && !gConnected && signCount < MAX_SIGNS) {
+        Sign_init(&signs[signCount++], &level, player.e.x, player.e.y, player.e.z, player.e.yRotation);
     }
     prevB = kB;
 
-    // G = spawn zombie at player. c0.0.16a_02 disables this debug key whenever
-    // connected to a server
-    int g = glfwGetKey(w, GLFW_KEY_G);
-    if (g == GLFW_PRESS && prevG == GLFW_RELEASE && !gConnected && mobCount < MAX_MOBS) {
-        Zombie_init(&mobs[mobCount++], &level, player.e.x, player.e.y, player.e.z);
+    // c0.24_st_03: Tab shoots an arrow, singleplayer only (matches the real
+    // source's own `this.y == null` gate - `y` there is a connection
+    // reference, not the Controls screen its own declared type would
+    // suggest; CFR picked the wrong same-named obfuscated class across two
+    // different packages, confirmed via raw bytecode). No conflict with the
+    // existing Tab "connected players" overlay below: that one only ever
+    // shows while gConnected, this only ever fires while !gConnected
+    int tab = glfwGetKey(w, GLFW_KEY_TAB);
+    if (tab == GLFW_PRESS && prevTab == GLFW_RELEASE && !gConnected && arrowCount < MAX_ARROWS) {
+        Arrow_init(&arrows[arrowCount++], &level, &player.e,
+                   player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation);
     }
-    prevG = g;
+    prevTab = tab;
 
     // c0.0.23a_01: Y no longer does anything at all as a direct key press
     // (confirmed absent from the real source's key handling entirely, not
@@ -1144,14 +1426,16 @@ static void handleBlockClicks(GLFWwindow* w) {
     prevRight = right;
 
     // c0.0.14a_08: middle click picks the block under the crosshair (grass
-    // picks dirt instead of grass itself), only if it's one of the 9 hotbar
-    // tiles, matching the real hotbar-membership check
-    if (middle == GLFW_PRESS && prevMiddle == GLFW_RELEASE && !isHitNull) {
+    // picks dirt instead of grass itself). c0.24_st_03: this no longer
+    // force-acquires the tile into a fixed Creative hotbar slot - it only
+    // switches to a slot that already holds that tile id (Inventory_findSlot,
+    // matches the real source's own inventory.a(tileId) lookup, returning -1
+    // and leaving selection untouched if the player doesn't have any)
+    if (middle == GLFW_PRESS && prevMiddle == GLFW_RELEASE && !isHitNull && hitResult.type == HITRESULT_TILE) {
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
         if (id == TILE_GRASS.id) id = TILE_DIRT.id;
-        for (int i = 0; i < 9; ++i) {
-            if (gHotbar[i] == id) gSelectedSlot = i;
-        }
+        int slot = Inventory_findSlot(&player.inventory, id);
+        if (slot >= 0) player.inventory.selected = slot;
     }
     prevMiddle = middle;
 
@@ -1170,6 +1454,23 @@ static void handleBlockClicks(GLFWwindow* w) {
 }
 
 static void mineOrPlace(void) {
+    // c0.24_st_03: matches the real source's own combined click handler,
+    // which checks for an entity hit before any block mine/place logic and,
+    // if found, always attacks instead, regardless of which mouse button
+    // (or here, which gEditMode) triggered it - flat 4 damage, no weapon
+    // variance, since no weapons exist yet (k.java: hitEntity.hurt(player,4)).
+    // Real source's right click can also land this same attack when it hits
+    // an entity (its own item-throw/place path only returns early on a
+    // successful throw/place, falling through to the entity check
+    // otherwise), but that quirk isn't ported: this port's right click is a
+    // dedicated mine/place mode toggle, not a placement action in its own
+    // right, so there's no equivalent "placement failed, try attacking
+    // instead" fallthrough to replicate
+    if (hitResult.type == HITRESULT_ENTITY) {
+        Mob_hurt(hitResult.entity, &player.e, 4);
+        return;
+    }
+
     if (gEditMode == 0) {
         // destroy
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
@@ -1187,7 +1488,7 @@ static void mineOrPlace(void) {
         if (t && changed) {
             // type field is the currently selected tile even on destroy,
             // matching the real source; the server ignores it for mode 0
-            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, gHotbar[gSelectedSlot]);
+            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, Inventory_getSelected(&player.inventory));
             // c0.0.23a_01: block break sound, same "step." family as
             // footsteps, matching the real source's own volume/pitch formula
             // exactly ((volume+1)/2, pitch*0.8, both already jittered)
@@ -1199,8 +1500,19 @@ static void mineOrPlace(void) {
                            hitResult.x + 0.5f, hitResult.y + 0.5f, hitResult.z + 0.5f);
             }
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
+            // c0.24_st_03: survival tile drops, matching Tile.e()/Tile.a()'s
+            // own count/resource hooks (task #63 fills in the per-tile
+            // overrides; every tile drops one of itself for now). Not gated
+            // on gConnected: the real source drops these client side
+            // regardless, same as the block-break particles just above
+            if (!gConnected) Tile_dropItems(t, &level, hitResult.x, hitResult.y, hitResult.z);
         }
     } else {
+        // c0.24_st_03: nothing selected (empty handed, or the selected
+        // stack just ran out) - can't place a -1 "tile"
+        int placeId = Inventory_getSelected(&player.inventory);
+        if (placeId < 0) return;
+
         // place on adjacent face
         int nx=0, ny=0, nz=0;
         switch (hitResult.f) {
@@ -1224,14 +1536,17 @@ static void mineOrPlace(void) {
         if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
             bool blocked = false;
             for (int i = 0; i < mobCount; ++i) {
-                if (AABB_intersects(&mobs[i].base.boundingBox, &aabb)) { blocked = true; break; }
+                if (AABB_intersects(&mobs[i].e.boundingBox, &aabb)) { blocked = true; break; }
             }
             for (int i = 0; !blocked && i < netPlayerCount; ++i) {
                 if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
             }
             if (!blocked) {
-                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, gHotbar[gSelectedSlot]);
-                Level_netSetTile(&level, x, y, z, gHotbar[gSelectedSlot]);
+                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, placeId);
+                Level_netSetTile(&level, x, y, z, placeId);
+                // c0.24_st_03: placing spends one of the selected stack,
+                // matches Inventory_consume (player/d.java's own c(int))
+                if (!gConnected) Inventory_consume(&player.inventory, placeId);
             }
         }
     }
@@ -1279,14 +1594,10 @@ static void handleScreenClicks(GLFWwindow* w) {
 static void syncGameplayKeyEdges(GLFWwindow* w) {
     prevR     = glfwGetKey(w, gOptions.keys[OPT_KEY_LOAD_LOC].glfwKey);
     prevEnter = glfwGetKey(w, gOptions.keys[OPT_KEY_SAVE_LOC].glfwKey);
-    // c0.0.21a: the Select block screen keeps number key hotbar switching
-    // live every frame via its own handleHotbarNumberKeys call (see run()'s
-    // main loop), so resyncing prevNumKeys here too would erase each
-    // frame's edge before that call ever got a chance to see it
-    if (!(activeScreen && InventoryScreen_isThis(activeScreen))) {
-        for (int i = 0; i < 9; ++i) prevNumKeys[i] = glfwGetKey(w, GLFW_KEY_1 + i);
-    }
-    prevG = glfwGetKey(w, GLFW_KEY_G);
+    // c0.24_st_03: the c0.0.21a Select block screen carve-out this guarded
+    // is gone along with that screen (see the removed InventoryScreen note
+    // above), so number key edges always resync here now
+    for (int i = 0; i < 9; ++i) prevNumKeys[i] = glfwGetKey(w, GLFW_KEY_1 + i);
     prevF = glfwGetKey(w, gOptions.keys[OPT_KEY_TOGGLE_FOG].glfwKey);
     prevT = glfwGetKey(w, gOptions.keys[OPT_KEY_CHAT].glfwKey);
 }
@@ -1358,9 +1669,9 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     setupEntityLighting(true);
     for (int i = 0; i < mobCount; ++i) {
-        const Zombie* z = &mobs[i];
-        if (frustum_isVisible(&frustum, &z->base.boundingBox)) {
-            Zombie_render(z, t);
+        const Creature* c = &mobs[i];
+        if (frustum_isVisible(&frustum, &c->e.boundingBox)) {
+            Creature_render(c, t);
         }
     }
 
@@ -1368,6 +1679,27 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         const NetworkPlayer* np = &netPlayers[i];
         if (frustum_isVisible(&frustum, &np->base.boundingBox)) {
             NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
+        }
+    }
+
+    for (int i = 0; i < arrowCount; ++i) {
+        const Arrow* a = &arrows[i];
+        if (frustum_isVisible(&frustum, &a->e.boundingBox)) {
+            Arrow_render(a, t);
+        }
+    }
+
+    for (int i = 0; i < itemCount; ++i) {
+        const Item* it = &items[i];
+        if (frustum_isVisible(&frustum, &it->e.boundingBox)) {
+            Item_render(it, t);
+        }
+    }
+
+    for (int i = 0; i < signCount; ++i) {
+        const Sign* s = &signs[i];
+        if (frustum_isVisible(&frustum, &s->e.boundingBox)) {
+            Sign_render(s, t, &gFont);
         }
     }
     setupEntityLighting(false);
@@ -1384,10 +1716,12 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     setupFog(1);
     glEnable(GL_LIGHTING);
 
-    if (!isHitNull) {
+    // c0.24_st_03: only tile hits get the wireframe/break-progress overlay;
+    // an entity hit has no meaningful x/y/z block position to draw one at
+    if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, gHotbar[gSelectedSlot]);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -1411,10 +1745,10 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_FOG);
 
-    if (!isHitNull) {
+    if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, gHotbar[gSelectedSlot]);
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
@@ -1456,6 +1790,15 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
         Timer_advanceTime(&timer);
         for (int i = 0; i < timer.ticks; ++i) tick(p, window);
 
+        // c0.24_st_03: force the Game over screen open the moment nothing
+        // else is showing and the player is dead, matching the real
+        // source's own per frame check right before its mouse wheel
+        // handling. Minecraft_setScreen(NULL)'s own substitution (see
+        // above) does the actual redirect to the Game over screen
+        if (!activeScreen && p->e.health <= 0) {
+            Minecraft_setScreen(NULL);
+        }
+
         // while connecting/downloading a level, skip world interaction and
         // the normal render entirely. The loading screen is drawn
         // synchronously from inside tick()'s packet handling instead,
@@ -1478,19 +1821,10 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
                 // setting activeScreen to null mid frame, so recheck before use.
                 if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
 
-                // c0.0.21a: walking and switching hotbar slots both still
-                // work while the Select block screen is open, confirmed
-                // against the real source's Screen.e passthrough flag
-                // (o.java gates its mouse wheel/movement continuation on
-                // this.o==null || this.o.e, and only the Select block
-                // screen's own constructor sets e=true). Left/right/middle
-                // click still don't reach the world here though, matching
-                // the real source nesting those under a stricter
-                // this.o==null only check that this screen doesn't satisfy
-                if (activeScreen && InventoryScreen_isThis(activeScreen)) {
-                    handleHotbarNumberKeys(window);
-                    Player_pollKeys(p, window, &gOptions);
-                }
+                // c0.24_st_03: the c0.0.21a Select block screen's Screen.e
+                // passthrough (walking/hotbar switching while a screen is
+                // open) is gone along with that screen - nothing in this
+                // version's real source ever sets that flag anymore
             }
 
             int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);
@@ -1595,10 +1929,44 @@ static void tick(Player* p, GLFWwindow* w) {
 
     Player_onTick(p);
     for (int i = 0; i < mobCount; ) {
-        Zombie_onTick(&mobs[i]);
-        if (mobs[i].base.removed) {
+        Creature_onTick(&mobs[i]);
+        if (mobs[i].e.removed) {
             mobs[i] = mobs[mobCount - 1];
+            // Entity.ai points at this same struct's own embedded Ai field,
+            // so a raw struct copy above leaves it pointing at the old slot;
+            // re-anchor it to the copy's new home before that field goes away
+            mobs[i].e.ai = &mobs[i].ai;
             mobCount--;
+            continue;
+        }
+        i++;
+    }
+
+    for (int i = 0; i < arrowCount; ) {
+        Arrow_onTick(&arrows[i]);
+        if (arrows[i].e.removed) {
+            arrows[i] = arrows[arrowCount - 1];
+            arrowCount--;
+            continue;
+        }
+        i++;
+    }
+
+    for (int i = 0; i < itemCount; ) {
+        Item_onTick(&items[i]);
+        if (items[i].e.removed) {
+            items[i] = items[itemCount - 1];
+            itemCount--;
+            continue;
+        }
+        i++;
+    }
+
+    for (int i = 0; i < signCount; ) {
+        Sign_onTick(&signs[i]);
+        if (signs[i].e.removed) {
+            signs[i] = signs[signCount - 1];
+            signCount--;
             continue;
         }
         i++;

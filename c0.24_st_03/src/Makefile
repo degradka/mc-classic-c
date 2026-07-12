@@ -10,19 +10,25 @@ INCLUDE := -I.
 BUILD ?= debug
 
 # Sources / Objects
-SRC = minecraft.c player.c timer.c  hitresult.c user.c options.c \
+SRC = minecraft.c player.c mob.c mob_ai.c timer.c  hitresult.c user.c options.c \
+      inventory.c \
       level/chunk.c level/level.c level/level_renderer.c \
-      level/tile/tile.c phys/aabb.c entity.c character/zombie.c \
+      level/tile/tile.c phys/aabb.c entity.c character/creature.c \
+      item/arrow.c item/item.c item/sign.c item/sign_model.c \
       character/polygon.c character/cube.c \
       level/levelgen/level_gen.c \
       level/levelgen/synth/synth.c level/levelgen/synth/improved_noise.c \
       level/levelgen/synth/perlin_noise.c level/levelgen/synth/distort.c \
       particle/particle_engine.c particle/particle.c \
-      character/zombie_model.c renderer/textures.c renderer/tessellator.c \
+      character/zombie_model.c character/mob_zombie_model.c \
+      character/mob_skeleton_model.c character/mob_pig_model.c \
+      character/mob_creeper_model.c \
+      renderer/textures.c renderer/tessellator.c \
       renderer/texture_fx.c \
       renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c \
       gui/generate_level_screen.c gui/chat_input_screen.c gui/message_screen.c \
-      gui/inventory_screen.c gui/options_screen.c gui/controls_screen.c \
+      gui/options_screen.c gui/controls_screen.c \
+      gui/game_over_screen.c \
       net/net_socket.c net/packet.c net/connection.c net/network_player.c \
       audio/sound.c
 

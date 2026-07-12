@@ -91,6 +91,15 @@ struct Tile {
     // both to render only in the dedicated liquid layer and draw both sides.
     int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
+
+    // c0.24_st_03: how many Item entities Tile_dropItems spawns on break
+    // (default 1) and which tile id they represent (default this tile's own
+    // id). Matches the real source's Tile.f()/g(). Per-tile overrides (Log's
+    // 3-5 planks, Leaves' 1-in-6 sapling, etc) are task #63's job; every tile
+    // gets the default here for now, i.e. breaking anything currently drops
+    // exactly one of itself
+    int  (*getDropCount)(const Tile* self);
+    int  (*getDropResource)(const Tile* self);
 };
 
 // Global registry, index by tile id (0..255)
@@ -137,17 +146,14 @@ extern Tile TILE_GOLD_BLOCK; // id=41, tex=40, plain tile, no special behavior
 
 void Tile_registerAll(void);
 
-// c0.0.20a_02: master placeable-tile list, backing the new inventory screen's
-// grid and the default hotbar seed (first 9 entries). Order matches the real
-// source's own list exactly (not just the same set): Rock, StoneBrick, Dirt,
-// Wood, Log, Leaves, Bush, Dandelion, Rose, both Mushrooms, Sand, Gravel,
-// Glass, Sponge, GoldBlock, then all 16 Cloth colors.
-#define PLACEABLE_TILE_COUNT 32
-extern const int PLACEABLE_TILE_IDS[PLACEABLE_TILE_COUNT];
-
 // Helper to render a plain, untextured face (for highlights)
 void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
+
+// c0.24_st_03: spawns self->getDropCount() Item entities of id
+// self->getDropResource(), each jittered to a random point within the
+// broken block (matches Tile.e()/Tile.a(level,x,y,z,1.0f) exactly)
+void Tile_dropItems(const Tile* self, Level* lvl, int x, int y, int z);
 
 #endif

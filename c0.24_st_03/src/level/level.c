@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 void Level_init(Level* level, int width, int height, int depth) {
     level->width = width;
@@ -25,6 +26,7 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->tickListSize = 0;
     level->tickListCapacity = 0;
     level->networkMode = false;
+    level->player = NULL; // set once by Minecraft's own init, via Level_setPlayer
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -444,6 +446,95 @@ int Level_getTile(const Level* level, int x, int y, int z) {
         return 0;
     int index = (y * level->height + z) * level->width + x;
     return level->blocks[index];
+}
+
+// mob AI line of sight check, matches Level.clip(Vec3,Vec3) exactly: the
+// real source's tile collision type getter defaults to SOLID for every
+// tile and is only overridden by the liquid tile class, so the collision
+// type equals SOLID test it does is really just testing for not a liquid,
+// the same as this port's own mayPick, shared with the block picking
+// raycast in minecraft.c, both use the exact same real method. Amanatides
+// Woo voxel walk, same technique as that other raycast, but capped to the
+// actual distance between the two points instead of a fixed reach
+bool Level_clip(const Level* level, float x1, float y1, float z1, float x2, float y2, float z2) {
+    double dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
+    double dist = sqrt(dx*dx + dy*dy + dz*dz);
+    if (dist < 1e-5) return false;
+    dx /= dist; dy /= dist; dz /= dist;
+
+    int x = (int)floor(x1), y = (int)floor(y1), z = (int)floor(z1);
+    const int stepX = (dx > 0) - (dx < 0);
+    const int stepY = (dy > 0) - (dy < 0);
+    const int stepZ = (dz > 0) - (dz < 0);
+
+    double tMaxX = (dx != 0.0) ? (((stepX > 0 ? (x + 1) : x) - x1) / dx) : DBL_MAX;
+    double tMaxY = (dy != 0.0) ? (((stepY > 0 ? (y + 1) : y) - y1) / dy) : DBL_MAX;
+    double tMaxZ = (dz != 0.0) ? (((stepZ > 0 ? (z + 1) : z) - z1) / dz) : DBL_MAX;
+
+    double tDeltaX = (dx != 0.0) ? fabs(1.0 / dx) : DBL_MAX;
+    double tDeltaY = (dy != 0.0) ? fabs(1.0 / dy) : DBL_MAX;
+    double tDeltaZ = (dz != 0.0) ? fabs(1.0 / dz) : DBL_MAX;
+
+    double t = 0.0;
+    while (t <= dist) {
+        int id = Level_getTile(level, x, y, z);
+        if (id > 0 && gTiles[id] && gTiles[id]->mayPick(gTiles[id])) return true;
+
+        if (tMaxX < tMaxY) {
+            if (tMaxX < tMaxZ) { x += stepX; t = tMaxX; tMaxX += tDeltaX; }
+            else               { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; }
+        } else {
+            if (tMaxY < tMaxZ) { y += stepY; t = tMaxY; tMaxY += tDeltaY; }
+            else               { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; }
+        }
+    }
+    return false;
+}
+
+bool Level_maybeGrowTree(Level* level, int x, int y, int z) {
+    int trunkHeight = rand() % 3 + 4;
+
+    // space check: exact column at the base, 3x3 through the trunk, 5x5 for
+    // the canopy's own top 2 layers, matching the real source's own radius
+    // schedule exactly. checkRadius is 0 at the base tile itself, 2 for the
+    // top 2 layers, 1 everywhere in between
+    for (int ny = y; ny <= y + 1 + trunkHeight; ny++) {
+        int radius = 1;
+        if (ny == y) radius = 0;
+        if (ny >= y + 1 + trunkHeight - 2) radius = 2;
+        for (int nx = x - radius; nx <= x + radius; nx++) {
+            for (int nz = z - radius; nz <= z + radius; nz++) {
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= level->width || ny >= level->depth || nz >= level->height)
+                    return false;
+                if (Level_getTile(level, nx, ny, nz) != 0) return false;
+            }
+        }
+    }
+
+    if (Level_getTile(level, x, y - 1, z) != TILE_GRASS.id) return false;
+    if (y >= level->depth - trunkHeight - 1) return false;
+
+    level_setTile(level, x, y - 1, z, TILE_DIRT.id);
+
+    // canopy: bottom 2 layers are a 5x5 (radius 2), top 2 layers a 3x3
+    // (radius 1); the outermost diagonal corner of each layer is dropped
+    // half the time, except on the very top layer where it's always dropped
+    for (int ly = y - 3 + trunkHeight; ly <= y + trunkHeight; ly++) {
+        int fromTop = ly - (y + trunkHeight); // -3..0, 0 = the very top layer
+        int radius = 1 - fromTop / 2;
+        for (int lx = x - radius; lx <= x + radius; lx++) {
+            int dx = lx - x;
+            for (int lz = z - radius; lz <= z + radius; lz++) {
+                int dz = lz - z;
+                if (abs(dx) == radius && abs(dz) == radius && (rand() % 2 == 0 || fromTop == 0)) continue;
+                level_setTile(level, lx, ly, lz, TILE_LEAVES.id);
+            }
+        }
+    }
+    for (int ly = 0; ly < trunkHeight; ly++) {
+        level_setTile(level, x, y + ly, z, TILE_LOG.id);
+    }
+    return true;
 }
 
 AABB Level_getTilePickAABB(const Level* level, int x, int y, int z) {

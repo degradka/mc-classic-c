@@ -72,7 +72,7 @@ void NetworkPlayer_onTick(NetworkPlayer* np) {
 
     // matches NetworkPlayer.tick(): always drains at least one queued
     // waypoint, then up to 5 more only while the backlog is still over 10,
-    // a catch up mechanism for lag spikes rather than a normal per-tick rate
+    // a catch up mechanism for lag spikes rather than a normal per tick rate
     int budget = 5;
     do {
         if (np->queueCount > 0) {
@@ -156,8 +156,12 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     float headYaw   = headYawO + (np->base.yRotation - headYawO) * partialTicks;
     float headPitch = headPitchO + (np->base.xRotation - headPitchO) * partialTicks;
     // head model rotation is relative to the body, which is rotated
-    // separately below; negated in c0.0.19a_04 to match the mirrored body
-    headYaw = -(headYaw - bodyYaw);
+    // separately below. Matches Mob.java's own "f7 -= f5" exactly, plain
+    // yRot minus bodyYaw, no negation. An extra negation here previously
+    // worked around the missing body flip below, and would now double
+    // compensate in the wrong direction now that the actual flip is
+    // restored
+    headYaw -= bodyYaw;
     float animStep  = np->animStepO + (np->animStep - np->animStepO) * partialTicks;
 
     float b = Entity_getBrightness(&np->base);
@@ -172,15 +176,22 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glScalef(1.0f, -1.0f, 1.0f);
     const float size = 0.0625f;
     glScalef(size, size, size);
-    // c0.0.19a_04: leg-bob switched from a constant-amplitude sine to a
-    // run-speed-scaled cosine, matching "fixed the default player stance"
+    // c0.0.19a_04: leg bob switched from a constant amplitude sine to a
+    // run speed scaled cosine, matching "fixed the default player stance"
     float offY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
     glTranslatef(0.0f, offY, 0.0f);
-    glRotatef(bodyYaw, 0.0f, 1.0f, 0.0f);
-    glDisable(GL_ALPHA_TEST);
-    glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: "fixed mirroring"
+    // real source rotates by 180 minus bodyYaw plus rotOffs, not bodyYaw
+    // directly, Mob.java:238,243,247, inherited by NetworkPlayer via
+    // HumanoidMob, rotOffs is 0 here
+    glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
+    // real source's Mob.render() only disables alpha test for allowAlpha
+    // false mobs, disabling GL_CULL_FACE instead when true, the default,
+    // which is a no op in this project since GL_CULL_FACE is never actually
+    // enabled anywhere, see minecraft.c. Alpha test must stay enabled, the
+    // ambient state from init(), so any future alpha cutout skin regions
+    // render as transparent instead of black
+    glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: fixed mirroring
     ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);
-    glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
     // name tag: floats above the head, billboarded to face the camera

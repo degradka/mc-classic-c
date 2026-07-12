@@ -4,8 +4,16 @@
 #include "player.h"
 
 void hitresult_create(HitResult* h, int x, int y, int z, int o, int f) {
+    h->type = HITRESULT_TILE;
     h->x = x; h->y = y; h->z = z;
     h->o = o; h->f = f;
+    h->entity = NULL;
+}
+
+void hitresult_createEntity(HitResult* h, Entity* entity) {
+    h->type = HITRESULT_ENTITY;
+    h->x = h->y = h->z = h->o = h->f = 0;
+    h->entity = entity;
 }
 
 static double distanceTo(const HitResult* h, const Player* player, int editMode) {

@@ -2,6 +2,7 @@
 
 #include "level_gen.h"
 #include "../tile/tile.h"
+#include "../../character/creature.h" // CreatureKind constants
 #include "synth/synth.h"
 #include "synth/perlin_noise.h"
 #include "synth/distort.h"
@@ -15,6 +16,10 @@ extern void Minecraft_beginLevelLoading(const char* title);
 extern void Minecraft_levelLoadUpdate(const char* status);
 extern void Minecraft_levelLoadProgress(int percent);
 extern const char* Minecraft_getUserName(void);
+// implemented in minecraft.c, spawns into mobs[] for the world gen mob
+// population below. Returns false with nothing added if the mob cap is
+// reached or the spot turned out not to actually be free
+extern bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z);
 
 static inline float randf(void) {
     return (float)rand() / ((float)RAND_MAX + 1.0f);
@@ -44,8 +49,12 @@ static int* raiseHeightmap(int width, int height) {
             if (done % 256 == 0) Minecraft_levelLoadProgress(done * 100 / (total > 1 ? total - 1 : 1));
             done++;
 
-            double d14 = distortA.synth.getValue(&distortA.synth, x * 1.3, y * 1.3) / 8.0 - 8.0;
-            double d16 = distortB.synth.getValue(&distortB.synth, x * 1.3, y * 1.3) / 6.0 + 6.0;
+            // c0.24_st_03: both height-bias constants changed from
+            // c0.0.23a_01's own /8.0-8.0 and /6.0+6.0 (confirmed via direct
+            // source comparison, not an estimate) - shifts the overall
+            // terrain height distribution
+            double d14 = distortA.synth.getValue(&distortA.synth, x * 1.3, y * 1.3) / 6.0 - 4.0;
+            double d16 = distortB.synth.getValue(&distortB.synth, x * 1.3, y * 1.3) / 5.0 + 10.0 - 4.0;
             double d18 = plain.synth.getValue(&plain.synth, x, y) / 8.0;
             if (d18 > 0.0) d16 = d14;
             double d20 = (d14 > d16 ? d14 : d16) / 2.0;
@@ -121,6 +130,12 @@ static void buildBlocks(Level* level, int* heightmap) {
                 int id = 0;
                 if (y <= surfaceY) id = TILE_DIRT.id;
                 if (y <= rockY) id = TILE_ROCK.id;
+                // c0.24_st_03: the absolute bottom layer of the map is lava
+                // instead of solid rock/bedrock - confirmed genuinely new
+                // this version (zero bedrock placement anywhere in this
+                // jar's own world-gen at all, and c0.0.23a_01's equivalent
+                // stage has no such override)
+                if (y == 0) id = TILE_LAVA.id;
                 level->blocks[idx] = (byte)id;
             }
         }
@@ -131,7 +146,10 @@ static void buildBlocks(Level* level, int* heightmap) {
 
 static void carveTunnels(Level* level) {
     const int w = level->width, h = level->height, d = level->depth;
-    const int count = w * h * d / 256 / 64;
+    // c0.24_st_03: cave tunnel count doubled from c0.0.23a_01's own real
+    // source (that version's carve count has no such factor at all;
+    // confirmed via direct comparison, not an estimate)
+    const int count = w * h * d / 256 / 64 * 2;
 
     for (int i = 0; i < count; ++i) {
         float x = randf() * w;
@@ -142,6 +160,11 @@ static void carveTunnels(Level* level) {
         float dira1 = 0.0f;
         float dir2 = randf() * (float)M_PI * 2.0f;
         float dira2 = 0.0f;
+        // c0.24_st_03: one squared-random size scale per tunnel (skews
+        // small, occasionally large), feeding into the new per-point size
+        // formula below - confirmed genuinely new vs c0.0.23a_01's own
+        // fixed 2.5/1.0 constants
+        float radiusScale = randf() * randf();
 
         for (int l = 0; l < length; ++l) {
             x = (float)(x + sin(dir1) * cos(dir2));
@@ -157,21 +180,30 @@ static void carveTunnels(Level* level) {
             dira2 *= 0.9f;
             dira2 += randf() - randf();
 
-            // c0.0.19a_04: skips this path node entirely about 30% of the
-            // time, and when not skipped, carves a sphere centered up to 2
-            // blocks off the walker's exact position (each axis
-            // independently) instead of dead on it. Together these make
-            // caves sparser and more broken up rather than smooth
-            // continuous tunnels. Confirmed via direct bytecode diff (this
-            // method never decompiled cleanly on either side); ore veins
-            // (below) got no such change
-            if (randf() < 0.3f) continue;
+            // c0.0.19a_04: skips this path node entirely some of the time,
+            // and when not skipped, carves a sphere centered up to 2 blocks
+            // off the walker's exact position (each axis independently)
+            // instead of dead on it. Together these make caves sparser and
+            // more broken up rather than smooth continuous tunnels.
+            // c0.24_st_03: the skip chance itself loosened from 30% to 25%
+            // (confirmed via direct source comparison against c0.0.23a_01,
+            // not an estimate), letting marginally more carve points through
+            if (randf() < 0.25f) continue;
 
             float cx = x + randf() * 4.0f - 2.0f;
             float cy = y + randf() * 4.0f - 2.0f;
             float cz = z + randf() * 4.0f - 2.0f;
 
-            float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
+            // c0.24_st_03: size now also grows toward the bottom of the map
+            // (depthFrac approaches 1 as cy approaches 0) and is scaled by
+            // this tunnel's own radiusScale, then enveloped by the same
+            // sin(l*PI/length) taper as before - unlike the old fixed
+            // 2.5+1.0 formula, the taper now multiplies the WHOLE size
+            // (including the former "+1.0" floor), so tunnels taper all the
+            // way to a genuine point at both ends instead of a small stub
+            float depthFrac = ((float)d - cy) / (float)d;
+            float sizeBase = 1.2f + (depthFrac * 3.5f + 1.0f) * radiusScale;
+            float size = (float)sin(l * M_PI / length) * sizeBase;
 
             for (int xx = (int)(cx - size); xx <= (int)(cx + size); ++xx) {
                 for (int yy = (int)(cy - size); yy <= (int)(cy + size); ++yy) {
@@ -284,64 +316,136 @@ static void growBeaches(Level* level, const int* heightmap) {
 }
 
 // New in c0.0.14a_08: real tree generation, replacing the previously
-// treeless world gen entirely. Random walk site search, 4-5 block trunks,
-// a 3x3 leaf canopy that drops its 4 diagonal corners only on the very top
-// layer for a "+" shaped cap.
+// treeless world gen entirely. Random walk site search.
+// c0.24_st_03: this stage's own inline trunk/canopy construction (4-5 block
+// trunk, fixed corner-dropping rule) is confirmed replaced by a scatter
+// search that calls the new shared Level_maybeGrowTree for each candidate
+// spot instead - same function task #63 added for live sapling growth,
+// confirmed via direct source comparison against c0.0.23a_01 (whose
+// equivalent stage still has the old construction inlined directly here).
+// Attempt count (w*h/4000) and the 20x20 site search itself are unchanged
 static void plantTrees(Level* level, const int* heightmap) {
-    const int w = level->width, h = level->height, d = level->depth;
+    const int w = level->width, h = level->height;
     int attempts = w * h / 4000;
 
     for (int a = 0; a < attempts; ++a) {
-        if (a % 20 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
+        if (a % 20 == 0) Minecraft_levelLoadProgress(a * 50 / (attempts > 1 ? attempts - 1 : 1));
 
-        int cx = rand() % w;
-        int cz = rand() % h;
+        int baseX = rand() % w;
+        int baseZ = rand() % h;
         for (int outer = 0; outer < 20; ++outer) {
-            int x = cx, z = cz;
+            int x = baseX, z = baseZ;
             for (int inner = 0; inner < 20; ++inner) {
                 x += (rand() % 6) - (rand() % 6);
                 z += (rand() % 6) - (rand() % 6);
                 if (x < 0 || z < 0 || x >= w || z >= h) continue;
 
-                int baseY = heightmap[x + z * w] + 1; // heightmap already absolute here
-                int trunkHeight = rand() % 2 + 4;
+                int y = heightmap[x + z * w] + 1; // heightmap already absolute here
+                if (rand() % 4 != 0) continue;
+                Level_maybeGrowTree(level, x, y, z);
+            }
+        }
+    }
+}
 
-                int canPlace = 1;
-                for (int ly = baseY; ly <= baseY + 1 + trunkHeight && canPlace; ++ly) {
-                    int radius = (ly >= baseY + 1 + trunkHeight - 2) ? 2 : 1;
-                    for (int lx = x - radius; lx <= x + radius && canPlace; ++lx) {
-                        for (int lz = z - radius; lz <= z + radius && canPlace; ++lz) {
-                            if (lx < 0 || ly < 0 || lz < 0 || lx >= w || ly >= d || lz >= h) { canPlace = 0; break; }
-                            if (level->blocks[(ly * h + lz) * w + lx] != 0) { canPlace = 0; break; }
-                        }
-                    }
-                }
+// mushroom placement, confirmed genuinely new this version, with zero
+// mushroom references anywhere in c0.0.23a_01's own world gen. Random walk
+// site search similar to plantTrees, but placing single brown or red
+// mushroom tiles on top of exposed rock instead of a tree shape. The
+// heightmap check below matches level/a/a.java's actual mushroom method
+// exactly, `n10 >= nArray[n9+n11*n2]-1`, where nArray is the heightmap
+// passed into that method as a parameter. This check is not just semantic,
+// it is the only upper bound on y at all: y random walks by up to 1 either
+// way per step over 5 steps and has nothing else stopping it from drifting
+// past the world's own depth, so removing it causes an out of bounds
+// level->blocks read
+static void plantMushrooms(Level* level, const int* heightmap) {
+    const int w = level->width, h = level->height, d = level->depth;
+    int attempts = w * h * d / 2000;
+    int placed = 0;
 
-                if (canPlace &&
-                    level->blocks[((baseY - 1) * h + z) * w + x] == TILE_GRASS.id &&
-                    baseY < d - trunkHeight - 1) {
-                    level->blocks[((baseY - 1) * h + z) * w + x] = TILE_DIRT.id;
+    for (int a = 0; a < attempts; ++a) {
+        if (a % 50 == 0) Minecraft_levelLoadProgress(a * 50 / (attempts > 1 ? attempts - 1 : 1) + 50);
 
-                    int topY = baseY + trunkHeight;
-                    for (int ly = topY - 2; ly <= topY; ++ly) {
-                        int fromTop = topY - ly; // 0 only on the very top canopy layer
-                        for (int lx = x - 1; lx <= x + 1; ++lx) {
-                            int dx = lx - x;
-                            for (int lz = z - 1; lz <= z + 1; ++lz) {
-                                int dz = lz - z;
-                                if (fromTop != 0 || abs(dx) != 1 || abs(dz) != 1) {
-                                    level->blocks[(ly * h + lz) * w + lx] = TILE_LEAVES.id;
-                                }
-                            }
-                        }
-                    }
-                    for (int ly = 0; ly < trunkHeight; ++ly) {
-                        level->blocks[((baseY + ly) * h + z) * w + x] = TILE_LOG.id;
-                    }
+        int kind = rand() % 2; // 0 = brown, 1 = red
+        int bx = rand() % w;
+        int by = rand() % d;
+        int bz = rand() % h;
+
+        for (int outer = 0; outer < 20; ++outer) {
+            int x = bx, y = by, z = bz;
+            for (int inner = 0; inner < 5; ++inner) {
+                x += (rand() % 6) - (rand() % 6);
+                z += (rand() % 6) - (rand() % 6);
+                y += (rand() % 2) - (rand() % 2);
+                if (x < 0 || z < 0 || y < 1 || x >= w || z >= h) continue;
+                if (y >= heightmap[x + z * w] - 1) continue;
+                if (level->blocks[(y * h + z) * w + x] != 0) continue;
+
+                int below = level->blocks[((y - 1) * h + z) * w + x];
+                if (below != TILE_ROCK.id) continue;
+
+                level->blocks[(y * h + z) * w + x] = (byte)(kind == 0 ? TILE_MUSHROOM_BROWN.id : TILE_MUSHROOM_RED.id);
+                placed++;
+            }
+        }
+    }
+    printf("Added %d mushrooms\n", placed);
+}
+
+// world gen mob population, matches level/a/a.java's own private a(Level)
+// exactly, the final "Spawning.." stage. Bytecode confirms this version has
+// no manual spawn debug key counterpart at all; real source populates the
+// world automatically instead. One random mob type is picked per site, a
+// random point anywhere in the level, with y biased toward the bottom via
+// min(randf,randf), and skipped unless it is open, not solid, not inside a
+// liquid, and unlit 80% of the time, mirroring vanilla's dark cave spawn
+// bias. Each surviving site then tries 3 separate short random walks of 3
+// steps each, looking for a spot with solid ground directly below and two
+// clear tiles above for body and head, spawning the mob there if its own
+// bounding box also turns out to be clear
+static void spawnMobs(Level* level) {
+    const int w = level->width, h = level->height, d = level->depth;
+    // real source's n4 0/1/2/3 is Zombie, Skeleton, Pig, Creeper, a
+    // different order than this port's own CreatureKind enum of Zombie,
+    // Skeleton, Creeper, Pig, mapped explicitly rather than reordering the
+    // enum everywhere
+    static const int kindForRoll[4] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER };
+
+    int attempts = w * h * d / 800;
+    int placed = 0;
+
+    for (int a = 0; a < attempts; ++a) {
+        if (a % 50 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
+
+        int kind = kindForRoll[rand() % 4];
+        int sx = rand() % w;
+        int sy = (int)(fminf(randf(), randf()) * (float)d);
+        int sz = rand() % h;
+
+        if (Level_isSolidTile(level, sx, sy, sz)) continue;
+        int siteId = Level_getTile(level, sx, sy, sz);
+        const Tile* siteTile = (siteId > 0 && siteId < 256) ? gTiles[siteId] : NULL;
+        if (siteTile && siteTile->liquidType != LIQUID_NONE) continue;
+        if (Level_isLit(level, sx, sy, sz) && rand() % 5 != 0) continue;
+
+        for (int cluster = 0; cluster < 3; ++cluster) {
+            int x = sx, y = sy, z = sz;
+            for (int step = 0; step < 3; ++step) {
+                x += (rand() % 6) - (rand() % 6);
+                z += (rand() % 6) - (rand() % 6);
+                y += (rand() % 2) - (rand() % 2);
+                if (x < 0 || z < 1 || y < 0 || y >= d - 2 || x >= w || z >= h) continue;
+                if (!Level_isSolidTile(level, x, y - 1, z)) continue;
+                if (Level_isSolidTile(level, x, y, z) || Level_isSolidTile(level, x, y + 1, z)) continue;
+
+                if (Minecraft_spawnMob(level, kind, (float)x + 0.5f, (float)y + 1.0f, (float)z + 0.5f)) {
+                    placed++;
                 }
             }
         }
     }
+    printf("%d mobs\n", placed);
 }
 
 // Growable stack flood fill, the same algorithm as the Java source's
@@ -453,13 +557,18 @@ static void addWater(Level* level) {
 
 static void addLava(Level* level) {
     int lavaCount = 0;
-    int total = level->width * level->height * level->depth / 10000;
+    // c0.24_st_03: pass count halved (fewer pockets)
+    int total = level->width * level->height * level->depth / 20000;
     for (int i = 0; i < total; ++i) {
         if (i % 100 == 0) Minecraft_levelLoadProgress(i * 100 / (total > 1 ? total - 1 : 1));
         int x = rand() % level->width;
-        // c0.0.13a_03 keeps lava 4 blocks further from the water table than
-        // before, capping its spawn depth at depth/2 - 4 instead of depth/2
-        int y = rand() % (level->depth / 2 - 4);
+        // c0.24_st_03: Y is now squared-random (skews toward 0, i.e. the
+        // very bottom of the map) up to waterLevel-3, replacing the old
+        // uniform nextInt(depth/2-4) spread - each pocket lands much closer
+        // to the bottom of the world on average, genuinely matching the
+        // wiki's "lava layer above bedrock" claim (confirmed via direct
+        // source comparison against c0.0.23a_01, not an estimate)
+        int y = (int)(randf() * randf() * (Level_getWaterLevel(level) - 3.0f));
         int z = rand() % level->height;
         if (level->blocks[(y * level->height + z) * level->width + x] == 0) {
             lavaCount++;
@@ -498,7 +607,11 @@ void LevelGen_generateMap(Level* level) {
 
     Minecraft_levelLoadUpdate("Planting..");
     plantTrees(level, heightmap);
+    plantMushrooms(level, heightmap);
     free(heightmap);
+
+    Minecraft_levelLoadUpdate("Spawning..");
+    spawnMobs(level);
 
     level->createTime = (long long)time(NULL) * 1000;
     snprintf(level->creator, sizeof(level->creator), "%s", Minecraft_getUserName());
