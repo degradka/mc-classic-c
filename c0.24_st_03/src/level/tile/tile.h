@@ -66,6 +66,10 @@ struct Tile {
     // the light a face gets from the tile in front of it
     float (*getBrightness)(const Tile* self, const Level* lvl, int x, int y, int z);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
+
+    // how many items break off and which tile they are, one of itself by default
+    int  (*getDropCount)(const Tile* self);
+    int  (*getDropResource)(const Tile* self);
 };
 
 // indexed by tile id
@@ -108,5 +112,8 @@ void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float 
 bool Tile_isFaceVisible(const Level* lvl, int x, int y, int z, int face);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
+
+// spawns the drops, each at a random point inside the broken block
+void Tile_dropItems(const Tile* self, Level* lvl, int x, int y, int z);
 
 #endif
