@@ -38,6 +38,9 @@ void Mob_knockback(Entity* e, Entity* attacker) {
 void Mob_hurt(Entity* e, Entity* attacker, int damage) {
     if (!e->isMob || e->health <= 0) return;
 
+    // the ai hears about the hit first
+    if (e->ai) Ai_onHurt(e->ai, e, attacker, damage);
+
     // inside the invulnerability window only the worst hit counts
     if (e->invulnerableTime > MOB_INVULNERABLE_DURATION / 2) {
         if (e->lastHealth - damage >= e->health) return;

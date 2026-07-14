@@ -8,22 +8,98 @@
 #include "../renderer/textures.h"
 #include "../mob.h"
 #include "../player.h"
+#include "../level/level.h"
+#include "../level/tile/tile.h"
 #include <GL/glew.h>
 #include <math.h>
 #include <stdlib.h>
 
+static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
+
+// Box-Muller, a real normal distribution, the creeper particles need its shape
+static float gaussianRand(void) {
+    float u1 = frand01();
+    if (u1 < 1e-7f) u1 = 1e-7f;
+    float u2 = frand01();
+    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+}
+
+extern bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, float z, float yaw, float pitch, float speed);
+extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
+// spawns a leaf-textured particle used only by Creeper's death effect
+extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz);
+
+// a 1 in 30 chance per tick to fire, on top of everything
+// BasicAttackAI's own melee already does
+static void Skeleton_onAfterUpdate(Ai* ai, Entity* mob) {
+    if (mob->health > 0 && ai->attackTarget && rand() % 30 == 0) {
+        // along the skeleton's own current facing,
+        // flipped 180 degrees plus randomized pitch
+        float yaw = mob->yRotation + 180.0f + (frand01() * 45.0f - 22.5f);
+        float pitch = mob->xRotation - (frand01() * 45.0f - 10.0f);
+        Minecraft_spawnArrow(mob->level, mob, mob->x, mob->y, mob->z, yaw, pitch, 1.0f);
+    }
+}
+
+// before removal, scatter 4-9 collectible arrows around the corpse,
+// crediting the player so the arrows can be picked up
+static void Skeleton_onDeathTimeout(Ai* ai, Entity* mob) {
+    (void)ai;
+    int count = (int)((frand01() + frand01()) * 3.0f + 4.0f);
+    Entity* player = Level_getPlayer(mob->level);
+    for (int i = 0; i < count; ++i) {
+        float yaw = frand01() * 360.0f;
+        float pitch = -(frand01() * 60.0f);
+        Minecraft_spawnArrow(mob->level, player, mob->x, mob->y - 0.2f, mob->z, yaw, pitch, 0.4f);
+    }
+}
+
+// a succesful melee hit also deals 6 self-damage to the creeper
+// the target is passed as the attacker so it gets knockback
+static void Creeper_onAfterAttack(Ai* ai, Entity* mob, Entity* target) {
+    (void)ai;
+    Mob_hurt(mob, target, 6);
+}
+
+static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
+    (void)ai;
+    const float radius = 4.0f;
+    Level_explode(mob->level, mob, mob->x, mob->y, mob->z, radius);
+    for (int i = 0; i < 500; ++i) {
+        float dx = gaussianRand() * radius / 4.0f;
+        float dy = gaussianRand() * radius / 4.0f;
+        float dz = gaussianRand() * radius / 4.0f;
+        float mag = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (mag < 0.0001f) mag = 0.0001f;
+        float mx = dx / mag / mag;
+        float my = dy / mag / mag;
+        float mz = dz / mag / mag;
+        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz);
+    }
+}
+
 // the skeleton has no die of its own and scores like a zombie
 static void Creature_onDeath(Entity* self, Entity* attacker) {
-    if (!attacker) return; // only a credited kill awards score
     Creature* c = (Creature*)self;
-    // arrows credit whoever shot them and only the player keeps score
-    if (attacker->killCredit) attacker = attacker->killCredit;
-    Player* killer = (Player*)attacker;
-    switch (c->kind) {
-        case CREATURE_ZOMBIE:
-        case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
-        case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
-        case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+
+    if (attacker) { // only a credited kill awards score
+        // arrows credit whoever shot them and only the player keeps score
+        if (attacker->killCredit) attacker = attacker->killCredit;
+        Player* killer = (Player*)attacker;
+        switch (c->kind) {
+            case CREATURE_ZOMBIE:
+            case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
+            case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
+            case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+        }
+    }
+
+    // pigs and sheep drop 1-2 brown mushrooms no matter what killed them
+    if (c->kind == CREATURE_PIG) {
+        int count = (int)(frand01() + frand01() + 1.0f);
+        for (int i = 0; i < count; ++i) {
+            Minecraft_spawnItem(self->level, self->x, self->y, self->z, TILE_MUSHROOM_BROWN.id);
+        }
     }
 }
 
@@ -32,22 +108,30 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     Mob_init(&c->e);
     c->e.ai = &c->ai;
     c->e.onDeath = Creature_onDeath;
+    c->e.aiClassTag = (int)kind;
     c->kind = kind;
 
     switch (kind) {
         case CREATURE_ZOMBIE:
+            c->e.heightOffset = 1.62f;
+            Ai_init(&c->ai, true, 30, 1.0f, 6);
+            break;
         case CREATURE_SKELETON:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 30);
+            Ai_init(&c->ai, true, 30, 0.3f, 8);
+            c->ai.onAfterUpdate = Skeleton_onAfterUpdate;
+            c->ai.onDeathTimeout = Skeleton_onDeathTimeout;
             break;
         case CREATURE_CREEPER:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 45);
+            Ai_init(&c->ai, true, 45, 0.7f, 6);
+            c->ai.onAfterAttack = Creeper_onAfterAttack;
+            c->ai.onDeathTimeout = Creeper_onDeathTimeout;
             break;
         case CREATURE_PIG:
             c->e.heightOffset = 1.72f;
             Entity_setSize(&c->e, 1.4f, 1.2f);
-            Ai_init(&c->ai, false, 0);
+            Ai_init(&c->ai, false, 0, 0.7f, 6);
             break;
     }
 

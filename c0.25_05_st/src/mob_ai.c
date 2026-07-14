@@ -8,63 +8,112 @@
 
 static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
 
-void Ai_init(Ai* ai, bool chase, int wanderPitch) {
+void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage) {
     ai->chase = chase;
     ai->wanderPitch = wanderPitch;
+    ai->runSpeed = runSpeed;
+    ai->damage = damage;
     ai->speedX = ai->speedZ = 0.0f;
     ai->turnSpeed = 0.0f;
     ai->wantsJump = false;
     ai->attackCooldown = 0;
+    ai->noActionTime = 0;
+    ai->attackTarget = NULL;
     ai->onDeathTimeout = NULL;
+    ai->onAfterUpdate = NULL;
+    ai->onAfterAttack = NULL;
 }
 
-// no hit through a solid block, damage 1 to 7, then a 10 to 30 tick wait
+// no hit through a solid block, damage is (rand+rand)/2*damage+1
 static void Ai_tryAttack(Ai* ai, Entity* mob, Entity* target) {
     if (Level_clip(mob->level, mob->x, mob->y, mob->z, target->x, target->y, target->z)) return;
     mob->attackTime = MOB_ATTACK_DURATION;
     ai->attackCooldown = (int)(frand01() * 20.0f) + 10;
-    Mob_hurt(target, mob, (int)(frand01() * 4.0f) + (int)(frand01() * 4.0f) + 1);
+    int damage = (int)(((frand01() + frand01()) / 2.0f) * (float)ai->damage + 1.0f);
+    Mob_hurt(target, mob, damage);
+    ai->noActionTime = 0;
+    if (ai->onAfterAttack) ai->onAfterAttack(ai, mob, target);
 }
 
-// within 8 blocks it turns to the target and the wander speed walks it there
-// within 2 blocks and off cooldown it attacks
-static void Ai_seekAndAttack(Ai* ai, Entity* mob, Entity* target) {
-    if (!target) return;
+static void Ai_doAttack(Ai* ai, Entity* mob) {
+    const float detectRange = 16.0f;
 
-    float dx = target->x - mob->x;
-    float dz = target->z - mob->z;
-    float distXZ = sqrtf(dx * dx + dz * dz);
-    if (distXZ >= 8.0f) return;
+    if (ai->attackTarget && ai->attackTarget->removed) {
+        ai->attackTarget = NULL;
+    }
 
-    float dy = target->y - mob->y;
-    mob->yRotation = (float)(atan2(dz, dx) * 180.0 / M_PI) - 90.0f;
-    mob->xRotation = -(float)(atan2(dy, distXZ) * 180.0 / M_PI);
+    if (!ai->attackTarget) {
+        Entity* player = Level_getPlayer(mob->level);
+        if (player) {
+            float dx = player->x - mob->x;
+            float dy = player->y - mob->y;
+            float dz = player->z - mob->z;
+            float distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < detectRange * detectRange) ai->attackTarget = player;
+        }
+    }
 
-    float dist3d = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (dist3d < 2.0f && ai->attackCooldown == 0) {
-        Ai_tryAttack(ai, mob, target);
+    if (!ai->attackTarget) return;
+
+    float dx = ai->attackTarget->x - mob->x;
+    float dy = ai->attackTarget->y - mob->y;
+    float dz = ai->attackTarget->z - mob->z;
+    float distSq = dx * dx + dy * dy + dz * dz;
+
+    if (distSq > detectRange * detectRange * 2.0f * 2.0f && rand() % 100 == 0) {
+        ai->attackTarget = NULL;
+    }
+
+    if (ai->attackTarget) {
+        float dist3d = sqrtf(dx * dx + dy * dy + dz * dz);
+        mob->yRotation = (float)(atan2(dz, dx) * 180.0 / M_PI) - 90.0f;
+        mob->xRotation = -(float)(atan2(dy, dist3d) * 180.0 / M_PI);
+        if (dist3d < 2.0f && ai->attackCooldown == 0) {
+            Ai_tryAttack(ai, mob, ai->attackTarget);
+        }
     }
 }
 
-// the random wander: new speeds 7% a tick, a new turn 4% a tick, a jump 1% a tick, 80% in water or lava
 static void Ai_wanderStep(Ai* ai, Entity* mob) {
     if (frand01() < 0.07f) {
-        ai->speedX = frand01() - 0.5f;
-        ai->speedZ = frand01();
+        ai->speedX = (frand01() - 0.5f) * ai->runSpeed;
+        ai->speedZ = frand01() * ai->runSpeed;
     }
+    ai->wantsJump = frand01() < 0.01f;
     if (frand01() < 0.04f) {
         ai->turnSpeed = (frand01() - 0.5f) * 60.0f;
     }
     mob->yRotation += ai->turnSpeed;
     mob->xRotation = (float)ai->wanderPitch;
 
-    ai->wantsJump = frand01() < 0.01f;
+    if (ai->attackTarget) {
+        ai->speedZ = ai->runSpeed;
+        ai->wantsJump = frand01() < 0.04f;
+    }
+
     if (Entity_isInWater(mob) || Entity_isInLava(mob)) {
         ai->wantsJump = frand01() < 0.8f;
     }
 }
 
 void Ai_tick(Ai* ai, Entity* mob) {
+    // idle 600 ticks, then 1 in 800 a tick it gets removed if over 32 blocks from the player
+    ai->noActionTime++;
+    if (ai->noActionTime > 600 && rand() % 800 == 0) {
+        Entity* player = Level_getPlayer(mob->level);
+        if (player) {
+            float dx = player->x - mob->x;
+            float dy = player->y - mob->y;
+            float dz = player->z - mob->z;
+            float distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < 1024.0f) {
+                ai->noActionTime = 0;
+            } else {
+                Entity_remove(mob);
+            }
+        }
+    }
+
     if (ai->attackCooldown > 0) ai->attackCooldown--;
 
     if (mob->health <= 0) {
@@ -74,7 +123,7 @@ void Ai_tick(Ai* ai, Entity* mob) {
     } else {
         Ai_wanderStep(ai, mob);
         if (ai->chase) {
-            Ai_seekAndAttack(ai, mob, Level_getPlayer(mob->level));
+            Ai_doAttack(ai, mob);
         }
     }
 
@@ -92,4 +141,19 @@ void Ai_tick(Ai* ai, Entity* mob) {
 
     Mob_travel(mob, ai->speedX, ai->speedZ);
 
+    if (ai->onAfterUpdate) ai->onAfterUpdate(ai, mob);
+}
+
+void Ai_onHurt(Ai* ai, Entity* mob, Entity* attacker, int damage) {
+    (void)damage;
+    ai->noActionTime = 0;
+    if (!ai->chase) return;
+
+    // an arrow counts as its shooter
+    Entity* real = attacker;
+    if (real && real->killCredit) real = real->killCredit;
+
+    if (real && real->aiClassTag != mob->aiClassTag) {
+        ai->attackTarget = real;
+    }
 }

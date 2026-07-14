@@ -67,6 +67,9 @@ struct Tile {
     float (*getBrightness)(const Tile* self, const Level* lvl, int x, int y, int z);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
 
+    // the held block in first person
+    void (*renderItem)(const Tile* self, Tessellator* t, float brightness);
+
     // how many items break off and which tile they are, one of itself by default
     int  (*getDropCount)(const Tile* self);
     int  (*getDropResource)(const Tile* self);

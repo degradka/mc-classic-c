@@ -8,7 +8,7 @@
 
 typedef struct {
     Screen screen;
-    Button buttons[1];
+    Button buttons[2];
     int score;
 } GameOverScreen;
 
