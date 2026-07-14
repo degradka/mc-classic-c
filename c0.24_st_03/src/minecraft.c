@@ -144,7 +144,14 @@ static int gIsFullscreen = 0;
 // ChatInputScreen's own mouseClicked to paste it into the message being typed
 static char gHoveredTabName[65] = "";
 
-static GLfloat fogColorDaylight[4] = { 0.5f, 0.8f, 1.0f, 1.0f };
+// c0.24_st_03: fixed, was this port's own sky color (0.5,0.8,1.0) copied in
+// here rather than the real source's own distinct Level.fogColor field,
+// newly introduced at this exact version alongside skyColor. Bytecode
+// confirmed: fogColor's only ever-reached default (0xFFFFFF, plain white)
+// is never overwritten anywhere else in this version's own code, unlike
+// every earlier version (c0.0.23a_01 and before), where fog really was a
+// flat hardcoded 0.5/0.8/1.0 constant with no separate Level field at all
+static GLfloat fogColorDaylight[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 static GLfloat fogColorShadow  [4] = {  14.0f/255.0f,  11.0f/255.0f,  10.0f/255.0f, 1.0f };
 
 static int      isHitNull = 1;
