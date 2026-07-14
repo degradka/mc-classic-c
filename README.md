@@ -18,6 +18,7 @@ Sequel to [mc-preclassic-c](https://github.com/degradka/mc-preclassic-c).
 - [c0.0.23a_01](c0.0.23a_01/)
 - [c0.24_st_03](c0.24_st_03/)
 - [c0.25_05_st](c0.25_05_st/)
+- [c0.27_st](c0.27_st/)
 
 Dedicated servers:
 - [server 1.2](server/server1.2/)
