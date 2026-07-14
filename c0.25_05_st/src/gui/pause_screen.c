@@ -57,10 +57,13 @@ void PauseScreen_init(PauseScreen* ps, Font* font, int width, int height, Option
     Button_init(&ps->buttons[3], 3, width / 2 - 100, height / 4 + 72,  200, 20, "Load level..");
     Button_init(&ps->buttons[4], 4, width / 2 - 100, height / 4 + 120, 200, 20, "Back to game");
 
-    // c0.0.16a_02 greys these out unless a login session exists. Our desktop
-    // build never has the applet supplied session the real client checks
-    // for, so they stay permanently disabled here, on top of already being
-    // unwired to a dead backend
+    // c0.24_st_03's own real source disabled these two unconditionally, no
+    // check at all. c0.25_05_st changed this to greying them out only when
+    // no login session object is present, rather than a flat disable; a
+    // fully offline desktop build never has the applet supplied session the
+    // real client checks for either way, so the visible result here is
+    // identical, just now describing the real reason instead of a stale one.
+    // Also already unwired to a dead networked save/load backend regardless
     ps->buttons[2].enabled = false;
     ps->buttons[3].enabled = false;
 

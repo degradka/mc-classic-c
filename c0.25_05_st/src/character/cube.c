@@ -27,32 +27,32 @@ Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
     const Vertex t4 = Vertex_make(ox, y,  oz, 8, 0);
 
     // right
-    Polygon_init_uv(&c->polys[0], b4, b2, t3, t1,
+    Quad_init_uv(&c->polys[0], b4, b2, t3, t1,
         c->texOffX + d + w,     c->texOffY + d,
         c->texOffX + d + w + d, c->texOffY + d + h);
 
     // left
-    Polygon_init_uv(&c->polys[1], b1, b3, t2, t4,
+    Quad_init_uv(&c->polys[1], b1, b3, t2, t4,
         c->texOffX,              c->texOffY + d,
         c->texOffX + d,          c->texOffY + d + h);
 
     // bottom
-    Polygon_init_uv(&c->polys[2], b4, b3, b1, b2,
+    Quad_init_uv(&c->polys[2], b4, b3, b1, b2,
         c->texOffX + d,          c->texOffY,
         c->texOffX + d + w,      c->texOffY + d);
 
     // top
-    Polygon_init_uv(&c->polys[3], t3, t4, t2, t1,
+    Quad_init_uv(&c->polys[3], t3, t4, t2, t1,
         c->texOffX + d + w,      c->texOffY,
         c->texOffX + d + w + w,  c->texOffY + d);
 
     // front
-    Polygon_init_uv(&c->polys[4], b2, b1, t4, t3,
+    Quad_init_uv(&c->polys[4], b2, b1, t4, t3,
         c->texOffX + d,          c->texOffY + d,
         c->texOffX + d + w,      c->texOffY + d + h);
 
     // back
-    Polygon_init_uv(&c->polys[5], b3, b4, t1, t2,
+    Quad_init_uv(&c->polys[5], b3, b4, t1, t2,
         c->texOffX + d + w + d,      c->texOffY + d,
         c->texOffX + d + w + d + w,  c->texOffY + d + h);
 
@@ -72,7 +72,7 @@ void Cube_render(Cube* c) {
         c->displayList = glGenLists(1);
         glNewList(c->displayList, GL_COMPILE);
         glBegin(GL_QUADS);
-        for (int i = 0; i < 6; ++i) Polygon_render(&c->polys[i]);
+        for (int i = 0; i < 6; ++i) Quad_render(&c->polys[i]);
         glEnd();
         glEndList();
         c->built = 1;

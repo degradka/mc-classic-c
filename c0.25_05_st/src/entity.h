@@ -83,7 +83,23 @@ typedef struct Entity {
     // source's Arrow.awardKillScore() forwarding to its own owner, a virtual
     // dispatch this port handles this way instead
     Entity* killCredit;
+    // c0.25_05_st: a lightweight stand in for Java's getClass() equality
+    // check, used by BasicAttackAI.hurt() to decide whether an attacker
+    // counts as a different kind of thing worth aggroing onto (mobs fighting
+    // each other, but not a zombie attacking another zombie). AI_CLASS_PLAYER
+    // for Player, the entity's own CreatureKind value for every hostile or
+    // passive mob, unused and left at its default for anything else (Item,
+    // Sign, Arrow, Particle, NetworkPlayer)
+    int aiClassTag;
 } Entity;
+
+// c0.25_05_st: Entity.aiClassTag values, matches Java's getClass() equality
+// check inside BasicAttackAI.hurt() well enough for this port's own small,
+// fixed set of concrete attacker types. Creature's own kind values are
+// appended after PLAYER at Creature_init time (0 plus CreatureKind), so this
+// only needs the one reserved sentinel here
+#define AI_CLASS_NONE   (-2) // default, not a Player or a Creature
+#define AI_CLASS_PLAYER (-1)
 
 void Entity_init(Entity* e, Level* level);
 void Entity_setPosition(Entity* e, float x, float y, float z);

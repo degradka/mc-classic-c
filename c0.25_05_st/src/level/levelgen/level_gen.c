@@ -393,18 +393,21 @@ static void plantMushrooms(Level* level, const int* heightmap) {
     printf("Added %d mushrooms\n", placed);
 }
 
-// world gen mob population, matches level/a/a.java's own private a(Level)
-// exactly, the final "Spawning.." stage. Bytecode confirms this version has
-// no manual spawn debug key counterpart at all; real source populates the
-// world automatically instead. One random mob type is picked per site, a
-// random point anywhere in the level, with y biased toward the bottom via
-// min(randf,randf), and skipped unless it is open, not solid, not inside a
-// liquid, and unlit 80% of the time, mirroring vanilla's dark cave spawn
-// bias. Each surviving site then tries 3 separate short random walks of 3
-// steps each, looking for a spot with solid ground directly below and two
-// clear tiles above for body and head, spawning the mob there if its own
-// bounding box also turns out to be clear
-static void spawnMobs(Level* level) {
+// shared mob population routine, matches Level.maybeSpawnMobs(int,Entity,
+// ProgressListener) exactly, reused both by world gen's own one time
+// population pass, level/a/a.java's final "Spawning.." stage, and by
+// Level_onTick's own small periodic top up while playing. One random mob
+// type is picked per site, a random point anywhere in the level, with y
+// biased toward the bottom via min(randf,randf), and skipped unless it is
+// open, not solid, not inside a liquid, and unlit 80% of the time, mirroring
+// vanilla's dark cave spawn bias. Each surviving site then tries 3 separate
+// short random walks of 3 steps each, looking for a spot with solid ground
+// directly below and two clear tiles above for body and head, at least 16
+// blocks (256 squared) from referenceEntity if given, or from the level's
+// own spawn point otherwise, spawning the mob there if its own bounding box
+// also turns out to be clear. Bytecode confirms the walk's own y offset is
+// always zero, nextInt(1) minus nextInt(1), so only x and z actually wander
+int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress) {
     const int w = level->width, h = level->height, d = level->depth;
     // real source's n4 0/1/2/3 is Zombie, Skeleton, Pig, Creeper, a
     // different order than this port's own CreatureKind enum of Zombie,
@@ -412,11 +415,10 @@ static void spawnMobs(Level* level) {
     // enum everywhere
     static const int kindForRoll[4] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER };
 
-    int attempts = w * h * d / 800;
     int placed = 0;
 
     for (int a = 0; a < attempts; ++a) {
-        if (a % 50 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
+        if (reportProgress && a % 50 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
 
         int kind = kindForRoll[rand() % 4];
         int sx = rand() % w;
@@ -434,18 +436,31 @@ static void spawnMobs(Level* level) {
             for (int step = 0; step < 3; ++step) {
                 x += (rand() % 6) - (rand() % 6);
                 z += (rand() % 6) - (rand() % 6);
-                y += (rand() % 2) - (rand() % 2);
                 if (x < 0 || z < 1 || y < 0 || y >= d - 2 || x >= w || z >= h) continue;
                 if (!Level_isSolidTile(level, x, y - 1, z)) continue;
                 if (Level_isSolidTile(level, x, y, z) || Level_isSolidTile(level, x, y + 1, z)) continue;
 
-                if (Minecraft_spawnMob(level, kind, (float)x + 0.5f, (float)y + 1.0f, (float)z + 0.5f)) {
-                    placed++;
+                float fx = (float)x + 0.5f;
+                float fy = (float)y + 1.0f;
+                float fz = (float)z + 0.5f;
+
+                float dx, dy, dz;
+                if (referenceEntity) {
+                    dx = fx - referenceEntity->x;
+                    dy = fy - referenceEntity->y;
+                    dz = fz - referenceEntity->z;
+                } else {
+                    dx = fx - (float)level->xSpawn;
+                    dy = fy - (float)level->ySpawn;
+                    dz = fz - (float)level->zSpawn;
                 }
+                if (dx * dx + dy * dy + dz * dz < 256.0f) continue;
+
+                if (Minecraft_spawnMob(level, kind, fx, fy, fz)) placed++;
             }
         }
     }
-    printf("%d mobs\n", placed);
+    return placed;
 }
 
 // Growable stack flood fill, the same algorithm as the Java source's
@@ -611,7 +626,8 @@ void LevelGen_generateMap(Level* level) {
     free(heightmap);
 
     Minecraft_levelLoadUpdate("Spawning..");
-    spawnMobs(level);
+    int spawned = LevelGen_maybeSpawnMobs(level, level->width * level->height * level->depth / 800, NULL, true);
+    printf("%d mobs\n", spawned);
 
     level->createTime = (long long)time(NULL) * 1000;
     snprintf(level->creator, sizeof(level->creator), "%s", Minecraft_getUserName());

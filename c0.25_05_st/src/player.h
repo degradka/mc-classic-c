@@ -17,6 +17,10 @@
 #define PLAYER_KEY_RIGHT 3
 #define PLAYER_KEY_JUMP  4
 
+// c0.25_05_st: matches Player.MAX_ARROWS, the carry cap checked both by
+// Arrow.playerTouch's own pickup gate and (once wired) the Tab fire key
+#define PLAYER_MAX_ARROWS 99
+
 typedef struct Player {
     Entity e;
     bool keys[5];
@@ -29,6 +33,10 @@ typedef struct Player {
     int userType;
     // c0.24_st_03: shown on the Game over screen, reset to 0 on every new level
     int score;
+    // c0.25_05_st: matches Player.arrows, starts at 20 on a fresh spawn,
+    // decremented by the Tab fire key and incremented back by Arrow's own
+    // pickup, capped at PLAYER_MAX_ARROWS
+    int arrows;
     // c0.24_st_03: survival inventory, replaces the old Creative style fixed
     // gHotbar[]/gSelectedSlot pair. Starts empty, matching player/d.java's
     // own constructor - filling it back up is what breaking tiles and

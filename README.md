@@ -133,6 +133,36 @@ Released July 11 2009, accumulating ten real point releases (0.0.21a through 0.0
 * Buttons across every menu now use a real textured graphic (3 states: normal, hovered, disabled) instead of flat color fills
 * The inventory/select-block screen's background is now a smaller centered box instead of a full screen fade, and the hovered slot gets a bright highlight behind it
 
+### c0.24_st_03
+
+Released September 1 2009 as "0.24_SURVIVAL_TEST_03". This is the start of Survival Test, the first time Classic became a game you could lose rather than a pure building sandbox. It skips the whole 0.24_SURVIVAL_TEST_01/02 series (no surviving client jars for those), so the diff against c0.0.23a_01 covers everything those accumulated, not just one version. The real client is applet only with no standalone launcher jar.
+
+* Health: the player now has 10 hearts, shown in the HUD, and can take and deal damage and die. Fall damage, drowning once an air supply runs out underwater (air bubbles show in the HUD), and standing in lava all hurt
+* Mobs are now real enemies: Zombie, Skeleton, Creeper, and Pig each have their own health, wander and chase, and attack the player on contact. Left click attacks whatever entity is under the crosshair for flat damage
+* A white flash plus a knockback and hurt-wobble animation play whenever any mob or the player takes a hit, and a mob tips over as it dies
+* Survival inventory: the fixed Creative hotbar is gone. The inventory starts empty and fills only by breaking tiles and walking over the dropped Item entities they leave behind; placing a block spends one from the stack (max 99 per slot)
+* Killing a mob or breaking certain tiles drops pickup items; a score counter in the HUD tracks kills
+* Bow and arrow: press Tab to shoot an arrow that arcs, sticks into blocks, and can hit mobs
+* Place a Sign with the build key
+* A Game over screen with the final score appears on death, its only exit being Generate new level
+* World generation now populates the fresh map with mobs, and scatters mushrooms underground
+
+### c0.25_05_st
+
+Released September 8-11 2009 as "0.25_05 SURVIVAL TEST". It represents the cumulative result of the whole 0.25_SURVIVAL_TEST through 0.25_04 series (no surviving client jars for those four), so the diff against c0.24_st_03 covers all of them at once. The real client is applet only with no standalone launcher jar.
+
+* Mobs are much more dangerous: they move faster, spot the player from further away (16 blocks), keep chasing a locked target instead of re-checking every tick, and now turn on whoever hurts them regardless of distance, which also makes them fight each other (a skeleton that hits another mob gets attacked back; skeletons never fight other skeletons)
+* Mobs now respawn over time during play, not just at world generation, staying at least 16 blocks from the player, and a lone idle mob far from the player eventually despawns
+* Skeletons are now real archers: they shoot arrows at a locked target, and scatter a handful of loose, retrievable arrows around their corpse when killed
+* Pigs now drop 1-2 brown mushrooms on death
+* Creepers now explode on death: a real crater that destroys blocks in a 4 block radius, sprays particles, and hurts anything nearby
+* Arrows overhauled: player shots do 7 damage (mob shots 3), fly faster and further, stick around much longer before vanishing, and can be walked over to pick back up. The player starts with 20 arrows, capped at 99, spends one per shot, and can now damage themself with their own arrows
+* First person view now shows your own arm, or the block/sapling you're holding, in the bottom right corner
+* HUD gains a live score in the top right corner and an arrow count above the hotbar
+* A "Load level" button is added to the Game over screen (disabled, like the pause menu's Save/Load, since this offline build has no login session)
+* Right clicking can no longer be used to deal damage, only left click
+* Saplings drop from leaves slightly less often (1 in 10, was 1 in 6)
+
 ## Building
 
 ### Windows
@@ -220,3 +250,12 @@ On Windows the built exe needs `zlib1.dll` next to it (the same one the client u
 * [Java Edition Classic 0.0.22a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_05)
 * [Java Edition Classic 0.0.23a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a)
 * [Java Edition Classic 0.0.23a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a_01)
+* [Java Edition Classic 0.24 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.24_SURVIVAL_TEST)
+* [Java Edition Classic 0.24 SURVIVAL TEST 01](https://minecraft.wiki/w/Java_Edition_Classic_0.24_SURVIVAL_TEST_01)
+* [Java Edition Classic 0.24 SURVIVAL TEST 02](https://minecraft.wiki/w/Java_Edition_Classic_0.24_SURVIVAL_TEST_02)
+* [Java Edition Classic 0.24 SURVIVAL TEST 03](https://minecraft.wiki/w/Java_Edition_Classic_0.24_SURVIVAL_TEST_03)
+* [Java Edition Classic 0.25 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST)
+* [Java Edition Classic 0.25 SURVIVAL TEST 2](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_2)
+* [Java Edition Classic 0.25 SURVIVAL TEST 3](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_3)
+* [Java Edition Classic 0.25 SURVIVAL TEST 4](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_4)
+* [Java Edition Classic 0.25_05 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.25_05_SURVIVAL_TEST)

@@ -13,4 +13,14 @@
 // Fills level->blocks (already allocated by Level_init) in place.
 void LevelGen_generateMap(Level* level);
 
+// matches Level.maybeSpawnMobs(int,Entity,ProgressListener): the shared mob
+// population routine, reused both by world gen's own one time population
+// pass and by Level_onTick's own small periodic top up while playing.
+// referenceEntity is the point the new 16 block exclusion zone (256
+// squared) is measured from, the player during gameplay, or NULL to measure
+// from the level's own spawn point instead, matching world gen's own call.
+// reportProgress drives the loading screen progress bar and must only be
+// true for the world gen call. Returns how many mobs actually got placed
+int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress);
+
 #endif

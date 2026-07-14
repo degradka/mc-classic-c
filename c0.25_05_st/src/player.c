@@ -6,6 +6,7 @@
 void Player_init(Player* p, Level* level) {
     Entity_init(&p->e, level);
     p->e.heightOffset = 1.62f;
+    p->e.aiClassTag = AI_CLASS_PLAYER;
     // real source's own Entity constructor doesn't search for a free spawn
     // spot at all, it just sets pos to literal 0,0,0. Only Player's own
     // resetPos() override does, and only when explicitly invoked by the
@@ -22,6 +23,8 @@ void Player_init(Player* p, Level* level) {
     p->jumping = false;
     p->userType = 0;
     p->score = 0;
+    // c0.25_05_st: matches Player's own field initializer, arrows = 20
+    p->arrows = 20;
 
     // c0.24_st_03: Player now extends Mob in the real source (health,
     // invulnerability, drowning/lava/fall damage, knockback)
@@ -86,6 +89,9 @@ void Player_turn(Player* p, GLFWwindow* window, float dx, float dy) {
 // narrowed to Item specifically since that's this port's only playerTouch
 // consumer so far
 extern void Minecraft_checkItemPickups(Entity* player);
+// implemented in minecraft.c: same playerTouch loop narrowed to Arrow
+// instead, matches Arrow.playerTouch(Player)
+extern void Minecraft_checkArrowPickups(Entity* player);
 
 void Player_onTick(Player* p) {
     Entity_onTick(&p->e);
@@ -152,5 +158,11 @@ void Player_onTick(Player* p) {
         }
     }
 
-    Minecraft_checkItemPickups(&p->e);
+    // c0.25_05_st: Player.aiStep() gained a health > 0 guard around its own
+    // item/arrow touch loop, so a dead player (mid ragdoll, waiting on the
+    // Game Over screen) no longer keeps sweeping up drops
+    if (p->e.health > 0) {
+        Minecraft_checkItemPickups(&p->e);
+        Minecraft_checkArrowPickups(&p->e);
+    }
 }

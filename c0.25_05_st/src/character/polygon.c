@@ -3,7 +3,7 @@
 #include "polygon.h"
 #include <GL/glew.h>
 
-void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
+void Quad_init_uv(Quad* p, Vertex a, Vertex b, Vertex c, Vertex d,
                      int minU, int minV, int maxU, int maxV) {
     p->v[0] = Vertex_remap(a, maxU, minV);
     p->v[1] = Vertex_remap(b, minU, minV);
@@ -11,8 +11,16 @@ void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
     p->v[3] = Vertex_remap(d, maxU, maxV);
 }
 
-void Polygon_render(const Polygon* p) {
-    glColor3f(1.f, 1.f, 1.f);
+void Quad_render(const Quad* p) {
+    // no color call here, matching the real source's own compiled cuboid
+    // (d/j.java's b(float)): normal, texcoord and vertex only. This gets
+    // baked once into the Cube's own display list (Cube_render), and a
+    // glColor3f here would be replayed on every glCallList too, permanently
+    // overwriting whatever brightness tint the caller (a mob, the player
+    // model, the first person arm) set right before calling Cube_render,
+    // which is exactly what was happening before this fix: every Cube based
+    // render always looked flat white lit regardless of the caller's own
+    // Level brightness at its position
 
     // c0.0.20a_02: per face lighting normal, matching the real source's
     // normalize(v1-v0) cross normalize(v1-v2)

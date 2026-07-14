@@ -38,6 +38,11 @@ void Mob_knockback(Entity* e, Entity* attacker) {
 void Mob_hurt(Entity* e, Entity* attacker, int damage) {
     if (!e->isMob || e->health <= 0) return;
 
+    // matches Mob.hurt()'s own very first action, before any invulnerability
+    // or damage bookkeeping: lets the AI reset its idle timer and, for chase
+    // capable mobs, lock onto whoever or whatever just landed this hit
+    if (e->ai) Ai_onHurt(e->ai, e, attacker, damage);
+
     // still in the strong half of the invulnerability window: this hit only
     // actually lands if applying it fresh from lastHealth (the health value
     // from before this window started) would be worse than whatever's
@@ -182,7 +187,7 @@ void Mob_onTick(Entity* e) {
     // actual speed times 3 while running, yBodyRotation first eases toward
     // the movement's own facing direction, or just holds still if not
     // moving, then gets reclamped to stay within 75 degrees either way of
-    // the live head yaw, matching Ai_seekAndAttack turning the head to face
+    // the live head yaw, matching Ai_doAttack turning the head to face
     // a target while the body catches up. If the head ends up more than 90
     // degrees off body facing, looking backward relative to travel, the leg
     // animation runs in reverse instead of freezing

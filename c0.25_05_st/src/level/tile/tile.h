@@ -92,6 +92,23 @@ struct Tile {
     int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
 
+    // c0.25_05_st: standalone "render as a held/inventory item" at the
+    // origin, no neighbor culling, matching the real source's
+    // Tile.a(Tessellator). brightness is the single ambient tint the real
+    // source applies via one outer glColor4f(getBrightness(playerX,Y,Z))
+    // before branching into the held block or arm, darkening the held item
+    // to match the player's own current lighting (bright outside, dark in a
+    // cave), same as this port's own first person arm already does. This
+    // port's own renderFace has no per-face normals for GL_LIGHTING to react
+    // to the way the real source's own item render relies on, so this
+    // multiplies brightness into each face's existing directional shading
+    // factor directly instead, keeping the same top/side/bottom look this
+    // port's own world render already has. Default draws all 6 cube faces;
+    // Bush (saplings/flowers/mushrooms) overrides it to draw its crossed
+    // sprite quads instead, so a held plant reads as its flat sprite rather
+    // than a solid cube. Used by the first person hand's own held item render
+    void (*renderItem)(const Tile* self, Tessellator* t, float brightness);
+
     // c0.24_st_03: how many Item entities Tile_dropItems spawns on break
     // (default 1) and which tile id they represent (default this tile's own
     // id). Matches the real source's Tile.f()/g(). Per-tile overrides (Log's

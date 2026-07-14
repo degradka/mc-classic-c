@@ -145,6 +145,24 @@ static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lv
     }
 }
 
+// c0.25_05_st: default "render as a held/inventory item", matches
+// Tile.a(Tessellator): all 6 cube faces at the origin, no neighbor culling,
+// the fixed top/side/bottom directional shading (top brightest, sides mid,
+// bottom darkest) this port's own world render already uses, scaled by the
+// caller's own ambient brightness so a held block darkens in a cave the
+// same way the arm does
+static void Tile_default_renderItem(const Tile* self, Tessellator* t, float brightness) {
+    const float c1 = 1.0f * brightness, c2 = 0.8f * brightness, c3 = 0.6f * brightness;
+    Tessellator_begin(t);
+    Tessellator_color(t, c1, c1, c1); self->renderFace(self, t, 0, 0, 0, 0);
+    Tessellator_color(t, c1, c1, c1); self->renderFace(self, t, 0, 0, 0, 1);
+    Tessellator_color(t, c2, c2, c2); self->renderFace(self, t, 0, 0, 0, 2);
+    Tessellator_color(t, c2, c2, c2); self->renderFace(self, t, 0, 0, 0, 3);
+    Tessellator_color(t, c3, c3, c3); self->renderFace(self, t, 0, 0, 0, 4);
+    Tessellator_color(t, c3, c3, c3); self->renderFace(self, t, 0, 0, 0, 5);
+    Tessellator_end(t);
+}
+
 /* tile instances and registry */
 
 const Tile* gTiles[256] = { 0 };
@@ -175,6 +193,7 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->neighborChanged = Tile_default_neighborChanged;
     t->shouldRenderFace = Tile_default_shouldRenderFace;
     t->renderFace = Tile_default_renderFace;
+    t->renderItem = Tile_default_renderItem;
     t->onPlace = NULL;
     t->onRemoved = NULL;
     t->getDropCount    = Tile_default_getDropCount;
@@ -430,6 +449,46 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
     }
 }
 
+// c0.25_05_st: Bush's own "render as a held/inventory item" override, so a
+// held sapling/flower/mushroom shows its flat crossed sprite rather than the
+// default cube. Matches the real source's own flower tile override of
+// Tile.a(Tessellator) (level/tile/l.java's a(c)) exactly: the same two
+// crossing quads as the world render, but drawn at a fixed offset of
+// (0, 0.4, -0.3) rather than the block origin. That +0.4 vertical lift (and
+// slight backward shift) is what raises the held plant so it reads fully
+// on screen instead of sitting half below the hotbar, unlike a solid block
+// which the base render draws centered at the origin. Real source's own
+// a(c) sets no color at all here, unlike its world render counterpart
+// (which looks up level.getBrightness per tile): it just inherits whatever
+// color the caller already has active, the single ambient brightness tint
+// set once before branching into the held block or arm. This port passes
+// that same value in explicitly instead of relying on an ambient GL color
+// state to still be set correctly by the time this runs
+static void Bush_renderItem(const Tile* self, Tessellator* t, float brightness) {
+    float tex = (float)self->textureId;
+    float u0 = ((int)tex % 16) / 16.0f;
+    float u1 = u0 + 0.0624375f;
+    float v0 = ((int)tex / 16) / 16.0f;
+    float v1 = v0 + 0.0624375f;
+
+    const float ox = 0.0f, oy = 0.4f, oz = -0.3f; // matches l.java a(c)'s own this.a(c2, 0, 0.4, -0.3)
+    Tessellator_begin(t);
+    Tessellator_color(t, brightness, brightness, brightness);
+    const int rots = 2;
+    for (int r = 0; r < rots; ++r) {
+        float xa = (float)(sin(r * M_PI / rots + M_PI / 4.0) * 0.5);
+        float za = (float)(cos(r * M_PI / rots + M_PI / 4.0) * 0.5);
+        float x0 = ox + 0.5f - xa, x1 = ox + 0.5f + xa;
+        float y0 = oy, y1 = oy + 1.0f;
+        float z0 = oz + 0.5f - za, z1 = oz + 0.5f + za;
+        Tessellator_vertexUV(t, x0, y1, z0, u1, v0);
+        Tessellator_vertexUV(t, x1, y1, z1, u0, v0);
+        Tessellator_vertexUV(t, x1, y0, z1, u0, v1);
+        Tessellator_vertexUV(t, x0, y0, z0, u1, v1);
+    }
+    Tessellator_end(t);
+}
+
 // c0.24_st_03: Bush is this codebase's own name for what the real source
 // calls Sapling (level\tile\i.java) - same tile, id 6, same class hierarchy
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
@@ -481,11 +540,11 @@ static int Log_getDropResource(const Tile* self) { (void)self; return TILE_WOOD.
    world generation's new tree pass */
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
-// c0.24_st_03: 1-in-6 chance of a single sapling, matches level\tile\e.java's
-// f()/g() exactly - returning a drop count of 0 the other 5/6 of the time
-// naturally yields "no drop" via Tile_dropItems' own count-driven loop, no
-// separate chance check needed on top of it
-static int Leaves_getDropCount(const Tile* self)    { (void)self; return (rand() % 6 == 0) ? 1 : 0; }
+// c0.25_05_st: 1-in-10 chance of a single sapling (was 1-in-6), matches
+// level\tile\e.java's own f()/g() exactly - returning a drop count of 0 the
+// other 9/10 of the time naturally yields "no drop" via Tile_dropItems' own
+// count-driven loop, no separate chance check needed on top of it
+static int Leaves_getDropCount(const Tile* self)    { (void)self; return (rand() % 10 == 0) ? 1 : 0; }
 static int Leaves_getDropResource(const Tile* self) { (void)self; return TILE_BUSH.id; }
 
 /* Sponge: new in c0.0.19a_04. Dries a 5x5x5 area of water on placement, and
@@ -560,6 +619,7 @@ void Tile_registerAll(void) {
     TILE_BUSH.blocksLight = Bush_blocksLight;
     TILE_BUSH.getAABB     = Bush_getAABB;
     TILE_BUSH.render      = Bush_render;
+    TILE_BUSH.renderItem  = Bush_renderItem;
     TILE_BUSH.onTick      = Bush_onTick;
 
     // tex 14 = water, tex 30 = lava (terrain.png atlas slots, matching LiquidTile.java)
@@ -721,6 +781,7 @@ void Tile_registerAll(void) {
         plants[i]->blocksLight = Bush_blocksLight;
         plants[i]->getAABB     = Bush_getAABB;
         plants[i]->render      = Bush_render;
+        plants[i]->renderItem  = Bush_renderItem;
         plants[i]->onTick      = Bush_onTick;
     }
 

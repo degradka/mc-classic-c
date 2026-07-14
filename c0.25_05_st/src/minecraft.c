@@ -30,6 +30,7 @@
 #include "audio/sound.h"
 #include "user.h"
 #include "character/creature.h"
+#include "character/cube.h"
 #include "item/arrow.h"
 #include "item/item.h"
 #include "item/sign.h"
@@ -65,6 +66,23 @@ static int mobCount = 0;
 static int arrowCount = 0;
 static int itemCount = 0;
 static int signCount = 0;
+
+// c0.25_05_st: first person hand/held item state, matches the real source's
+// own HeldItemRenderer fields (h2.b/c/d/e/f in the decompile): heldTileId is
+// the tile id currently shown in hand (-1 for the empty hand pose, mirrors
+// h2.b being null), heldBlend/prevHeldBlend crossfade toward 1.0 whenever
+// the inventory's own selected tile matches heldTileId (and toward 0.0 the
+// moment it changes, at which point heldTileId snaps to the new selection
+// once the fade has mostly bottomed out), driving both a rise/dip animation
+// and, if ever needed, a transparency style blend. handSwinging/handSwingTicks
+// track the 7 tick punch animation, triggered once per left click event
+// regardless of whether that click actually hit anything
+static int   heldTileId = -1;
+static float heldBlend = 0.0f, prevHeldBlend = 0.0f;
+static bool  handSwinging = false;
+static int   handSwingTicks = -1;
+static Cube  handArmCube;
+static bool  handArmCubeBuilt = false;
 
 static NetworkPlayer netPlayers[MAX_NET_PLAYERS];
 static int netPlayerCount = 0;
@@ -144,7 +162,13 @@ static int gIsFullscreen = 0;
 // ChatInputScreen's own mouseClicked to paste it into the message being typed
 static char gHoveredTabName[65] = "";
 
-static GLfloat fogColorDaylight[4] = { 0.5f, 0.8f, 1.0f, 1.0f };
+// c0.25_05_st: fixed, was this port's own sky color (0.5,0.8,1.0) copied in
+// here rather than the real source's own distinct Level.fogColor field.
+// Bytecode confirmed: fogColor and skyColor are two separate fields, and
+// fogColor's only ever-reached default (0xFFFFFF, plain white) is never
+// overwritten anywhere else in this version's own code, so hardcoding it
+// exactly like this port already hardcodes skyColor is a safe simplification
+static GLfloat fogColorDaylight[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 static GLfloat fogColorShadow  [4] = {  14.0f/255.0f,  11.0f/255.0f,  10.0f/255.0f, 1.0f };
 
 static int      isHitNull = 1;
@@ -203,10 +227,10 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     int size = 128 << sizePreset;
 
     // must happen before Level_resize, not after. World gen's own
-    // "Spawning.." stage, level_gen.c's spawnMobs, now populates mobs[] as
-    // part of Level_resize's own Level_generateMap call below, via the same
-    // mobCount indexed array this resets. Clearing mobCount afterward would
-    // silently wipe every mob world gen just spawned
+    // "Spawning.." stage, level_gen.c's LevelGen_maybeSpawnMobs, now
+    // populates mobs[] as part of Level_resize's own Level_generateMap call
+    // below, via the same mobCount indexed array this resets. Clearing
+    // mobCount afterward would silently wipe every mob world gen just spawned
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
@@ -235,12 +259,13 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     // real source's own level change path, k.java's setLevel, constructs a
     // brand new Player object every single time a level is generated or
     // loaded, whether or not the previous one died. A fresh Player
-    // naturally has a fresh, empty inventory, Player.java's own field
-    // initializer. This port keeps one persistent Player struct instead of
-    // reallocating it, so the equivalent is resetting inventory explicitly
-    // here. Both cases, dying or not, should behave identically: hotbar
-    // always clears on regen
+    // naturally has a fresh, empty inventory and arrows back to 20,
+    // Player.java's own field initializers. This port keeps one persistent
+    // Player struct instead of reallocating it, so the equivalent is
+    // resetting these explicitly here. Both cases, dying or not, should
+    // behave identically: hotbar and arrow count always reset on regen
     Inventory_init(&player.inventory);
+    player.arrows = 20;
 
     Entity_resetPosition(&player.e);
 }
@@ -664,9 +689,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.24_SURVIVAL_TEST_03", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.25_05   SURVIVAL TEST", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.24_SURVIVAL_TEST_03", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.25_05   SURVIVAL TEST", NULL, NULL);
     }
 
     if (!window) {
@@ -748,12 +773,12 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     gTextureFX[1]->tick(gTextureFX[1]);
 
     // must happen before Level_init, not after. World gen's own
-    // "Spawning.." stage, level_gen.c's spawnMobs, populates mobs[] as part
-    // of Level_init's own Level_generateMap call below, when booting into a
-    // freshly generated map rather than loading a save. These are already 0
-    // from their own static initializers at this point in the program, but
-    // resetting them again after Level_init would silently wipe every mob
-    // world gen just spawned
+    // "Spawning.." stage, level_gen.c's LevelGen_maybeSpawnMobs, populates
+    // mobs[] as part of Level_init's own Level_generateMap call below, when
+    // booting into a freshly generated map rather than loading a save. These
+    // are already 0 from their own static initializers at this point in the
+    // program, but resetting them again after Level_init would silently wipe
+    // every mob world gen just spawned
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
@@ -1018,14 +1043,29 @@ static void drawGui(float partialTicks) {
     glDisable(GL_TEXTURE_2D);
 
     // top left corner: version and stats
-    // c0.24_st_03: real source's own version string for this build
-    Font_drawShadow(&gFont, &hudTess, "0.24_SURVIVAL_TEST_03", 2, 2, 0xFFFFFF);
+    // c0.25_05_st: real source's own version string for this build, note the
+    // literal 3 spaces before "SURVIVAL", confirmed via decompile
+    Font_drawShadow(&gFont, &hudTess, "0.25_05   SURVIVAL TEST", 2, 2, 0xFFFFFF);
 
     if (gOptions.showFrameRate) {
         char stats[64];
         snprintf(stats, sizeof stats, "%d fps, %d chunk updates", gFPS, gChunkUpdatesPerSec);
         Font_drawShadow(&gFont, &hudTess, stats, 2, 12, 0xFFFFFF);
     }
+
+    // c0.25_05_st: score, top right corner, matches the HUD class's own
+    // "Score: &e" + player.getScore(), right aligned by its own live
+    // (color code stripped) string width
+    char scoreMsg[48];
+    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", player.score);
+    Font_drawShadow(&gFont, &hudTess, scoreMsg, screenWidth - Font_width(&gFont, scoreMsg) - 2, 2, 0xFFFFFF);
+
+    // c0.25_05_st: arrow count, just above the hotbar, matches the HUD
+    // class's own "Arrows: " + player.arrows exactly, including its fixed
+    // (not right aligned) position
+    char arrowsMsg[32];
+    snprintf(arrowsMsg, sizeof arrowsMsg, "Arrows: %d", player.arrows);
+    Font_drawShadow(&gFont, &hudTess, arrowsMsg, screenWidth / 2 + 8, screenHeight - 33, 0xFFFFFF);
 
     int cx = screenWidth / 2;
     int cy = screenHeight / 2;
@@ -1251,21 +1291,98 @@ static void pick(float t) {
     }
 }
 
-// c0.24_st_03: entity-vs-box overlap query for Arrow's own tick (item/arrow.c),
-// matching the real source's level.blockMap query narrowed to isShootable
-// entities. Linear scan of mobs[], same as pick()'s own entity search above;
-// this project has no spatial index, and this is the only other place that
-// needs one so far
-bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, Entity** outHit) {
+// entity-vs-box overlap query for Arrow's own tick (item/arrow.c), matching
+// the real source's level.blockMap query narrowed to isShootable entities.
+// Linear scan of mobs[] plus the live player, since Player also extends Mob
+// (isShootable) in the real source but isn't kept in mobs[] here; the owner
+// is only excluded during its own first 5 ticks of flight, matching Arrow's
+// own `entity == this.owner && this.time <= 5` grace window exactly, so an
+// arrow can hit its own shooter once it's had a moment to actually leave
+bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, int flightTime, Entity** outHit) {
     for (int i = 0; i < mobCount; i++) {
         Entity* e = &mobs[i].e;
-        if (e->removed || e == owner) continue;
+        if (e->removed) continue;
+        if (e == owner && flightTime <= 5) continue;
         if (AABB_intersects(&e->boundingBox, box)) {
             *outHit = e;
             return true;
         }
     }
+    if (!(&player.e == owner && flightTime <= 5) && AABB_intersects(&player.e.boundingBox, box)) {
+        *outHit = &player.e;
+        return true;
+    }
     return false;
+}
+
+// implemented for mob_ai.c/creature.c's own Skeleton hooks: shooting while
+// chasing, and its own death arrow scatter, spawns into arrows[]
+bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, float z, float yaw, float pitch, float speed) {
+    if (arrowCount >= MAX_ARROWS) return false;
+    Arrow_init(&arrows[arrowCount++], lvl, owner, x, y, z, yaw, pitch, speed);
+    return true;
+}
+
+// implemented for player.c's own Player_onTick, matches Arrow.playerTouch(Player):
+// only picks back up an arrow this same player is owner of (a self fired
+// shot, or a Skeleton's own death scatter, credited to the player at spawn
+// time), and only once it's actually stuck, capped at the player's own carry
+// limit. Starts the same 3 tick streak-to-player animation as
+// Item_startPickup, see Arrow_onTick
+void Minecraft_checkArrowPickups(Entity* playerEntity) {
+    AABB box = AABB_grow(&playerEntity->boundingBox, 1.0f, 0.0f, 1.0f);
+    Player* p = (Player*)playerEntity;
+    for (int i = 0; i < arrowCount; i++) {
+        Arrow* a = &arrows[i];
+        if (a->e.removed || a->pickedUp || !a->hasHit) continue;
+        if (a->owner != playerEntity) continue;
+        if (p->arrows >= PLAYER_MAX_ARROWS) continue;
+        if (!AABB_intersects(&a->e.boundingBox, &box)) continue;
+        Arrow_startPickup(a, playerEntity);
+        p->arrows++;
+    }
+}
+
+// implemented for level.c's own Level_explode, matching the real source's
+// own blockMap.getEntities(source,...) scan plus per entity distance based
+// hurt call: linear scan of mobs[] plus the live player (this port's usual
+// stand-in for a unified entity list), excluding the explosion's own
+// source. Bytecode confirmed the distance ratio check compares the freshly
+// computed distanceTo(source)/radius value itself, not the locally
+// uninitialized variable CFR's own decompile of this method mis-scopes it as
+// implemented for Creeper's own death explosion, matches the real source's
+// own particle spawn there exactly: 500 particles textured as Leaves (real
+// source's a.y constant, id 18 tex 22, confirmed via the tile registry;
+// purely a texture reuse, not an actual leaves block spawn)
+void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz) {
+    Particle p;
+    Particle_init(&p, lvl, x, y, z, mx, my, mz, &TILE_LEAVES);
+    ParticleEngine_add(&particleEngine, &p);
+}
+
+void Minecraft_hurtEntitiesInExplosion(Level* lvl, Entity* source, float x, float y, float z, float radius) {
+    (void)lvl;
+    for (int i = 0; i < mobCount; i++) {
+        Entity* e = &mobs[i].e;
+        if (e->removed || e == source) continue;
+        float dx = e->x - x, dy = e->y - y, dz = e->z - z;
+        float ratio = sqrtf(dx * dx + dy * dy + dz * dz) / radius;
+        if (ratio <= 1.0f) Mob_hurt(e, source, (int)((1.0f - ratio) * 15.0f + 1.0f));
+    }
+    if (&player.e != source) {
+        float dx = player.e.x - x, dy = player.e.y - y, dz = player.e.z - z;
+        float ratio = sqrtf(dx * dx + dy * dy + dz * dz) / radius;
+        if (ratio <= 1.0f) Mob_hurt(&player.e, source, (int)((1.0f - ratio) * 15.0f + 1.0f));
+    }
+}
+
+// implemented for level.c's own Level_onTick, matching Level.tick()'s own
+// mob population cap check, level.blockMap.all filtered to instanceof Mob.
+// Player also extends Mob in the real source and lives in that same count,
+// so the +1 stands in for the always present local player, which this
+// port's own mobs[] array never holds
+int Minecraft_countMobs(void) {
+    return mobCount + 1;
 }
 
 // implemented for level_gen.c's own world gen mob population, level/a/a.java's
@@ -1353,17 +1470,21 @@ static void handleGameplayKeys(GLFWwindow* w) {
     }
     prevB = kB;
 
-    // c0.24_st_03: Tab shoots an arrow, singleplayer only (matches the real
-    // source's own `this.y == null` gate - `y` there is a connection
-    // reference, not the Controls screen its own declared type would
-    // suggest; CFR picked the wrong same-named obfuscated class across two
-    // different packages, confirmed via raw bytecode). No conflict with the
-    // existing Tab "connected players" overlay below: that one only ever
-    // shows while gConnected, this only ever fires while !gConnected
+    // Tab shoots an arrow, singleplayer only (matches the real source's own
+    // `this.y == null` gate - `y` there is a connection reference, not the
+    // Controls screen its own declared type would suggest; CFR picked the
+    // wrong same-named obfuscated class across two different packages,
+    // confirmed via raw bytecode). No conflict with the existing Tab
+    // "connected players" overlay below: that one only ever shows while
+    // gConnected, this only ever fires while !gConnected. c0.25_05_st: now
+    // also gated on the player's own arrow count (spawns with 20, matches
+    // Player.arrows), decremented per shot, speed bumped from the old debug
+    // 0.8 to the real source's own 1.2 for a player's own shot
     int tab = glfwGetKey(w, GLFW_KEY_TAB);
-    if (tab == GLFW_PRESS && prevTab == GLFW_RELEASE && !gConnected && arrowCount < MAX_ARROWS) {
+    if (tab == GLFW_PRESS && prevTab == GLFW_RELEASE && !gConnected && player.arrows > 0 && arrowCount < MAX_ARROWS) {
         Arrow_init(&arrows[arrowCount++], &level, &player.e,
-                   player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation);
+                   player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation, 1.2f);
+        player.arrows--;
     }
     prevTab = tab;
 
@@ -1439,6 +1560,15 @@ static void handleBlockClicks(GLFWwindow* w) {
     }
     prevMiddle = middle;
 
+    // c0.25_05_st: the first person hand's own punch swing, matches the real
+    // source triggering it unconditionally on every fresh left click event,
+    // even one that hits nothing at all, before any mine/place/attack logic
+    // even runs
+    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE) {
+        handSwinging = true;
+        handSwingTicks = -1;
+    }
+
     // left click performs the current mode: on a fresh press immediately,
     // then c0.0.14a_08 auto-repeats every ticksPerSecond/4 ticks (~5 ticks at
     // 20 TPS) for as long as the button stays held, instead of requiring
@@ -1454,18 +1584,18 @@ static void handleBlockClicks(GLFWwindow* w) {
 }
 
 static void mineOrPlace(void) {
-    // c0.24_st_03: matches the real source's own combined click handler,
-    // which checks for an entity hit before any block mine/place logic and,
-    // if found, always attacks instead, regardless of which mouse button
-    // (or here, which gEditMode) triggered it - flat 4 damage, no weapon
-    // variance, since no weapons exist yet (k.java: hitEntity.hurt(player,4)).
-    // Real source's right click can also land this same attack when it hits
-    // an entity (its own item-throw/place path only returns early on a
-    // successful throw/place, falling through to the entity check
-    // otherwise), but that quirk isn't ported: this port's right click is a
-    // dedicated mine/place mode toggle, not a placement action in its own
-    // right, so there's no equivalent "placement failed, try attacking
-    // instead" fallthrough to replicate
+    // matches the real source's own combined click handler, which checks
+    // for an entity hit before any block mine/place logic and, if found,
+    // attacks instead - flat 4 damage, no weapon variance, since no weapons
+    // exist yet. c0.24_st_03's own real source let either mouse button land
+    // this hit; c0.25_05_st changed that to left click only (bytecode
+    // confirmed: the entity branch now checks which button fired before
+    // calling hurt(), where it used to fire unconditionally), matching the
+    // wiki's "players can no longer right click to deal damage". This
+    // port's own right click was already a dedicated mine/place mode
+    // toggle, never itself reaching mineOrPlace(), so it already matched
+    // the fixed behavior before this version even existed; nothing to
+    // change here beyond this comment
     if (hitResult.type == HITRESULT_ENTITY) {
         Mob_hurt(hitResult.entity, &player.e, 4);
         return;
@@ -1604,6 +1734,139 @@ static void syncGameplayKeyEdges(GLFWwindow* w) {
 
 /* frame */
 
+// c0.25_05_st: first person hand, matches the real source's own
+// HeldItemRenderer.render() exactly: drawn as a small object attached to the
+// camera (translated forward/right/down within the same view transform
+// everything else in the scene already uses, not a separate reset overlay),
+// so it naturally stays in the same relative spot as the player looks
+// around. Either a small terrain.png cube for the currently selected tile,
+// or, empty handed, char.png bound to a single forearm box borrowed from
+// this port's own humanoid arm shape (mob/mob_zombie_model.c's own rightArm:
+// same box, same texture origin; the real source's own mirrored UV variant
+// isn't reproduced, invisible at this scale and this port's own Cube has no
+// mirror flag to begin with). No custom skin download, matches this port's
+// own offline-only scope decision for this feature
+static void renderHand(Player* p, float partialTicks) {
+    if (!handArmCubeBuilt) {
+        // matches the exact arm the real source's first person hand draws:
+        // the humanoid model's own field f (d/h.java), box origin (-1,-2,-2)
+        // size 4x12x4, texture origin (40,16). Crucially the real source
+        // draws it with glCallList on the compiled geometry alone (l.java
+        // line 776), NOT the model part's own render() call, so the part's
+        // own position offset (5,2,0) is deliberately never applied. This
+        // port's Cube_render always applies its stored position, so that
+        // position is left at (0,0,0) here (no Cube_setPos) to match: the arm
+        // is drawn at its box local origin, the same as the real source's own
+        // bare display list. The real source's field f also sets a horizontal
+        // UV mirror flag, which this port's Cube has no support for; that only
+        // affects texture wrap direction, negligible at this scale on the near
+        // solid skin tone
+        Cube_init(&handArmCube, 40, 16);
+        Cube_addBox(&handArmCube, -1, -2, -2, 4, 12, 4);
+        handArmCubeBuilt = true;
+    }
+
+    // matches the real source clearing the depth buffer immediately before
+    // its own first person hand pass (l.java: glClear(GL_DEPTH_BUFFER_BIT)
+    // right after the world, particle, cloud and water passes, right before
+    // resetting the modelview for the hand). This is what keeps the hand
+    // always drawn on top of the world instead of clipping into a nearby
+    // block face, e.g. when standing right against a wall or in a tunnel. It
+    // requires the hand to be the very last 3D thing rendered this frame,
+    // which is why render() calls this right before drawGui, after every
+    // other 3D pass
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // the hand is lit like every other entity; sets up its own lighting
+    // bracket here since it now renders outside the main entity loop's own
+    setupEntityLighting(true);
+
+    float blend = prevHeldBlend + (heldBlend - prevHeldBlend) * partialTicks;
+
+    glPushMatrix();
+
+    // setupCamera left the modelview as the full world-to-eye transform (the
+    // camera's own look rotation plus a translate by the negative player
+    // position). A first person hand is NOT drawn in that space: it must
+    // stay pinned to the same screen corner no matter where the player
+    // looks, so it's drawn in pure eye space instead, matching the real
+    // source exactly. l.java's own hand pass does glLoadIdentity then layers
+    // only hurt-camera tilt (d.a) and view bobbing (d.b) on top, never the
+    // look rotation itself (the xRot/yRot rotate in that method is inside its
+    // own push/pop, used only to aim the light, then discarded). This port's
+    // own simplified camera implements neither hurt tilt nor bobbing (see
+    // moveCameraToPlayer omitting both for the world camera too), so a plain
+    // glLoadIdentity is the exact equivalent here: it drops the world camera
+    // transform entirely, leaving the hand's own fixed offset below measured
+    // straight in eye space
+    glLoadIdentity();
+
+    const float baseScale = 0.8f;
+    if (handSwinging) {
+        float swing = ((float)handSwingTicks + partialTicks) / 7.0f;
+        float dip = sinf(swing * (float)M_PI);
+        float rise = sinf(sqrtf(swing) * (float)M_PI);
+        glTranslatef(-rise * 0.4f, sinf(sqrtf(swing) * (float)M_PI * 2.0f) * 0.2f, -dip * 0.2f);
+    }
+    glTranslatef(0.7f * baseScale, -0.65f * baseScale - (1.0f - blend) * 0.6f, -0.9f * baseScale);
+    glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+    if (handSwinging) {
+        float swing = ((float)handSwingTicks + partialTicks) / 7.0f;
+        float rise = sinf(sqrtf(swing) * (float)M_PI);
+        glRotatef(rise * 80.0f, 0.0f, 1.0f, 0.0f);
+        glRotatef(-sinf(swing * swing * (float)M_PI) * 20.0f, 1.0f, 0.0f, 0.0f);
+    }
+
+    float brightness = Level_getBrightness(&level, (int)p->e.x, (int)p->e.y, (int)p->e.z);
+    glColor4f(brightness, brightness, brightness, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+
+    if (heldTileId > 0) {
+        // the block is shaded purely by per face vertex color (this port's
+        // renderFace emits no normals), the same as the hotbar's own 3D
+        // icons, so lighting is turned off for it to avoid the directional
+        // light dimming those colors. The arm branch below keeps lighting on
+        // since its own Cube geometry does emit normals
+        glDisable(GL_LIGHTING);
+        glScalef(0.4f, 0.4f, 0.4f);
+        glTranslatef(-0.5f, -0.5f, -0.5f);
+        glBindTexture(GL_TEXTURE_2D, texTerrain);
+        // matches the real source's held item drawing the tile's own
+        // Tile.a(Tessellator): a standalone render of the block at the
+        // origin, no neighbor culling and no world brightness. This port's
+        // own renderItem does the same, dispatching per tile type: a full
+        // cube for solid blocks, or the flat crossed sprite for a
+        // sapling/flower/mushroom, so a held plant reads as its sprite rather
+        // than a solid cube
+        const Tile* t = (heldTileId < 256) ? gTiles[heldTileId] : NULL;
+        if (t && t->renderItem) {
+            t->renderItem(t, &hudTess, brightness);
+        }
+    } else {
+        static int texChar = 0;
+        if (!texChar) texChar = loadTexture("resources/char.png", GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, texChar);
+        glScalef(1.0f, -1.0f, -1.0f);
+        glTranslatef(0.0f, 0.2f, 0.0f);
+        glRotatef(-120.0f, 0.0f, 0.0f, 1.0f);
+        // real source bakes this same 0.0625 (pixel unit box -> world block
+        // unit, matches Creature_render's own identical constant) into the
+        // arm's own display list at first compile instead of a live
+        // transform (bytecode confirmed: Cuboid.b(float) takes the scale as
+        // a build time parameter, called only once, guarded by the same
+        // already-built flag this port's own Cube.built is). This port's
+        // own Cube_render never bakes scale in, so it has to be applied
+        // live here every frame instead
+        glScalef(0.0625f, 0.0625f, 0.0625f);
+        Cube_render(&handArmCube);
+    }
+
+    glDisable(GL_TEXTURE_2D);
+    glPopMatrix();
+
+    setupEntityLighting(false);
+}
+
 static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, float t) {
     (void)w;
     (void)lvl;
@@ -1668,6 +1931,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     LevelRenderer_render(lr, p, 2);
 
     setupEntityLighting(true);
+
     for (int i = 0; i < mobCount; ++i) {
         const Creature* c = &mobs[i];
         if (frustum_isVisible(&frustum, &c->e.boundingBox)) {
@@ -1702,6 +1966,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
             Sign_render(s, t, &gFont);
         }
     }
+
     setupEntityLighting(false);
 
     ParticleEngine_render(&particleEngine, p, t);
@@ -1753,6 +2018,15 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
     }
+
+    // c0.25_05_st: first person hand, drawn last among the 3D passes,
+    // matching the real source's own order exactly. It clears the depth
+    // buffer itself (see renderHand) so it always sits on top of the world
+    // rather than clipping into nearby blocks, which only works correctly as
+    // the final 3D pass, right before the 2D HUD. Drawn whenever a level is
+    // loaded, screen open or not, matching the real source; render() is
+    // already only reached once a level exists
+    renderHand(p, t);
 
     drawGui(t);
 
@@ -1928,6 +2202,28 @@ static void tick(Player* p, GLFWwindow* w) {
     ParticleEngine_onTick(&particleEngine);
 
     Player_onTick(p);
+
+    // c0.25_05_st: first person hand tick, matches the real source's own
+    // HeldItemRenderer update exactly: advance the swing counter to
+    // completion, then crossfade heldTileId toward whatever's now selected
+    prevHeldBlend = heldBlend;
+    if (handSwinging) {
+        handSwingTicks++;
+        if (handSwingTicks == 7) {
+            handSwingTicks = 0;
+            handSwinging = false;
+        }
+    }
+    {
+        int selected = Inventory_getSelected(&p->inventory);
+        float target = (selected == heldTileId) ? 1.0f : 0.0f;
+        float delta = target - heldBlend;
+        if (delta < -0.4f) delta = -0.4f;
+        if (delta > 0.4f) delta = 0.4f;
+        heldBlend += delta;
+        if (heldBlend < 0.1f) heldTileId = selected;
+    }
+
     for (int i = 0; i < mobCount; ) {
         Creature_onTick(&mobs[i]);
         if (mobs[i].e.removed) {

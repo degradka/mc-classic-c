@@ -50,6 +50,7 @@ void Entity_init(Entity* e, Level* level) {
     e->onDeath = NULL;
     e->ai = NULL;
     e->killCredit = NULL;
+    e->aiClassTag = AI_CLASS_NONE;
     e->tickCount = 0;
     e->run = e->oRun = 0.0f;
     e->animStep = e->animStepO = 0.0f;

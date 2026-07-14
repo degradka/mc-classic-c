@@ -6,7 +6,7 @@
 #include "polygon.h"
 
 typedef struct {
-    Polygon polys[6];
+    Quad polys[6];
     float   x, y, z;
     float   xRot, yRot, zRot;
     int     texOffX, texOffY;

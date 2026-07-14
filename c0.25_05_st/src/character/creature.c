@@ -8,9 +8,101 @@
 #include "../renderer/textures.h"
 #include "../mob.h"
 #include "../player.h"
+#include "../level/level.h"
+#include "../level/tile/tile.h"
 #include <GL/glew.h>
 #include <math.h>
 #include <stdlib.h>
+
+static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
+
+// Box-Muller transform: an actual standard normal (mean 0, stddev 1)
+// distribution, not just a uniform substitute, since Creeper's own death
+// particle scatter relies on the real Gaussian's own clustered-toward-center
+// shape (matches Random.nextGaussian() closely enough; exact bit-for-bit
+// sequences were never a goal in this port, but the distribution's actual
+// shape visibly matters here, unlike the flat rolls used for AI ticks)
+static float gaussianRand(void) {
+    float u1 = frand01();
+    if (u1 < 1e-7f) u1 = 1e-7f;
+    float u2 = frand01();
+    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+}
+
+// implemented in minecraft.c: spawns into arrows[]
+extern bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, float z, float yaw, float pitch, float speed);
+// implemented in minecraft.c: spawns into items[]
+extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
+// implemented in minecraft.c: spawns a Leaves textured particle (real
+// source's own a.y constant), used only by Creeper's own death scatter
+extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz);
+
+// matches Skeleton$1's own tick() override: while alive and a target is
+// locked, a 1 in 30 chance per tick to fire, on top of everything
+// BasicAttackAI's own melee already does
+static void Skeleton_onAfterUpdate(Ai* ai, Entity* mob) {
+    if (mob->health > 0 && ai->attackTarget && rand() % 30 == 0) {
+        // matches Skeleton.shootArrow(Level): along the skeleton's own
+        // current facing, flipped 180 degrees plus up to +-22.5 degrees of
+        // horizontal jitter, and a smaller vertical jitter, speed 1.0
+        float yaw = mob->yRotation + 180.0f + (frand01() * 45.0f - 22.5f);
+        float pitch = mob->xRotation - (frand01() * 45.0f - 10.0f);
+        Minecraft_spawnArrow(mob->level, mob, mob->x, mob->y, mob->z, yaw, pitch, 1.0f);
+    }
+}
+
+// matches Skeleton.access$000, fired from Skeleton$1's own beforeRemove()
+// override, itself Ai_onDeathTimeout, called once from Mob_onTick right
+// before a dead Skeleton actually gets removed: scatters 4 to 9 arrows (two
+// averaged random rolls times 3 plus 4) in fully random directions around
+// the corpse, credited to the player rather than the dead Skeleton itself so
+// they can actually be picked back up
+static void Skeleton_onDeathTimeout(Ai* ai, Entity* mob) {
+    (void)ai;
+    int count = (int)((frand01() + frand01()) * 3.0f + 4.0f);
+    Entity* player = Level_getPlayer(mob->level);
+    for (int i = 0; i < count; ++i) {
+        float yaw = frand01() * 360.0f;
+        float pitch = -(frand01() * 60.0f);
+        Minecraft_spawnArrow(mob->level, player, mob->x, mob->y - 0.2f, mob->z, yaw, pitch, 0.4f);
+    }
+}
+
+// matches Creeper$1's own attack() override calling super.attack() first,
+// then, only once that landed a real hit, this.mob.hurt(entity, 6): the
+// Creeper damages itself 6, using the target purely as the "attacker"
+// argument for hurtDir/knockback bookkeeping. The player takes no extra
+// damage from this at all, the Creeper takes 6 backfire damage per landed
+// melee hit
+static void Creeper_onAfterAttack(Ai* ai, Entity* mob, Entity* target) {
+    (void)ai;
+    Mob_hurt(mob, target, 6);
+}
+
+// matches Creeper$1's own beforeRemove() override, itself Ai_onDeathTimeout,
+// called once from Mob_onTick right before a dead Creeper actually gets
+// removed: a radius 4 explosion (crater plus nearby entity damage, see
+// Level_explode), then 500 particles scattered via a real Gaussian offset,
+// each one's own outward velocity scaled by the inverse square of its own
+// distance from center (closer particles fly out faster), matching the
+// real source's own f3/f6/f6 formula exactly, an actual bytecode confirmed
+// detail, not a typo to "fix" into a plain unit vector
+static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
+    (void)ai;
+    const float radius = 4.0f;
+    Level_explode(mob->level, mob, mob->x, mob->y, mob->z, radius);
+    for (int i = 0; i < 500; ++i) {
+        float dx = gaussianRand() * radius / 4.0f;
+        float dy = gaussianRand() * radius / 4.0f;
+        float dz = gaussianRand() * radius / 4.0f;
+        float mag = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (mag < 0.0001f) mag = 0.0001f;
+        float mx = dx / mag / mag;
+        float my = dy / mag / mag;
+        float mz = dz / mag / mag;
+        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz);
+    }
+}
 
 // score awarded per kind on a credited kill, Mob_hurt's attacker argument,
 // matches each species' own die(Entity) override. Skeleton has none of its
@@ -18,18 +110,31 @@
 // credits Zombie's own value instead. This is a genuine original quirk,
 // preserved faithfully rather than corrected
 static void Creature_onDeath(Entity* self, Entity* attacker) {
-    if (!attacker) return; // only a credited kill awards score
     Creature* c = (Creature*)self;
-    // an Arrow is itself the attacker, so knockback and hurtDir resolve
-    // relative to where it struck, but redirects credit to whoever shot it
-    // via killCredit. Anything else attacking is the local Player directly
-    if (attacker->killCredit) attacker = attacker->killCredit;
-    Player* killer = (Player*)attacker;
-    switch (c->kind) {
-        case CREATURE_ZOMBIE:
-        case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
-        case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
-        case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+
+    if (attacker) { // only a credited kill awards score
+        // an Arrow is itself the attacker, so knockback and hurtDir resolve
+        // relative to where it struck, but redirects credit to whoever shot
+        // it via killCredit. Anything else attacking is the local Player
+        // directly
+        if (attacker->killCredit) attacker = attacker->killCredit;
+        Player* killer = (Player*)attacker;
+        switch (c->kind) {
+            case CREATURE_ZOMBIE:
+            case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
+            case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
+            case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+        }
+    }
+
+    // matches Pig.die(): drops 1 to 2 brown mushrooms unconditionally,
+    // regardless of whether this was a credited kill or environmental
+    // damage (fall, drown, lava), unlike the score award above
+    if (c->kind == CREATURE_PIG) {
+        int count = (int)(frand01() + frand01() + 1.0f);
+        for (int i = 0; i < count; ++i) {
+            Minecraft_spawnItem(self->level, self->x, self->y, self->z, TILE_MUSHROOM_BROWN.id);
+        }
     }
 }
 
@@ -38,22 +143,34 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     Mob_init(&c->e);
     c->e.ai = &c->ai;
     c->e.onDeath = Creature_onDeath;
+    // matches Java's getClass() equality check inside BasicAttackAI.hurt():
+    // each CreatureKind counts as its own distinct kind of thing, so a
+    // zombie hitting a skeleton (or vice versa) makes them fight, but a
+    // zombie hitting another zombie does not
+    c->e.aiClassTag = (int)kind;
     c->kind = kind;
 
     switch (kind) {
         case CREATURE_ZOMBIE:
+            c->e.heightOffset = 1.62f;
+            Ai_init(&c->ai, true, 30, 1.0f, 6);
+            break;
         case CREATURE_SKELETON:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 30);
+            Ai_init(&c->ai, true, 30, 0.3f, 8);
+            c->ai.onAfterUpdate = Skeleton_onAfterUpdate;
+            c->ai.onDeathTimeout = Skeleton_onDeathTimeout;
             break;
         case CREATURE_CREEPER:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 45);
+            Ai_init(&c->ai, true, 45, 0.7f, 6);
+            c->ai.onAfterAttack = Creeper_onAfterAttack;
+            c->ai.onDeathTimeout = Creeper_onDeathTimeout;
             break;
         case CREATURE_PIG:
             c->e.heightOffset = 1.72f;
             Entity_setSize(&c->e, 1.4f, 1.2f);
-            Ai_init(&c->ai, false, 0);
+            Ai_init(&c->ai, false, 0, 0.7f, 6);
             break;
     }
 

@@ -25,7 +25,7 @@ static void GameOverScreen_render(Screen* self, int xm, int ym) {
     snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", s->score);
     Screen_drawCenteredString(self, scoreMsg, self->width / 2, 100, 0xFFFFFFu);
 
-    Screen_renderButtons(self, s->buttons, 1, xm, ym);
+    Screen_renderButtons(self, s->buttons, 2, xm, ym);
 }
 
 static void GameOverScreen_mouseClicked(Screen* self, int x, int y, int button) {
@@ -33,12 +33,16 @@ static void GameOverScreen_mouseClicked(Screen* self, int x, int y, int button) 
     if (button != 0) return;
 
     // real source's click handler also checks a button id 0, but no button
-    // using id 0 is ever added here, only the id 1 "Generate new level..."
-    // one, so that branch is unreachable and left out
-    int id = Screen_buttonClickedAt(s->buttons, 1, x, y);
+    // using id 0 is ever added here, only ids 1 "Generate new level.." and 2
+    // "Load level..", so that branch is unreachable and left out
+    int id = Screen_buttonClickedAt(s->buttons, 2, x, y);
     if (id == 1) {
         GenerateNewLevelScreen_open(self);
     }
+    // id 2 (Load) is unwired: gated on a login session this port never has
+    // (see GameOverScreen_init), so it's permanently disabled and never
+    // actually reaches this handler; the real screen it'd open also talks
+    // to a networked save/load backend that's permanently dead regardless
 }
 
 void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, int score) {
@@ -54,4 +58,12 @@ void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, i
     s->score = score;
 
     Button_init(&s->buttons[0], 1, width / 2 - 100, height / 4 + 72, 200, 20, "Generate new level...");
+
+    // c0.25_05_st: new second button, matching the real source's own layout
+    // exactly. Greyed out unless a login session object is present; this
+    // port never has one (fully offline build), so it stays permanently
+    // disabled here, same reasoning as the pause screen's own Save/Load
+    // buttons, see pause_screen.c
+    Button_init(&s->buttons[1], 2, width / 2 - 100, height / 4 + 96, 200, 20, "Load level..");
+    s->buttons[1].enabled = false;
 }

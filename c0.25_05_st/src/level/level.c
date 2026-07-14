@@ -645,8 +645,26 @@ void Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId) {
     pushTickEntry(level, e);
 }
 
+extern int Minecraft_countMobs(void);
+
 void Level_onTick(Level* level) {
     level->tickCount++;
+
+    // periodic mob top up, matches Level.tick()'s own new spawn attempt:
+    // volume/64/64/64 (chained integer division, not a single /262144) is
+    // both the odds out of 100 of even trying this tick, and, times 20, the
+    // population cap checked against the current mob count, player included
+    // since Player extends Mob in the real source, see Minecraft_countMobs.
+    // Only actually spawns using this same tick's roll of attempts as the
+    // site search count, reusing LevelGen_maybeSpawnMobs, the player is the
+    // reference point for the 16 block exclusion zone this time, not the
+    // level's own spawn point
+    int spawnAttempts = level->width * level->height * level->depth / 64 / 64 / 64;
+    if (rand() % 100 < spawnAttempts) {
+        if (Minecraft_countMobs() < spawnAttempts * 20) {
+            LevelGen_maybeSpawnMobs(level, spawnAttempts, level->player, false);
+        }
+    }
 
     if (level->tickCount % 5 == 0 && level->tickListSize > 0) {
         int n = level->tickListSize;
@@ -695,4 +713,47 @@ void Level_onTick(Level* level) {
         const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
         if (t && t->onTick) t->onTick(t, level, x, y, z);
     }
+}
+
+// implemented for Creeper's own death explosion, matches Minecraft's own
+// blockMap.getEntities(source,...) plus per entity distance based hurt call.
+// This port has no unified cross type entity list, so the mob/player scan
+// lives in minecraft.c instead
+extern void Minecraft_hurtEntitiesInExplosion(Level* level, Entity* source, float x, float y, float z, float radius);
+
+static inline float explodeRandf(void) { return (float)rand() / (float)RAND_MAX; }
+
+// matches Level.explode(Entity,x,y,z,radius) exactly: clears every block
+// whose own center point falls within radius of (x,y,z), each destroyed
+// block also getting a reduced chance of dropping its usual items (30% per
+// block here, approximating the real source's own per attempt reroll since
+// this port's own Tile_dropItems already bakes its drop count/chance in as
+// a single unit rather than exposing separate attempts), then hands off to
+// Minecraft_hurtEntitiesInExplosion for the entity damage pass
+void Level_explode(Level* level, Entity* source, float x, float y, float z, float radius) {
+    int x0 = (int)(x - radius - 1.0f);
+    int x1 = (int)(x + radius + 1.0f);
+    int y0 = (int)(y - radius - 1.0f);
+    int y1 = (int)(y + radius + 1.0f);
+    int z0 = (int)(z - radius - 1.0f);
+    int z1 = (int)(z + radius + 1.0f);
+
+    for (int bx = x0; bx < x1; ++bx) {
+        for (int by = y1 - 1; by >= y0; --by) {
+            for (int bz = z0; bz < z1; ++bz) {
+                if (bx < 0 || by < 0 || bz < 0 || bx >= level->width || by >= level->depth || bz >= level->height) continue;
+                float dx = (float)bx + 0.5f - x;
+                float dy = (float)by + 0.5f - y;
+                float dz = (float)bz + 0.5f - z;
+                if (!(dx * dx + dy * dy + dz * dz < radius * radius)) continue;
+                int id = Level_getTile(level, bx, by, bz);
+                if (id <= 0) continue;
+                const Tile* t = (id < 256) ? gTiles[id] : NULL;
+                if (t && explodeRandf() < 0.3f) Tile_dropItems(t, level, bx, by, bz);
+                level_setTile(level, bx, by, bz, 0);
+            }
+        }
+    }
+
+    Minecraft_hurtEntitiesInExplosion(level, source, x, y, z, radius);
 }

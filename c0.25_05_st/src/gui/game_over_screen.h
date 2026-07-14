@@ -1,6 +1,7 @@
 // game_over_screen.h: shown once the player's health reaches 0 (permadeath).
-// Only exit is "Generate new level...", matching the real source having no
-// respawn option in this version (c0.24_st_03)
+// No respawn option in this version, matching the real source; c0.25_05_st
+// adds a second "Load level.." button, gated on a login session concept
+// this port doesn't have, see game_over_screen.c
 
 #ifndef GAME_OVER_SCREEN_H
 #define GAME_OVER_SCREEN_H
@@ -10,7 +11,7 @@
 
 typedef struct {
     Screen screen;
-    Button buttons[1];
+    Button buttons[2];
     int score;
 } GameOverScreen;
 

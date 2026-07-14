@@ -153,4 +153,12 @@ bool Level_clip(const Level* level, float x1, float y1, float z1, float x2, floa
 // matching the real source's own check space first, place second order
 bool Level_maybeGrowTree(Level* level, int x, int y, int z);
 
+// matches Level.explode(Entity,x,y,z,radius): clears every block whose
+// center falls within radius of (x,y,z), each destroyed block also getting
+// a reduced chance of dropping its usual items, then damages every nearby
+// entity scaled by how close it is to the center. source is credited as
+// the attacker on any entity hurt (matches Creeper's own death explosion,
+// character/creature.c's Creeper_onDeathTimeout)
+void Level_explode(Level* level, Entity* source, float x, float y, float z, float radius);
+
 #endif  // LEVEL_H
