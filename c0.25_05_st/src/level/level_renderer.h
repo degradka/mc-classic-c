@@ -52,7 +52,10 @@ void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
 void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
-void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, struct HitResult* h, int mode, int tileId);
+// digFraction is the current mining progress (0..1, see updateMining in
+// minecraft.c), only meaningful/consumed when mode==0 - draws the real
+// source's 10 frame crack overlay on top of the pulsing destroy highlight
+void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, struct HitResult* h, int mode, int tileId, float digFraction);
 void LevelRenderer_renderHitOutline(struct HitResult* h, int mode);
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);

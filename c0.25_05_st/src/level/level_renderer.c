@@ -215,7 +215,10 @@ void LevelRenderer_renderClouds(LevelRenderer* r, float partialTicks) {
     glDisable(GL_TEXTURE_2D);
 
     Tessellator_begin(&TESSELLATOR);
-    Tessellator_color(&TESSELLATOR, 0.5f, 0.8f, 1.0f);
+    // matches real Level.skyColor (0x99CCFF = 0.6,0.8,1.0), never overwritten
+    // anywhere in this version's own source, same fix as c0.24_st_03's
+    // identical bug (was still the old pre-Survival-Test 0.5/0.8/1.0)
+    Tessellator_color(&TESSELLATOR, 0.6f, 0.8f, 1.0f);
     const float y2 = (float)(r->level->depth + 10);
     for (int xx = -2048; xx < r->level->width + 2048; xx += 512) {
         for (int zz = -2048; zz < r->level->height + 2048; zz += 512) {
@@ -335,12 +338,76 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     return limit;
 }
 
+// c0.24_st_03: real source's mining crack overlay (a/g.java's own a(HitResult,int,int),
+// only drawn while this.h>0). Draws a generic full cube (always Rock/Stone's
+// own face shape in the real source, com.mojang.minecraft.level.tile.a.h,
+// regardless of the actual targeted tile's real shape) scaled up 1.01x
+// around its center to avoid z fighting with the real block face, textured
+// with one of 10 crack frames at terrain.png atlas cells 240-249 (row 15)
+// chosen by mining progress, using the same multiplicative GL_DST_COLOR/
+// GL_SRC_COLOR blend real source uses so it darkens rather than tints
+static void renderDigOverlay(int terrainTex, int x, int y, int z, float fraction) {
+    int frame = 240 + (int)(fraction * 10.0f);
+    if (frame > 249) frame = 249;
+    int xt = (frame % 16) * 16;
+    int yt = (frame / 16) * 16;
+    float u0 = xt / 256.0f;
+    float u1 = (xt + 15.99f) / 256.0f;
+    float v0 = yt / 256.0f;
+    float v1 = (yt + 15.99f) / 256.0f;
+
+    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, terrainTex);
+    glColor4f(1.f, 1.f, 1.f, 0.5f);
+
+    glPushMatrix();
+    glTranslatef(x + 0.5f, y + 0.5f, z + 0.5f);
+    glScalef(1.01f, 1.01f, 1.01f);
+    glTranslatef(-(x + 0.5f), -(y + 0.5f), -(z + 0.5f));
+
+    glDepthMask(GL_FALSE);
+    float x0 = (float)x, x1 = (float)x + 1.0f;
+    float y0 = (float)y, y1 = (float)y + 1.0f;
+    float z0 = (float)z, z1 = (float)z + 1.0f;
+    Tessellator_begin(&TESSELLATOR);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u0, v0);
+    Tessellator_end(&TESSELLATOR);
+    glDepthMask(GL_TRUE);
+
+    glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
+}
+
 /*
    mode 0 is additive pulsing, only the cube faces facing the player
    mode 1 is alpha blended, a textured preview block on the adjacent cell,
    rendered in both layers (0 and 1)
 */
-void LevelRenderer_renderHit(LevelRenderer* r, const Player* player, HitResult* h, int mode, int tileId) {
+void LevelRenderer_renderHit(LevelRenderer* r, const Player* player, HitResult* h, int mode, int tileId, float digFraction) {
     if (!h) return;
 
     if (mode == 0) {
@@ -355,6 +422,10 @@ void LevelRenderer_renderHit(LevelRenderer* r, const Player* player, HitResult* 
             Face_render(&TESSELLATOR, h->x, h->y, h->z, face, player->e.x, player->e.y, player->e.z);
         }
         Tessellator_end(&TESSELLATOR);
+
+        if (digFraction > 0.0f) {
+            renderDigOverlay(r->terrainTex, h->x, h->y, h->z, digFraction);
+        }
 
         glDisable(GL_BLEND);
         return;

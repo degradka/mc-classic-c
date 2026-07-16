@@ -181,6 +181,7 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
     t->tickDelay = 0;
     t->particleGravity = 1.0f;
+    t->hardnessTicks = 20; // overridden per tile below, matches real source's own explicit hardness set at every registration
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
@@ -612,6 +613,18 @@ void Tile_registerAll(void) {
     TILE_WOOD.soundType       = SOUND_WOOD;
     TILE_BEDROCK.soundType    = SOUND_STONE;
 
+    // c0.24_st_03: real per tile hardness (seconds*20, read directly from
+    // each tile's own constructor call), matching the real source's
+    // progressive mining: hold the crosshair on the same block for
+    // hardnessTicks+1 ticks before it actually breaks
+    TILE_ROCK.hardnessTicks       = 20;
+    TILE_GRASS.hardnessTicks      = 12;
+    TILE_DIRT.hardnessTicks       = 10;
+    TILE_STONEBRICK.hardnessTicks = 40;
+    TILE_WOOD.hardnessTicks       = 40;
+    TILE_BUSH.hardnessTicks       = 0; // instant, matches every plant/flower/mushroom
+    TILE_BEDROCK.hardnessTicks    = 2000;
+
     TILE_GRASS.onTick     = Grass_onTick;
     TILE_GRASS.getDropResource = Grass_getDropResource;
 
@@ -627,6 +640,11 @@ void Tile_registerAll(void) {
     registerTile(&TILE_CALM_WATER, 9, 14, NULL);
     registerTile(&TILE_LAVA,      10, 30, NULL);
     registerTile(&TILE_CALM_LAVA, 11, 30, NULL);
+
+    TILE_WATER.hardnessTicks      = 2000;
+    TILE_CALM_WATER.hardnessTicks = 2000;
+    TILE_LAVA.hardnessTicks       = 2000;
+    TILE_CALM_LAVA.hardnessTicks  = 2000;
 
     TILE_WATER.liquidType      = LIQUID_WATER;
     TILE_CALM_WATER.liquidType = LIQUID_WATER;
@@ -713,6 +731,14 @@ void Tile_registerAll(void) {
     registerTile(&TILE_LOG,        17, 20, Log_getTexture);
     registerTile(&TILE_LEAVES,     18, 22, NULL);
 
+    TILE_SAND.hardnessTicks     = 10;
+    TILE_GRAVEL.hardnessTicks   = 12;
+    TILE_GOLD_ORE.hardnessTicks = 60;
+    TILE_IRON_ORE.hardnessTicks = 60;
+    TILE_COAL_ORE.hardnessTicks = 60;
+    TILE_LOG.hardnessTicks      = 50;
+    TILE_LEAVES.hardnessTicks   = 4;
+
     TILE_SAND.onTick   = TILE_GRAVEL.onTick   = FallingTile_onTick;
     TILE_SAND.neighborChanged = TILE_GRAVEL.neighborChanged = FallingTile_neighborChanged;
 
@@ -746,6 +772,9 @@ void Tile_registerAll(void) {
     registerTile(&TILE_SPONGE, 19, 48, NULL);
     registerTile(&TILE_GLASS,  20, 49, NULL);
 
+    TILE_SPONGE.hardnessTicks = 12;
+    TILE_GLASS.hardnessTicks  = 6;
+
     TILE_SPONGE.onPlace   = Sponge_onPlace;
     TILE_SPONGE.onRemoved = Sponge_onRemoved;
     TILE_SPONGE.soundType = SOUND_CLOTH;
@@ -766,6 +795,7 @@ void Tile_registerAll(void) {
     for (int i = 0; i < 16; ++i) {
         registerTile(&TILE_CLOTH[i], 21 + i, 64 + i, NULL);
         TILE_CLOTH[i].soundType = SOUND_CLOTH;
+        TILE_CLOTH[i].hardnessTicks = 16;
     }
 
     // c0.0.20a_02: Dandelion/Rose/Mushrooms reuse Bush's tile class outright,
@@ -783,11 +813,13 @@ void Tile_registerAll(void) {
         plants[i]->render      = Bush_render;
         plants[i]->renderItem  = Bush_renderItem;
         plants[i]->onTick      = Bush_onTick;
+        plants[i]->hardnessTicks = 0; // instant, matches Bush
     }
 
     // c0.0.20a_02: Gold Block, plain tile, no special behavior
     registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
     TILE_GOLD_BLOCK.soundType = SOUND_METAL;
+    TILE_GOLD_BLOCK.hardnessTicks = 60;
 }
 
 /* untextured single face helper for hit highlight */

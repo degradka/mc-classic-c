@@ -9,9 +9,13 @@
 #include "button.h"
 #include "../options.h"
 
+// c0.25_05_st: music/sound/invertMouse/showFPS/viewDistance/bobView/anaglyph3d,
+// laid out as a 2 column grid matching c/e.java's own layout exactly
+#define OPTIONS_TOGGLE_COUNT 7
+
 typedef struct {
     Screen screen;
-    Button buttons[7]; // 5 toggles + "Controls..." + "Done"
+    Button buttons[OPTIONS_TOGGLE_COUNT + 2]; // toggles + "Controls..." + "Done"
     Screen* previousScreen;
     Options* options;
 } OptionsScreen;
