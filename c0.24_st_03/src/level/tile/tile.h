@@ -60,6 +60,17 @@ struct Tile {
     // base). 1.0 for every tile except Leaves, which falls at 0.4x.
     float particleGravity;
 
+    // c0.24_st_03: how many game ticks of continuous mining this tile takes
+    // to break, matching the real source's Tile.h() (itself set at
+    // construction from a hardness-in-seconds float times 20). The player
+    // must keep the crosshair on the same block for hardnessTicks+1 ticks
+    // before it actually breaks; looking away resets progress to 0. 0 means
+    // instant break (every plant/sapling/flower/mushroom). This was
+    // previously missing entirely, breaking every block on the very first
+    // tick regardless of type, an unnoticed gap until direct comparison
+    // against the real source's own SurvivalGameMode tracker
+    int hardnessTicks;
+
     // Render shape, in block local coordinates. Default is a full cube
     // (0,0,0) to (1,1,1). Liquids crop the top so the surface sits slightly
     // below a full block.

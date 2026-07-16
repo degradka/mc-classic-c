@@ -91,6 +91,18 @@ static int prevB    = GLFW_RELEASE; // c0.24_st_03: places a Sign, singleplayer 
 static int gTickCount = 0;
 static int gLastMineTick = 0;
 
+// c0.24_st_03: real progressive mining tracker (matches SurvivalGameMode's
+// own c/d/e=target x/y/z, f=progress ticks, g=captured hardness, h=short
+// post-break cooldown). gMineFraction is the partial-tick-blended 0..1
+// progress used to drive the crack overlay texture, recomputed every frame;
+// everything else only advances once per elapsed real game tick so it's
+// frame rate independent
+static int gMineX = -1, gMineY = -1, gMineZ = -1;
+static int gMineProgress = 0;
+static int gMineLastTick = 0;
+static int gMineCooldownUntil = 0;
+static float gMineFraction = 0.0f;
+
 static int gEditMode = 0;              // 0=destroy, 1=place
 
 // c0.0.23a_01: remappable keybindings and toggles, persisted to options.txt.
@@ -571,6 +583,12 @@ static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
 // (clouds render fully unlit).
 static void setupFog(int type) {
     if (type == -1) {
+        // every other branch below explicitly enables GL_FOG; this one
+        // skipped it and relied on it still being enabled from the earlier
+        // terrain pass, which is fragile (order dependent, and drawGui's own
+        // glDisable(GL_FOG) or any future reordering would silently leave
+        // clouds/sky completely unfogged)
+        glEnable(GL_FOG);
         glFogi(GL_FOG_MODE, GL_LINEAR);
         glFogf(GL_FOG_START, 0.0f);
         glFogf(GL_FOG_END, LevelRenderer_getFogEndDistance(&levelRenderer));
@@ -1409,6 +1427,8 @@ static void handleGameplayKeys(GLFWwindow* w) {
 }
 
 static void mineOrPlace(void);
+static void resetMining(void);
+static void updateMining(void);
 
 static void handleBlockClicks(GLFWwindow* w) {
     int left  = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
@@ -1446,18 +1466,121 @@ static void handleBlockClicks(GLFWwindow* w) {
     }
     prevMiddle = middle;
 
-    // left click performs the current mode: on a fresh press immediately,
-    // then c0.0.14a_08 auto-repeats every ticksPerSecond/4 ticks (~5 ticks at
-    // 20 TPS) for as long as the button stays held, instead of requiring
-    // discrete repeated clicks
-    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
+    // c0.24_st_03: destroy mode on a tile is now real progressive mining
+    // (see updateMining), checked every frame while held so progress
+    // accumulates smoothly; entity attacks and placement keep the
+    // pre-existing press-then-quarter-second-repeat cadence unchanged
+    if (left == GLFW_PRESS && !isHitNull && hitResult.type == HITRESULT_TILE && gEditMode == 0) {
+        updateMining();
+    } else {
+        resetMining();
+    }
+
+    bool wantsPressAction = !isHitNull && (hitResult.type == HITRESULT_ENTITY || gEditMode == 1);
+    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && wantsPressAction) {
         mineOrPlace();
         gLastMineTick = gTickCount;
-    } else if (left == GLFW_PRESS && !isHitNull && (gTickCount - gLastMineTick) >= timer.ticksPerSecond / 4.0f) {
+    } else if (left == GLFW_PRESS && wantsPressAction && (gTickCount - gLastMineTick) >= timer.ticksPerSecond / 4.0f) {
         mineOrPlace();
         gLastMineTick = gTickCount;
     }
     prevLeft = left;
+}
+
+// c0.24_st_03: shared block-removal steps (sound, break particles, survival
+// drops, netSetTile), used by both an instant Creative-style break (not
+// reachable from gameplay anymore, kept only in case a future non-hardness
+// tile needs it) and the real progressive mining tracker below
+static void destroyTargetTile(int x, int y, int z) {
+    int id = Level_getTile(&level, x, y, z);
+    // c0.0.20a_02: Bedrock can't be broken unless userType>=100 (an
+    // operator flag from the Login reply). Stays 0 in singleplayer, so
+    // Bedrock is unbreakable there too, matching the real source exactly
+    if (id == TILE_BEDROCK.id && player.userType < 100) return;
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    // c0.0.19a_04: the player's own break/place always uses the
+    // ungated Level_netSetTile, matching the real source calling
+    // netSetTile directly here, not the gated setTile. Only derivative
+    // world-simulation reactions (grass spread, liquid flow, falling
+    // blocks, sponge) route through the gated level_setTile/Level_swap
+    bool changed = Level_netSetTile(&level, x, y, z, 0);
+    if (t && changed) {
+        // type field is the currently selected tile even on destroy,
+        // matching the real source; the server ignores it for mode 0
+        if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 0, Inventory_getSelected(&player.inventory));
+        // c0.0.23a_01: block break sound, same "step." family as
+        // footsteps, matching the real source's own volume/pitch formula
+        // exactly ((volume+1)/2, pitch*0.8, both already jittered)
+        if (t->soundType != SOUND_NONE) {
+            char name[32];
+            snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
+            Sound_play(name, (SoundType_getVolume(t->soundType) + 1.0f) / 2.0f,
+                       SoundType_getPitch(t->soundType) * 0.8f,
+                       x + 0.5f, y + 0.5f, z + 0.5f);
+        }
+        Tile_onDestroy(t, &level, x, y, z, &particleEngine);
+        // c0.24_st_03: survival tile drops, matching Tile.e()/Tile.a()'s
+        // own count/resource hooks (task #63 fills in the per-tile
+        // overrides; every tile drops one of itself for now). Not gated
+        // on gConnected: the real source drops these client side
+        // regardless, same as the block-break particles just above
+        if (!gConnected) Tile_dropItems(t, &level, x, y, z);
+    }
+}
+
+// c0.24_st_03: matches SurvivalGameMode's own a() - abandons mining progress
+// the instant the target changes, the mouse is released, or the player
+// switches to place mode. Real source calls this from several such edges;
+// this port just calls it whenever handleBlockClicks sees we're not
+// actively holding a tile-destroy click this frame
+static void resetMining(void) {
+    gMineX = gMineY = gMineZ = -1;
+    gMineProgress = 0;
+    gMineFraction = 0.0f;
+}
+
+// c0.24_st_03: matches SurvivalGameMode's own a(x,y,z,face)/a(float) pair -
+// real hardness gated progressive mining, previously entirely missing (every
+// block broke on the very first tick regardless of type). Looking away
+// resets progress; holding the same block accumulates one tick of progress
+// per elapsed real game tick (frame rate independent) until it exceeds the
+// tile's own hardnessTicks, then actually breaks it and starts a short 5
+// tick cooldown before the next block can be started, matching the real
+// source exactly
+static void updateMining(void) {
+    if (gTickCount < gMineCooldownUntil) {
+        gMineFraction = 0.0f;
+        return;
+    }
+
+    if (hitResult.x != gMineX || hitResult.y != gMineY || hitResult.z != gMineZ) {
+        gMineX = hitResult.x; gMineY = hitResult.y; gMineZ = hitResult.z;
+        gMineProgress = 0;
+        gMineLastTick = gTickCount;
+    }
+
+    int elapsed = gTickCount - gMineLastTick;
+    if (elapsed > 0) {
+        gMineProgress += elapsed;
+        gMineLastTick = gTickCount;
+    }
+
+    int id = Level_getTile(&level, gMineX, gMineY, gMineZ);
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    int hardness = t ? t->hardnessTicks : 0;
+
+    if (gMineProgress > hardness) {
+        destroyTargetTile(gMineX, gMineY, gMineZ);
+        gMineCooldownUntil = gTickCount + 5;
+        resetMining();
+        return;
+    }
+
+    // matches the real source's own partial-tick blend exactly:
+    // ((f + partialTicks - 1) / hardness)
+    gMineFraction = hardness > 0 ? ((float)gMineProgress + timer.partialTicks - 1.0f) / (float)hardness : 0.0f;
+    if (gMineFraction < 0.0f) gMineFraction = 0.0f;
+    if (gMineFraction > 1.0f) gMineFraction = 1.0f;
 }
 
 static void mineOrPlace(void) {
@@ -1478,83 +1601,49 @@ static void mineOrPlace(void) {
         return;
     }
 
-    if (gEditMode == 0) {
-        // destroy
-        int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
-        // c0.0.20a_02: Bedrock can't be broken unless userType>=100 (an
-        // operator flag from the Login reply). Stays 0 in singleplayer, so
-        // Bedrock is unbreakable there too, matching the real source exactly
-        if (id == TILE_BEDROCK.id && player.userType < 100) return;
-        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-        // c0.0.19a_04: the player's own break/place always uses the
-        // ungated Level_netSetTile, matching the real source calling
-        // netSetTile directly here, not the gated setTile. Only derivative
-        // world-simulation reactions (grass spread, liquid flow, falling
-        // blocks, sponge) route through the gated level_setTile/Level_swap
-        bool changed = Level_netSetTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
-        if (t && changed) {
-            // type field is the currently selected tile even on destroy,
-            // matching the real source; the server ignores it for mode 0
-            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, Inventory_getSelected(&player.inventory));
-            // c0.0.23a_01: block break sound, same "step." family as
-            // footsteps, matching the real source's own volume/pitch formula
-            // exactly ((volume+1)/2, pitch*0.8, both already jittered)
-            if (t->soundType != SOUND_NONE) {
-                char name[32];
-                snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
-                Sound_play(name, (SoundType_getVolume(t->soundType) + 1.0f) / 2.0f,
-                           SoundType_getPitch(t->soundType) * 0.8f,
-                           hitResult.x + 0.5f, hitResult.y + 0.5f, hitResult.z + 0.5f);
-            }
-            Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
-            // c0.24_st_03: survival tile drops, matching Tile.e()/Tile.a()'s
-            // own count/resource hooks (task #63 fills in the per-tile
-            // overrides; every tile drops one of itself for now). Not gated
-            // on gConnected: the real source drops these client side
-            // regardless, same as the block-break particles just above
-            if (!gConnected) Tile_dropItems(t, &level, hitResult.x, hitResult.y, hitResult.z);
-        }
-    } else {
-        // c0.24_st_03: nothing selected (empty handed, or the selected
-        // stack just ran out) - can't place a -1 "tile"
-        int placeId = Inventory_getSelected(&player.inventory);
-        if (placeId < 0) return;
+    // c0.24_st_03: real progressive mining now owns tile-destroy entirely
+    // (see updateMining, called every frame from handleBlockClicks), so by
+    // the time mineOrPlace runs (only ever called for an entity hit, handled
+    // above, or gEditMode==1) it's always the place action below
+    // c0.24_st_03: nothing selected (empty handed, or the selected
+    // stack just ran out) - can't place a -1 "tile"
+    int placeId = Inventory_getSelected(&player.inventory);
+    if (placeId < 0) return;
 
-        // place on adjacent face
-        int nx=0, ny=0, nz=0;
-        switch (hitResult.f) {
-            case 0: ny = -1; break; // bottom
-            case 1: ny =  1; break; // top
-            case 2: nz = -1; break; // negative Z
-            case 3: nz =  1; break; // positive Z
-            case 4: nx = -1; break; // negative X
-            case 5: nx =  1; break; // positive X
-        }
-        int x = hitResult.x + nx;
-        int y = hitResult.y + ny;
-        int z = hitResult.z + nz;
+    // place on adjacent face
+    int nx=0, ny=0, nz=0;
+    switch (hitResult.f) {
+        case 0: ny = -1; break; // bottom
+        case 1: ny =  1; break; // top
+        case 2: nz = -1; break; // negative Z
+        case 3: nz =  1; break; // positive Z
+        case 4: nx = -1; break; // negative X
+        case 5: nx =  1; break; // positive X
+    }
+    int x = hitResult.x + nx;
+    int y = hitResult.y + ny;
+    int z = hitResult.z + nz;
 
-        // AABB collision check, disallow placing inside player, mobs, or
-        // connected network players. Matches Level.isFree(AABB), which walks
-        // the real source's unified entities list. This port keeps
-        // mobs[]/netPlayers[] as separate arrays instead, so both need
-        // checking here to get the same result
-        AABB aabb = Level_getTilePickAABB(&level, x, y, z);
-        if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
-            bool blocked = false;
-            for (int i = 0; i < mobCount; ++i) {
-                if (AABB_intersects(&mobs[i].e.boundingBox, &aabb)) { blocked = true; break; }
-            }
-            for (int i = 0; !blocked && i < netPlayerCount; ++i) {
-                if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
-            }
-            if (!blocked) {
-                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, placeId);
-                Level_netSetTile(&level, x, y, z, placeId);
-                // c0.24_st_03: placing spends one of the selected stack,
-                // matches Inventory_consume (player/d.java's own c(int))
-                if (!gConnected) Inventory_consume(&player.inventory, placeId);
-            }
+    // AABB collision check, disallow placing inside player, mobs, or
+    // connected network players. Matches Level.isFree(AABB), which walks
+    // the real source's unified entities list. This port keeps
+    // mobs[]/netPlayers[] as separate arrays instead, so both need
+    // checking here to get the same result
+    AABB aabb = Level_getTilePickAABB(&level, x, y, z);
+    if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
+        bool blocked = false;
+        for (int i = 0; i < mobCount; ++i) {
+            if (AABB_intersects(&mobs[i].e.boundingBox, &aabb)) { blocked = true; break; }
+        }
+        for (int i = 0; !blocked && i < netPlayerCount; ++i) {
+            if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
+        }
+        if (!blocked) {
+            if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, placeId);
+            Level_netSetTile(&level, x, y, z, placeId);
+            // c0.24_st_03: placing spends one of the selected stack,
+            // matches Inventory_consume (player/d.java's own c(int))
+            if (!gConnected) Inventory_consume(&player.inventory, placeId);
         }
     }
 }
@@ -1652,6 +1741,16 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         glfwSetCursorPos(window, cx, cy);
     }
 
+    // matches the real source: glClearColor is recomputed every frame from
+    // the current fog color, not set once at init and left alone. This was
+    // still the one-time init call's stale hardcoded 0.5/0.8/1.0 (the old
+    // pre-Survival-Test sky tint), so any empty space (world edge, a gap
+    // between blocks, geometry beyond the tiny draw distance's chunk
+    // radius) always showed that fixed blue instead of matching the actual
+    // fog color - most visible as a persistent unfogged blue sliver right at
+    // the horizon on the TINY view distance setting, since fog there is
+    // otherwise supposed to fully hide it
+    glClearColor(fogColorDaylight[0], fogColorDaylight[1], fogColorDaylight[2], 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glEnable(GL_MULTISAMPLE);
@@ -1728,7 +1827,11 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
+        // digFraction 0 here: this pass runs before the translucent water
+        // layer and gets redrawn again below after it, so the crack overlay
+        // (a multiplicative blend, unlike the additive wireframe pulse above
+        // it) only needs to actually draw once, not darken twice
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory), 0.0f);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
@@ -1755,7 +1858,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
+        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory), gMineFraction);
         LevelRenderer_renderHitOutline(&hitResult, gEditMode);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
