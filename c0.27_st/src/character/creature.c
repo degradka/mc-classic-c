@@ -265,12 +265,15 @@ static float bobStrengthForKind(CreatureKind kind) {
 // c0.27_st: matches HumanoidMob's own armor overlay pass exactly, binding
 // /armor/plate.png, copying the just-posed base model's own head/rightArm/
 // leftArm rotation onto the shared armor model (body never rotates), and
-// rendering whichever parts showHelmet/showArmor enable. Wrapped in
-// GL_ALPHA_TEST so the parts of plate.png not covered by armor (transparent)
-// don't draw as solid black. GL_CULL_FACE toggling is intentionally omitted
-// here, per the standing project invariant that it is never enabled anywhere
-// in this port; real source's own enable/disable pair around this pass would
-// be a no-op reproduction of that same invariant anyway
+// rendering whichever parts showHelmet/showArmor enable. GL_ALPHA_TEST is
+// left alone here (not toggled at all): this codebase's own standing
+// invariant is that alpha test stays enabled globally for the whole
+// program, set up once at init, so the parts of plate.png not covered by
+// armor (transparent) already draw correctly without touching it. GL_CULL_FACE
+// toggling is intentionally omitted too, per the standing project invariant
+// that it is never enabled anywhere in this port; real source's own
+// enable/disable pairs around this pass would be a no-op reproduction of
+// those same invariants anyway
 static void renderArmorOverlay(bool showHelmet, bool showArmor,
                                float headXRot, float headYRot,
                                float rightArmXRot, float rightArmZRot,
@@ -283,12 +286,10 @@ static void renderArmorOverlay(bool showHelmet, bool showArmor,
     if (!armorInit) { HumanoidArmorModel_init(&sArmor); armorInit = true; }
 
     glBindTexture(GL_TEXTURE_2D, texArmor);
-    glEnable(GL_ALPHA_TEST);
     HumanoidArmorModel_render(&sArmor, showHelmet, showArmor,
                               headXRot, headYRot,
                               rightArmXRot, rightArmZRot,
                               leftArmXRot, leftArmZRot);
-    glDisable(GL_ALPHA_TEST);
 }
 
 // binds this kind's own texture and renders its model, factored out of
