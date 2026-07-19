@@ -157,7 +157,7 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     float headPitch = headPitchO + (np->base.xRotation - headPitchO) * partialTicks;
     // head model rotation is relative to the body, which is rotated
     // separately below. Matches Mob.render's own "f7 -= f5" exactly (plain
-    // yRot-bodyYaw, no negation) - the negation this port had here was a
+    // yRot-bodyYaw, no negation). The negation this port had here was a
     // workaround for the missing 180-degree body flip below, not a real fix;
     // both corrected together now to match the real formula literally
     headYaw -= bodyYaw;
@@ -181,15 +181,16 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glTranslatef(0.0f, offY, 0.0f);
     // real source rotates by (180-bodyYaw+rotOffs), not bodyYaw directly
     // (Mob.render, inherited by NetworkPlayer via HumanoidMob; rotOffs is 0
-    // here) - was just bodyYaw, making other players visually face the
-    // opposite direction from their actual movement/facing
+    // here). This port's previous code used just bodyYaw, making other
+    // players visually face the opposite direction from their actual
+    // movement/facing
     glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
     // real source's Mob.render() only disables GL_ALPHA_TEST for allowAlpha
     // =false mobs (none exist here); the default (true) case disables
     // GL_CULL_FACE instead, which is never actually enabled anywhere in this
     // client anyway (a no-op). Alpha test must stay enabled (the ambient
-    // state set in init()) - harmless for char.png today since it has no
-    // alpha=0 regions, but was incorrect and would break any future skin
+    // state set in init()). This is harmless for char.png today since it has
+    // no alpha=0 regions, but was incorrect and would break any future skin
     // with real transparency
     glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04: "fixed mirroring"
     ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);

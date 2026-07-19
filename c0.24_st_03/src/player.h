@@ -31,7 +31,7 @@ typedef struct Player {
     int score;
     // c0.24_st_03: survival inventory, replaces the old Creative style fixed
     // gHotbar[]/gSelectedSlot pair. Starts empty, matching player/d.java's
-    // own constructor - filling it back up is what breaking tiles and
+    // own constructor. Filling it back up is what breaking tiles and
     // picking up the resulting Item entities is for
     Inventory inventory;
 } Player;

@@ -216,10 +216,10 @@ void LevelRenderer_renderClouds(LevelRenderer* r, float partialTicks) {
 
     Tessellator_begin(&TESSELLATOR);
     // c0.24_st_03: real Level.skyColor, a new field this version, defaults
-    // to 0x99CCFF (0.6, 0.8, 1.0) - was still the pre-Survival-Test hardcoded
-    // 0.5/0.8/1.0 (~0x7FCCFF) here, unnoticed since it's a subtle difference
-    // and this field is never actually overwritten anywhere else in this
-    // version's own source, so a plain constant update is faithful
+    // to 0x99CCFF (0.6, 0.8, 1.0), but this was still the pre-Survival-Test
+    // hardcoded 0.5/0.8/1.0 (~0x7FCCFF) here, unnoticed since it's a subtle
+    // difference and this field is never actually overwritten anywhere else
+    // in this version's own source, so a plain constant update is faithful
     Tessellator_color(&TESSELLATOR, 0.6f, 0.8f, 1.0f);
     const float y2 = (float)(r->level->depth + 10);
     for (int xx = -2048; xx < r->level->width + 2048; xx += 512) {
@@ -343,8 +343,8 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
 // c0.24_st_03: real source's mining crack overlay (a/g.java's own a(HitResult,int,int),
 // only drawn while this.h>0). Draws a generic full cube (always Rock/Stone's
 // own face shape in the real source, com.mojang.minecraft.level.tile.a.h,
-// regardless of the actual targeted tile's real shape - a half slab still
-// gets a full cube crack overlay here, matching real source exactly)
+// regardless of the actual targeted tile's real shape, so a half slab still
+// gets a full cube crack overlay here, matching the real source exactly)
 // scaled up 1.01x around its center to avoid z fighting with the real block
 // face, textured with one of 10 crack frames at terrain.png atlas cells
 // 240-249 (row 15) chosen by mining progress, using the same multiplicative

@@ -57,7 +57,7 @@ void PauseScreen_init(PauseScreen* ps, Font* font, int width, int height, Option
     Button_init(&ps->buttons[3], 3, width / 2 - 100, height / 4 + 72,  200, 20, "Load level..");
     Button_init(&ps->buttons[4], 4, width / 2 - 100, height / 4 + 120, 200, 20, "Back to game");
 
-    // c0.0.16a_02 greys these out unless a login session exists. Our desktop
+    // c0.0.16a_02 greys these out unless a login session exists. This desktop
     // build never has the applet supplied session the real client checks
     // for, so they stay permanently disabled here, on top of already being
     // unwired to a dead backend

@@ -9,8 +9,8 @@
 
 static Tessellator sTess;
 
-// c0.24_st_03: hardcoded, not user-editable in this build - confirmed no
-// text-entry path anywhere references Sign at all
+// c0.24_st_03: hardcoded and not user-editable in this build, confirmed by
+// the absence of any text-entry path that references Sign at all
 static const char* const SIGN_MESSAGES[4] = {
     "This is a test",
     "of the signs.",
@@ -27,8 +27,9 @@ void Sign_init(Sign* s, Level* level, float x, float y, float z, float yaw) {
     s->rot = -yaw;
     e->heightOffset = 1.5f;
     // c0.24_st_03: gentle toss in the facing direction, matches the real
-    // source exactly - not placed exactly where clicked, it falls and
-    // settles like a dropped Item (same physics, smaller/fixed velocity)
+    // source exactly, so the sign is not placed exactly where clicked but
+    // instead falls and settles like a dropped Item (same physics, smaller
+    // fixed velocity)
     e->motionX = -sinf(s->rot * (float)M_PI / 180.0f) * 0.05f;
     e->motionY = 0.2f;
     e->motionZ = -cosf(s->rot * (float)M_PI / 180.0f) * 0.05f;

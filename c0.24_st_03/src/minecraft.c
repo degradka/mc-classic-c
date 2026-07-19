@@ -85,7 +85,7 @@ static int prevB    = GLFW_RELEASE; // c0.24_st_03: places a Sign, singleplayer 
 // every earlier version's Creative style always-full gHotbar[]/gSelectedSlot
 // pair. No more free block picking (the B key full inventory/select block
 // screen and middle click "pick block" are both gone, matching the real
-// source having no such thing here) - the only way to get a tile into a
+// source having no such thing here). The only way to get a tile into a
 // slot is to break one and walk over the Item it drops
 
 static int gTickCount = 0;
@@ -564,7 +564,7 @@ static void charCallback(GLFWwindow* w, unsigned int codepoint) {
 // before (subtracts instead of adds), matching the real source exactly.
 // c0.24_st_03: the c0.0.21a "Select block screen stays scrollable while
 // open" exception is gone along with that screen itself (see the removed
-// InventoryScreen note above) - this is back to a plain "only while no
+// InventoryScreen note above), so this is back to a plain "only while no
 // screen is up" gate
 static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     (void)w; (void)xoffset;
@@ -744,7 +744,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Options_init(&gOptions);
     Sound_init(gOptions.music, gOptions.sound);
 
-    // c0.24_st_03: no more pre-filled Creative hotbar - player.inventory
+    // c0.24_st_03: no more pre-filled Creative hotbar. player.inventory
     // (initialized in Player_init below) starts empty, matching the real
     // source's own player/d.java constructor
 
@@ -956,7 +956,7 @@ static void drawGui(float partialTicks) {
     }
 
     // c0.24_st_03: air bubbles, only while actually submerged (eye level tile
-    // is water) - matches c/l.java:90 exactly. Standing in shallow/waist deep
+    // is water), matches c/l.java:90 exactly. Standing in shallow/waist deep
     // water with isInWater() true but eyes above the surface must not show
     // or drain bubbles at all
     if (Entity_isUnderWater(&player.e)) {
@@ -1367,10 +1367,10 @@ static void handleGameplayKeys(GLFWwindow* w) {
 
     // c0.24_st_03: the "Build" key used to open the full inventory/select
     // block screen (c0.0.20a_02). That screen doesn't exist in the real
-    // source for this version at all - Survival Test has no Creative style
-    // free block picker - the exact same binding (`this.B.n.b`, "Build" is
-    // literally the field name in the real Options class) is repurposed to
-    // place a Sign instead, singleplayer only, matching the real source's
+    // source for this version at all, since Survival Test has no Creative
+    // style free block picker. The exact same binding (`this.B.n.b`, "Build"
+    // is literally the field name in the real Options class) is repurposed
+    // to place a Sign instead, singleplayer only, matching the real source's
     // own `this.y == null` gate exactly like the Tab/Arrow binding above
     int kB = glfwGetKey(w, gOptions.keys[OPT_KEY_BUILD].glfwKey);
     if (kB == GLFW_PRESS && prevB == GLFW_RELEASE && !gConnected && signCount < MAX_SIGNS) {
@@ -1379,7 +1379,7 @@ static void handleGameplayKeys(GLFWwindow* w) {
     prevB = kB;
 
     // c0.24_st_03: Tab shoots an arrow, singleplayer only (matches the real
-    // source's own `this.y == null` gate - `y` there is a connection
+    // source's own `this.y == null` gate. `y` there is a connection
     // reference, not the Controls screen its own declared type would
     // suggest; CFR picked the wrong same-named obfuscated class across two
     // different packages, confirmed via raw bytecode). No conflict with the
@@ -1454,7 +1454,7 @@ static void handleBlockClicks(GLFWwindow* w) {
 
     // c0.0.14a_08: middle click picks the block under the crosshair (grass
     // picks dirt instead of grass itself). c0.24_st_03: this no longer
-    // force-acquires the tile into a fixed Creative hotbar slot - it only
+    // force-acquires the tile into a fixed Creative hotbar slot. It only
     // switches to a slot that already holds that tile id (Inventory_findSlot,
     // matches the real source's own inventory.a(tileId) lookup, returning -1
     // and leaving selection untouched if the player doesn't have any)
@@ -1528,25 +1528,25 @@ static void destroyTargetTile(int x, int y, int z) {
     }
 }
 
-// c0.24_st_03: matches SurvivalGameMode's own a() - abandons mining progress
-// the instant the target changes, the mouse is released, or the player
-// switches to place mode. Real source calls this from several such edges;
-// this port just calls it whenever handleBlockClicks sees we're not
-// actively holding a tile-destroy click this frame
+// c0.24_st_03: matches SurvivalGameMode's own a(), which abandons mining
+// progress the instant the target changes, the mouse is released, or the
+// player switches to place mode. Real source calls this from several such
+// edges; this port just calls it whenever handleBlockClicks sees that a
+// tile-destroy click is not actively being held this frame
 static void resetMining(void) {
     gMineX = gMineY = gMineZ = -1;
     gMineProgress = 0;
     gMineFraction = 0.0f;
 }
 
-// c0.24_st_03: matches SurvivalGameMode's own a(x,y,z,face)/a(float) pair -
-// real hardness gated progressive mining, previously entirely missing (every
-// block broke on the very first tick regardless of type). Looking away
-// resets progress; holding the same block accumulates one tick of progress
-// per elapsed real game tick (frame rate independent) until it exceeds the
-// tile's own hardnessTicks, then actually breaks it and starts a short 5
-// tick cooldown before the next block can be started, matching the real
-// source exactly
+// c0.24_st_03: matches SurvivalGameMode's own a(x,y,z,face)/a(float) pair,
+// implementing real hardness gated progressive mining, previously entirely
+// missing (every block broke on the very first tick regardless of type).
+// Looking away resets progress; holding the same block accumulates one tick
+// of progress per elapsed real game tick (frame rate independent) until it
+// exceeds the tile's own hardnessTicks, then actually breaks it and starts
+// a short 5 tick cooldown before the next block can be started, matching
+// the real source exactly
 static void updateMining(void) {
     if (gTickCount < gMineCooldownUntil) {
         gMineFraction = 0.0f;
@@ -1587,7 +1587,7 @@ static void mineOrPlace(void) {
     // c0.24_st_03: matches the real source's own combined click handler,
     // which checks for an entity hit before any block mine/place logic and,
     // if found, always attacks instead, regardless of which mouse button
-    // (or here, which gEditMode) triggered it - flat 4 damage, no weapon
+    // (or here, which gEditMode) triggered it. Flat 4 damage, no weapon
     // variance, since no weapons exist yet (k.java: hitEntity.hurt(player,4)).
     // Real source's right click can also land this same attack when it hits
     // an entity (its own item-throw/place path only returns early on a
@@ -1606,7 +1606,8 @@ static void mineOrPlace(void) {
     // the time mineOrPlace runs (only ever called for an entity hit, handled
     // above, or gEditMode==1) it's always the place action below
     // c0.24_st_03: nothing selected (empty handed, or the selected
-    // stack just ran out) - can't place a -1 "tile"
+    // stack just ran out) means there is nothing to place, since a -1
+    // "tile" cannot be placed
     int placeId = Inventory_getSelected(&player.inventory);
     if (placeId < 0) return;
 
@@ -1747,9 +1748,9 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // pre-Survival-Test sky tint), so any empty space (world edge, a gap
     // between blocks, geometry beyond the tiny draw distance's chunk
     // radius) always showed that fixed blue instead of matching the actual
-    // fog color - most visible as a persistent unfogged blue sliver right at
-    // the horizon on the TINY view distance setting, since fog there is
-    // otherwise supposed to fully hide it
+    // fog color. This was most visible as a persistent unfogged blue sliver
+    // right at the horizon on the TINY view distance setting, since fog
+    // there is otherwise supposed to fully hide it
     glClearColor(fogColorDaylight[0], fogColorDaylight[1], fogColorDaylight[2], 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1933,8 +1934,8 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
 
                 // c0.24_st_03: the c0.0.21a Select block screen's Screen.e
                 // passthrough (walking/hotbar switching while a screen is
-                // open) is gone along with that screen - nothing in this
-                // version's real source ever sets that flag anymore
+                // open) is gone along with that screen, since nothing in
+                // this version's real source ever sets that flag anymore
             }
 
             int built = LevelRenderer_updateDirtyChunks(&levelRenderer, &player);

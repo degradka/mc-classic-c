@@ -83,7 +83,7 @@ GLuint loadTextureTiled(const char* path, int filterMode) {
 
     // gluBuild2DMipmaps builds the mip chain on the CPU, matching what Java
     // does, instead of glGenerateMipmap, which needs GL 3.0 or an FBO
-    // extension that may not be present under the GL 2.0 context we request.
+    // extension that may not be present under the requested GL 2.0 context.
     gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGBA, w, h, GL_RGBA, GL_UNSIGNED_BYTE, img);
 
     stbi_image_free(img);

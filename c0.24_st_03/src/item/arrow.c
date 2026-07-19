@@ -41,8 +41,8 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
     // below, which never touches them either. A freshly fired arrow's very
     // first rendered frame (before its own first tick) genuinely does
     // interpolate from near the origin to its real spawn position. Kept
-    // faithfully rather than "fixed" - plausibly reads as a brief motion
-    // streak in practice rather than a jarring glitch
+    // faithfully rather than "fixed", since it plausibly reads as a brief
+    // motion streak in practice rather than a jarring glitch
     e->prevX -= f7 * 0.2f;
     e->prevZ += f8 * 0.2f;
 

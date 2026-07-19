@@ -53,7 +53,7 @@ static SOUND_LOCK_T gLock;
 // c0.0.23a_01: this version has exactly one sound effect family ("step.",
 // covering both footsteps and block breaking) and one music base name
 // ("calm"). Variant counts match what's actually present under resources/
-// (sourced by hand, see PORTING_SCOPE.md), not a directory scan like the
+// (sourced by hand), not a directory scan like the
 // real client's resource manifest grouping, since there's nothing else to
 // group here yet
 #define STEP_VARIANT_COUNT  4

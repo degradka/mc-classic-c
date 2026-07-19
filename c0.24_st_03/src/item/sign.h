@@ -1,8 +1,9 @@
 // item/sign.h: a free floating Sign entity (c0.24_st_03), matches
-// item\Sign.java. Not a tile - tossed out in front of the player with a
-// gentle physics arc and settles wherever it lands, same falls-and-bounces
-// movement as Item. Text is 4 hardcoded lines, genuinely not editable in
-// this build (confirmed: no text-entry path anywhere references it)
+// item\Sign.java. Not a tile, but an entity tossed out in front of the
+// player with a gentle physics arc that settles wherever it lands, using
+// the same falls-and-bounces movement as Item. Text is 4 hardcoded lines,
+// genuinely not editable in this build (confirmed: no text-entry path
+// anywhere references it)
 
 #ifndef SIGN_H
 #define SIGN_H

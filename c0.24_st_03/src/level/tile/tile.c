@@ -432,7 +432,8 @@ static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
 }
 
 // c0.24_st_03: Bush is this codebase's own name for what the real source
-// calls Sapling (level\tile\i.java) - same tile, id 6, same class hierarchy
+// calls Sapling (level\tile\i.java), the same tile with id 6 and the same
+// class hierarchy
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     int below = Level_getTile(lvl, x, y-1, z);
     if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
@@ -483,9 +484,9 @@ static int Log_getDropResource(const Tile* self) { (void)self; return TILE_WOOD.
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 // c0.24_st_03: 1-in-6 chance of a single sapling, matches level\tile\e.java's
-// f()/g() exactly - returning a drop count of 0 the other 5/6 of the time
-// naturally yields "no drop" via Tile_dropItems' own count-driven loop, no
-// separate chance check needed on top of it
+// f()/g() exactly. Returning a drop count of 0 the other 5/6 of the time
+// naturally yields "no drop" via Tile_dropItems' own count-driven loop, so
+// no separate chance check is needed on top of it
 static int Leaves_getDropCount(const Tile* self)    { (void)self; return (rand() % 6 == 0) ? 1 : 0; }
 static int Leaves_getDropResource(const Tile* self) { (void)self; return TILE_BUSH.id; }
 

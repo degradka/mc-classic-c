@@ -201,7 +201,7 @@ void Minecraft_openMessageScreen(const char* title, const char* message) {
 }
 
 // matches LevelFinalize's handling: installs the freshly gunzipped level and
-// swaps in a fresh LevelRenderer sized for it, then leaves loading mode --
+// swaps in a fresh LevelRenderer sized for it, then leaves loading mode;
 // spawn position arrives separately as a SpawnPlayer packet
 void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     LevelRenderer_destroy(&levelRenderer);
@@ -217,8 +217,8 @@ void Minecraft_networkSetBlock(int x, int y, int z, int type) {
     level_setTile(&level, x, y, z, type);
 }
 
-// matches SpawnPlayer with id < 0: the server telling us where our own
-// player belongs, once the level transfer finishes
+// matches SpawnPlayer with id < 0: the server telling the client where its
+// own player belongs, once the level transfer finishes
 void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float pitch) {
     Entity_setPosition(&player.e, x, y, z);
     player.e.yRotation = yaw;
@@ -567,8 +567,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     // c0.0.13a_03 defaults to "anonymous" instead of "noname" when no
     // session is set, matching Minecraft.run()'s fallback level owner name.
     // c0.0.16a_02: the connect path takes an optional username argument,
-    // falling back to "guest" instead of "anonymous" if none is given --
-    // both fallbacks exist because we have no real login session either way
+    // falling back to "guest" instead of "anonymous" if none is given.
+    // Both fallbacks exist because there is no real login session either way
     const char* connectName = gConnectUsername[0] ? gConnectUsername : "guest";
     User_init(&user, gConnectHost[0] ? connectName : "anonymous");
 
@@ -589,13 +589,13 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     Timer_init(&timer, 20.0f);
 
-    // c0.0.16a_02: a host argument switches to multiplayer -- the boot level
-    // above stays only as a placeholder until LevelFinalize replaces it
+    // c0.0.16a_02: a host argument switches to multiplayer, and the boot
+    // level above stays only as a placeholder until LevelFinalize replaces it
     if (gConnectHost[0]) {
         // matches the real client's Player starting at (0,0,0): its Level is
         // null at this point in multiplayer, so Entity's constructor leaves
         // it at the origin and resetPos() no-ops rather than searching a
-        // (nonexistent) spawn point. Our placeholder level's own spawn point
+        // (nonexistent) spawn point. This placeholder level's own spawn point
         // has no relation to the real server's, so keeping it here would
         // just broadcast a more random wrong position, not a more correct one
         Entity_setPosition(&p->e, 0.0f, 0.0f, 0.0f);
@@ -926,8 +926,8 @@ static void handleGameplayKeys(GLFWwindow* w) {
     // c0.0.16a_02: T opens chat. Minecraft_setScreen releases the held
     // movement keys itself, same as any other screen opening.
     // c0.0.17a: T now does nothing at all without an active connection,
-    // instead of opening a chat screen whose Enter handler would crash --
-    // this is the real client's own fix for that singleplayer NPE dead end,
+    // instead of opening a chat screen whose Enter handler would crash.
+    // This is the real client's own fix for that singleplayer NPE dead end,
     // not a deviation this port needs to keep working around anymore
     int kT = glfwGetKey(w, GLFW_KEY_T);
     if (kT == GLFW_PRESS && prevT == GLFW_RELEASE && gConnected) {
@@ -995,7 +995,7 @@ static void mineOrPlace(void) {
         bool changed = level_setTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
         if (t && changed) {
             // type field is the currently selected tile even on destroy,
-            // matching the real source -- the server ignores it for mode 0
+            // matching the real source, since the server ignores it for mode 0
             if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, selectedTileId);
             Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
         }
@@ -1232,7 +1232,7 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
         for (int i = 0; i < timer.ticks; ++i) tick(p, window);
 
         // while connecting/downloading a level, skip world interaction and
-        // the normal render entirely -- the loading screen is drawn
+        // the normal render entirely; the loading screen is drawn
         // synchronously from inside tick()'s packet handling instead,
         // matching the real source's separate !isLoading render gate
         if (!gLoading) {
@@ -1305,14 +1305,15 @@ static void tick(Player* p, GLFWwindow* w) {
     }
 
     // matches f(): drains queued packets, then unconditionally broadcasts
-    // our own position every tick, no dirty check, no rate limiting -- even
-    // before our real SpawnPlayer(-1) arrives. The real client's own Player
-    // starts at exactly (0,0,0) in multiplayer (Entity's constructor always
-    // does setPos(0,0,0), and resetPos() is a no-op when level is null,
-    // which it is until LevelFinalize), so other clients genuinely do see a
-    // newly connecting player appear briefly at world origin before
-    // snapping to their real spawn point -- confirmed original quirk, not a
-    // bug, see the matching (0,0,0) reset in the connect branch of init()
+    // the local player's own position every tick, with no dirty check and no
+    // rate limiting, even before the real SpawnPlayer(-1) arrives. The real
+    // client's own Player starts at exactly (0,0,0) in multiplayer (Entity's
+    // constructor always does setPos(0,0,0), and resetPos() is a no-op when
+    // level is null, which it is until LevelFinalize), so other clients
+    // genuinely do see a newly connecting player appear briefly at world
+    // origin before snapping to their real spawn point. This is a confirmed
+    // original quirk, not a bug; see the matching (0,0,0) reset in the
+    // connect branch of init()
     if (gConnecting) {
         if (NetConnection_pollConnecting(&gConn)) {
             gConnecting = false;

@@ -1,7 +1,7 @@
 // item/arrow.h: fired projectile entity (c0.24_st_03), matches item/Arrow.java.
 // Singleplayer only in the real source (gated on no active connection, see
-// the comment at its spawn site in minecraft.c) - fully self contained,
-// does its own small step incremental collision rather than using
+// the comment at its spawn site in minecraft.c). It is fully self contained
+// and does its own small step incremental collision rather than using
 // Entity_move/Mob_travel like everything else
 
 #ifndef ARROW_H

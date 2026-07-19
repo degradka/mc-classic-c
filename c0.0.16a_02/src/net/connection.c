@@ -152,7 +152,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             break;
         }
         case PACKET_LEVEL_FINALIZE: {
-            // wire order is width, depth, height -- matches this codebase's
+            // wire order is width, depth, height, matching this codebase's
             // own (Notch-inherited) naming where depth is the vertical axis
             // and height is a horizontal one, confirmed against both the
             // client's Level.setData(w, depth, height, ...) and the
@@ -191,7 +191,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             if (sid >= 0) {
                 Minecraft_spawnNetworkPlayer(sid, name, sx, sy, sz, yaw, pitch);
             } else {
-                // id < 0: this is the server telling us where we spawn
+                // id < 0: this is the server telling the client where it spawns
                 Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, yaw, pitch);
             }
             break;
@@ -321,8 +321,8 @@ void NetConnection_sendTeleportSelf(NetConnection* c, float x, float y, float z,
     writeU16(c, (unsigned short)(short)(x * 32.0f));
     writeU16(c, (unsigned short)(short)(y * 32.0f));
     writeU16(c, (unsigned short)(short)(z * 32.0f));
-    // outgoing angles are NOT negated, unlike incoming decode (angleYaw above) --
-    // confirmed asymmetric in the real source, not a transcription slip
+    // outgoing angles are NOT negated, unlike incoming decode (angleYaw above).
+    // This asymmetry is confirmed in the real source, not a transcription slip
     writeByte(c, (unsigned char)((int)(yaw * 256.0f / 360.0f) & 0xFF));
     writeByte(c, (unsigned char)((int)(pitch * 256.0f / 360.0f) & 0xFF));
 }

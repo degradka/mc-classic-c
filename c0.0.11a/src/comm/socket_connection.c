@@ -65,7 +65,7 @@ int SocketConnection_tick(SocketConnection *c) {
         c->writeLen -= n;
     }
 
-    // If we have read data, synthesize a callback
+    // If read data is present, synthesize a callback
     if (c->readLen > 0 && c->listener.command) {
         unsigned char cmd = c->readBuffer[0];
         c->listener.command(c->listener_ctx, cmd, c->readLen, c->readBuffer, c->readLen);
