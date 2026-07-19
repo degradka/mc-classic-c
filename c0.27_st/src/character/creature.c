@@ -202,12 +202,10 @@ static void renderArmorOverlay(bool showHelmet, bool showArmor,
     if (!armorInit) { HumanoidArmorModel_init(&sArmor); armorInit = true; }
 
     glBindTexture(GL_TEXTURE_2D, texArmor);
-    glEnable(GL_ALPHA_TEST);
     HumanoidArmorModel_render(&sArmor, showHelmet, showArmor,
                               headXRot, headYRot,
                               rightArmXRot, rightArmZRot,
                               leftArmXRot, leftArmZRot);
-    glDisable(GL_ALPHA_TEST);
 }
 
 // binds the texture and draws the model, the hurt flash draws it a second time
