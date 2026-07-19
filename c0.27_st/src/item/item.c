@@ -169,5 +169,6 @@ void Item_render(const Item* it, float partialTicks) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
     glPopMatrix();
 }

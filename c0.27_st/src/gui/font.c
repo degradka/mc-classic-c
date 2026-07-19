@@ -98,6 +98,13 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
             i += 2;
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);
+            // &x colors get the anaglyph remap too, the base color doesn't
+            if (Textures_isAnaglyph()) {
+                float nr = (r * 0.30f + g * 0.59f + b * 0.11f);
+                float ng = (r * 0.30f + g * 0.70f);
+                float nb = (r * 0.30f + b * 0.70f);
+                r = nr; g = ng; b = nb;
+            }
             Tessellator_color(t, r,g,b);
         }
         unsigned char c = str[i];

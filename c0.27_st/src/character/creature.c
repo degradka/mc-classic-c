@@ -5,6 +5,8 @@
 #include "mob_skeleton_model.h"
 #include "mob_pig_model.h"
 #include "mob_creeper_model.h"
+#include "mob_spider_model.h"
+#include "humanoid_armor_model.h"
 #include "../renderer/textures.h"
 #include "../mob.h"
 #include "../player.h"
@@ -27,7 +29,7 @@ static float gaussianRand(void) {
 extern bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, float z, float yaw, float pitch, float speed);
 extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
 // spawns a leaf-textured particle used only by Creeper's death effect
-extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz);
+extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz, const Tile* tile);
 
 // a 1 in 30 chance per tick to fire, on top of everything
 // BasicAttackAI's own melee already does
@@ -74,23 +76,38 @@ static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
         float mx = dx / mag / mag;
         float my = dy / mag / mag;
         float mz = dz / mag / mag;
-        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz);
+        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz, &TILE_LEAVES);
     }
 }
 
-// the skeleton has no die of its own and scores like a zombie
+// JumpAttackAI: a normal jump without a target, with one it stops and pounces forward
+static void Spider_onJumpFromGround(Ai* ai, Entity* mob) {
+    if (!ai->attackTarget) {
+        mob->motionY = 0.42f;
+        return;
+    }
+    mob->motionX = 0.0f;
+    mob->motionZ = 0.0f;
+    Entity_moveRelative(mob, 0.0f, 1.0f, 0.6f);
+    mob->motionY = 0.5f;
+}
+
 static void Creature_onDeath(Entity* self, Entity* attacker) {
     Creature* c = (Creature*)self;
 
-    if (attacker) { // only a credited kill awards score
+    if (attacker) {
         // arrows credit whoever shot them and only the player keeps score
         if (attacker->killCredit) attacker = attacker->killCredit;
-        Player* killer = (Player*)attacker;
-        switch (c->kind) {
-            case CREATURE_ZOMBIE:
-            case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
-            case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
-            case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+        // only the player keeps score, the attacker can be another mob
+        if (attacker->aiClassTag == AI_CLASS_PLAYER) {
+            Player* killer = (Player*)attacker;
+            switch (c->kind) {
+                case CREATURE_ZOMBIE:   Player_awardKillScore(killer, 80);  break;
+                case CREATURE_SKELETON: Player_awardKillScore(killer, 120); break;
+                case CREATURE_CREEPER:  Player_awardKillScore(killer, 200); break;
+                case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+                case CREATURE_SPIDER:   Player_awardKillScore(killer, 105); break;
+            }
         }
     }
 
@@ -111,6 +128,10 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     c->e.aiClassTag = (int)kind;
     c->kind = kind;
 
+    // helmet and armor, 1 in 5 each
+    c->hasHelmet = (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) && frand01() < 0.2f;
+    c->hasArmor  = (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) && frand01() < 0.2f;
+
     switch (kind) {
         case CREATURE_ZOMBIE:
             c->e.heightOffset = 1.62f;
@@ -118,7 +139,7 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
             break;
         case CREATURE_SKELETON:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 30, 0.3f, 8);
+            Ai_init(&c->ai, true, 0, 0.3f, 8);
             c->ai.onAfterUpdate = Skeleton_onAfterUpdate;
             c->ai.onDeathTimeout = Skeleton_onDeathTimeout;
             break;
@@ -132,6 +153,12 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
             c->e.heightOffset = 1.72f;
             Entity_setSize(&c->e, 1.4f, 1.2f);
             Ai_init(&c->ai, false, 0, 0.7f, 6);
+            break;
+        case CREATURE_SPIDER:
+            c->e.heightOffset = 0.72f;
+            Entity_setSize(&c->e, 1.4f, 0.9f);
+            Ai_init(&c->ai, true, 0, 0.56f, 6);
+            c->ai.onJumpFromGround = Spider_onJumpFromGround;
             break;
     }
 
@@ -152,14 +179,42 @@ static const char* textureForKind(CreatureKind kind) {
         case CREATURE_SKELETON: return "resources/mob/skeleton.png";
         case CREATURE_CREEPER:  return "resources/mob/creeper.png";
         case CREATURE_PIG:      return "resources/mob/pig.png";
+        case CREATURE_SPIDER:   return "resources/mob/spider.png";
     }
     return "resources/mob/zombie.png";
 }
 
+// bobStrength, the spider has none
+static float bobStrengthForKind(CreatureKind kind) {
+    return (kind == CREATURE_SPIDER) ? 0.0f : 1.0f;
+}
+
+// the armor layer copies the head and arm rotation from the posed model, plate.png
+static void renderArmorOverlay(bool showHelmet, bool showArmor,
+                               float headXRot, float headYRot,
+                               float rightArmXRot, float rightArmZRot,
+                               float leftArmXRot, float leftArmZRot) {
+    if (!showHelmet && !showArmor) return;
+
+    static int texArmor = 0;
+    if (!texArmor) texArmor = loadTexture("resources/armor/plate.png", GL_NEAREST);
+    static HumanoidArmorModel sArmor; static bool armorInit = false;
+    if (!armorInit) { HumanoidArmorModel_init(&sArmor); armorInit = true; }
+
+    glBindTexture(GL_TEXTURE_2D, texArmor);
+    glEnable(GL_ALPHA_TEST);
+    HumanoidArmorModel_render(&sArmor, showHelmet, showArmor,
+                              headXRot, headYRot,
+                              rightArmXRot, rightArmZRot,
+                              leftArmXRot, leftArmZRot);
+    glDisable(GL_ALPHA_TEST);
+}
+
 // binds the texture and draws the model, the hurt flash draws it a second time
-static void renderModelForKind(CreatureKind kind, float animStep, float run, float age,
+static void renderModelForKind(CreatureKind kind, bool hasHelmet, bool hasArmor,
+                                float animStep, float run, float age,
                                 float headYaw, float headPitch, float attackSwing) {
-    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0;
+    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0, texSpider = 0;
     switch (kind) {
         case CREATURE_ZOMBIE:
             if (!texZombie) texZombie = loadTexture(textureForKind(kind), GL_NEAREST);
@@ -168,6 +223,10 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobZombieModel sModel; static bool init = false;
                 if (!init) { MobZombieModel_init(&sModel); init = true; }
                 MobZombieModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmorOverlay(hasHelmet, hasArmor,
+                                   sModel.head.xRot, sModel.head.yRot,
+                                   sModel.rightArm.xRot, sModel.rightArm.zRot,
+                                   sModel.leftArm.xRot, sModel.leftArm.zRot);
             }
             break;
         case CREATURE_SKELETON:
@@ -177,6 +236,10 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobSkeletonModel sModel; static bool init = false;
                 if (!init) { MobSkeletonModel_init(&sModel); init = true; }
                 MobSkeletonModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmorOverlay(hasHelmet, hasArmor,
+                                   sModel.head.xRot, sModel.head.yRot,
+                                   sModel.rightArm.xRot, sModel.rightArm.zRot,
+                                   sModel.leftArm.xRot, sModel.leftArm.zRot);
             }
             break;
         case CREATURE_CREEPER:
@@ -195,6 +258,15 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobPigModel sModel; static bool init = false;
                 if (!init) { MobPigModel_init(&sModel); init = true; }
                 MobPigModel_render(&sModel, animStep, run, age, headYaw, headPitch);
+            }
+            break;
+        case CREATURE_SPIDER:
+            if (!texSpider) texSpider = loadTexture(textureForKind(kind), GL_NEAREST);
+            glBindTexture(GL_TEXTURE_2D, texSpider);
+            {
+                static MobSpiderModel sModel; static bool init = false;
+                if (!init) { MobSpiderModel_init(&sModel); init = true; }
+                MobSpiderModel_render(&sModel, animStep, run, age, headYaw, headPitch);
             }
             break;
     }
@@ -264,13 +336,13 @@ void Creature_render(const Creature* c, float partialTicks) {
     glScalef(1.0f, -1.0f, 1.0f);
     const float scale = 0.0625f;
     glScalef(scale, scale, scale); // pixel-unit model boxes -> world block units
-    float bobY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
+    float bobY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run * bobStrengthForKind(c->kind)) - 23.0f;
     glTranslatef(0.0f, bobY, 0.0f);
     glRotatef(renderYaw, 0.0f, 1.0f, 0.0f);
     glScalef(-1.0f, 1.0f, 1.0f);
 
     glEnable(GL_TEXTURE_2D);
-    renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+    renderModelForKind(c->kind, c->hasHelmet, c->hasArmor, animStep, run, age, headYaw, headPitch, attackSwing);
     glDisable(GL_TEXTURE_2D);
 
     // for the last 10 invulnerable ticks after a hit it draws the pose again additively, a white flash
@@ -279,7 +351,7 @@ void Creature_render(const Creature* c, float partialTicks) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         glEnable(GL_TEXTURE_2D);
-        renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+        renderModelForKind(c->kind, c->hasHelmet, c->hasArmor, animStep, run, age, headYaw, headPitch, attackSwing);
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_BLEND);
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);

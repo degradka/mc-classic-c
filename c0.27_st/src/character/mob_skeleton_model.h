@@ -10,6 +10,8 @@ typedef struct {
     Cube body;
     Cube rightArm, leftArm;
     Cube rightLeg, leftLeg;
+    // the hair layer, same as the zombie's
+    Cube hair;
 } MobSkeletonModel;
 
 void MobSkeletonModel_init(MobSkeletonModel* m);

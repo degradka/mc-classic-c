@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 #define MOB_MAX_HEALTH            20
-#define MOB_INVULNERABLE_DURATION 30
+#define MOB_INVULNERABLE_DURATION 20
 #define MOB_HURT_DURATION         10
 #define MOB_ATTACK_DURATION       5
 #define MOB_TOTAL_AIR_SUPPLY      300
@@ -24,6 +24,8 @@ void Mob_causeFallDamage(Entity* e, float fallDistance);
 
 // attacker is NULL for falls, drowning and lava
 void Mob_hurt(Entity* e, Entity* attacker, int damage);
+
+void Mob_heal(Entity* e, int amount);
 
 // halves the velocity, then pushes 0.4 away from the attacker and 0.4 up
 void Mob_knockback(Entity* e, Entity* attacker);

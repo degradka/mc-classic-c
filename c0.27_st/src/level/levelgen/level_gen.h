@@ -7,8 +7,8 @@
 
 bool LevelGen_generateLevel(Level* level, const char* userName, int width, int height, int depth);
 
-// referenceEntity keeps new mobs 16 blocks away, NULL uses the spawn point
+// the 16 block distance is always from the spawn point
 // reportProgress is only for the loading bar
-int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress);
+int LevelGen_maybeSpawnMobs(Level* level, int attempts, bool reportProgress);
 
 #endif

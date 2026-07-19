@@ -12,12 +12,17 @@ typedef enum {
     CREATURE_SKELETON,
     CREATURE_CREEPER,
     CREATURE_PIG,
+    CREATURE_SPIDER,
 } CreatureKind;
 
 typedef struct Creature {
     Entity e; // must be first so Creature* can be used as Entity*
     Ai ai;
     CreatureKind kind;
+
+    // helmet and armor, only zombies and skeletons use them
+    bool hasHelmet;
+    bool hasArmor;
 } Creature;
 
 void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float y, float z);
