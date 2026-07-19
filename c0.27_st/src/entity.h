@@ -29,6 +29,16 @@ typedef struct Entity {
     float  heightOffset;
     bool   removed;
 
+    // c0.27_st: new auto-step mechanic, active when footSize>0 and horizontal
+    // movement was blocked while grounded, Entity_move retries the move
+    // allowing up to footSize of vertical rise, letting mobs climb a half
+    // block ledge without jumping. ySlideOffset smooths the visual step
+    // over a few ticks (subtracted from render height, decaying toward 0)
+    // rather than snapping instantly. Default 0 (matches every non-Mob
+    // entity); Mob_init sets 0.5 for Player and every hostile/passive mob
+    float  footSize;
+    float  ySlideOffset;
+
     // c0.0.23a_01: horizontal distance walked, accumulated in Entity_move and
     // used to space out footstep sounds. makeStepSound defaults true, Particle
     // is the only entity in the real source that disables it
@@ -89,7 +99,7 @@ typedef struct Entity {
     // each other, but not a zombie attacking another zombie). AI_CLASS_PLAYER
     // for Player, the entity's own CreatureKind value for every hostile or
     // passive mob, unused and left at its default for anything else (Item,
-    // Sign, Arrow, Particle, NetworkPlayer)
+    // Arrow, Particle, NetworkPlayer)
     int aiClassTag;
 } Entity;
 
@@ -110,6 +120,13 @@ void Entity_move(Entity* e, float dx, float dy, float dz);
 void Entity_moveRelative(Entity* e, float x, float z, float speed);
 bool Entity_isLit(const Entity* e);
 float Entity_getBrightness(const Entity* e);
+// c0.27_st: matches Entity.shouldRender(Vec3)/shouldRenderAtSqrDistance(float)
+// exactly: squared distance from the camera to this entity's own position
+// (not its bounding box center) against (bbSize*64)^2, a per-entity-size
+// render distance cull independent of the frustum test. Was entirely
+// missing, so every entity rendered at any distance as long as it was in the
+// view frustum, regardless of how small or far away it actually was
+bool Entity_shouldRender(const Entity* e, float camX, float camY, float camZ);
 void Entity_remove(Entity* e);
 void Entity_setSize(Entity* e, float width, float height);
 bool Entity_isFree(const Entity* e, float dx, float dy, float dz);

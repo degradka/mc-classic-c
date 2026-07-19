@@ -95,3 +95,7 @@ AABB AABB_offset(const AABB* a, float x, float y, float z) {
     return AABB_create(a->minX + x, a->minY + y, a->minZ + z,
                        a->maxX + x, a->maxY + y, a->maxZ + z);
 }
+
+float AABB_getSize(const AABB* a) {
+    return ((a->maxX - a->minX) + (a->maxY - a->minY) + (a->maxZ - a->minZ)) / 3.0f;
+}

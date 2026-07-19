@@ -33,7 +33,6 @@
 #include "character/cube.h"
 #include "item/arrow.h"
 #include "item/item.h"
-#include "item/sign.h"
 #include "timer.h"
 #include "hitresult.h"
 #include "gui/font.h"
@@ -43,12 +42,15 @@
 #include "gui/message_screen.h"
 #include "gui/game_over_screen.h"
 #include "net/network_player.h"
+#include "item/primed_tnt.h"
+#include "level/fx/smolder.h"
 
 #define MAX_MOBS 256 // c0.0.14a_08 raises the mob cap from 100
 #define MAX_NET_PLAYERS 32
 #define MAX_ARROWS 64 // no cap in the real source; bounded here same as mobs/netPlayers
 #define MAX_ITEMS 256 // no cap in the real source either; same reasoning
-#define MAX_SIGNS 64 // no cap in the real source either; same reasoning
+#define MAX_TNTS 64 // no cap in the real source either; same reasoning
+#define MAX_SMOLDERS 256 // no cap in the real source either; one explosion can spawn dozens
 
 static GLFWwindow*    window;
 static Level          level;
@@ -58,14 +60,16 @@ static Timer          timer;
 static Creature       mobs[MAX_MOBS];
 static Arrow          arrows[MAX_ARROWS];
 static Item           items[MAX_ITEMS];
-static Sign           signs[MAX_SIGNS];
+static PrimedTnt      tnts[MAX_TNTS];
+static Smolder        smolders[MAX_SMOLDERS];
 static ParticleEngine particleEngine;
 static User           user;
 
 static int mobCount = 0;
 static int arrowCount = 0;
 static int itemCount = 0;
-static int signCount = 0;
+static int tntCount = 0;
+static int smolderCount = 0;
 
 // c0.25_05_st: first person hand/held item state, matches the real source's
 // own HeldItemRenderer fields (h2.b/c/d/e/f in the decompile): heldTileId is
@@ -96,20 +100,42 @@ static int prevF    = GLFW_RELEASE;
 static int prevR    = GLFW_RELEASE;
 static int prevT    = GLFW_RELEASE;
 static int prevTab  = GLFW_RELEASE; // c0.24_st_03: shoots an arrow, singleplayer only
-static int prevB    = GLFW_RELEASE; // c0.24_st_03: places a Sign, singleplayer only
+static int prevF6   = GLFW_RELEASE; // DEBUG ONLY, not from real source, see handleGameplayKeys
+static int prevF5   = GLFW_RELEASE; // c0.27_st: toggles rain, singleplayer only
 
 // c0.24_st_03: the hotbar is now backed directly by player.inventory (real
 // survival inventory: 9 slots, each an id+count, starting empty), replacing
 // every earlier version's Creative style always-full gHotbar[]/gSelectedSlot
 // pair. No more free block picking (the B key full inventory/select block
 // screen and middle click "pick block" are both gone, matching the real
-// source having no such thing here) - the only way to get a tile into a
+// source having no such thing here); the only way to get a tile into a
 // slot is to break one and walk over the Item it drops
 
 static int gTickCount = 0;
-static int gLastMineTick = 0;
+// c0.27_st: renamed from gLastMineTick; matches real source's own single
+// shared "last click action" timer (l.java's own O field), used by both the
+// left-click attack repeat and the right-click place repeat
+static int gLastActionTick = 0;
 
-static int gEditMode = 0;              // 0=destroy, 1=place
+// c0.24_st_03: real progressive mining tracker (matches SurvivalGameMode's
+// own c/d/e=target x/y/z, f=progress ticks, g=captured hardness, h=short
+// post-break cooldown). gMineFraction is the partial-tick-blended 0..1
+// progress used to drive the crack overlay texture, recomputed every frame;
+// everything else only advances once per elapsed real game tick so it's
+// frame rate independent
+static int gMineX = -1, gMineY = -1, gMineZ = -1;
+static int gMineProgress = 0;
+static int gMineLastTick = 0;
+static int gMineCooldownUntil = 0;
+static float gMineFraction = 0.0f;
+
+// c0.27_st CORRECTION: this used to be a right-click-toggled mine/place mode
+// flag, a leftover from a much earlier pre-Survival-Test version of this
+// project (predating any real left/right click differentiation). Direct
+// read of the real source's own click dispatcher (l.java's b(int), called
+// separately for button 0 and button 1) shows no such toggle exists at all;
+// left click always mines/attacks, right click always places, dispatched
+// directly per button every time. Removed entirely; see handleBlockClicks
 
 // c0.0.23a_01: remappable keybindings and toggles, persisted to options.txt.
 // Replaces the old fixed Y key mouse invert, F key draw distance, and
@@ -139,6 +165,7 @@ static int texTerrain = 0;
 static int texDirt = 0;
 static int texGui = 0; // c0.0.19a_04: hotbar background/highlight atlas
 static int texIcons = 0; // c0.24_st_03: crosshair/hearts/air bubbles atlas
+static int texParticles = 0; // c0.27_st: WaterDropParticle/SmokeParticle atlas
 
 // c0.0.19a_04: animated water/lava, one 16x16 patch per tile re-simulated
 // and re-uploaded into texTerrain once per tick
@@ -211,9 +238,9 @@ void Minecraft_closeScreenAndGrabMouse(void) {
     }
     activeScreen = NULL;
     // ticks keep advancing while paused, so without this the auto repeat
-    // mining check sees a stale gLastMineTick and fires the instant the
+    // mining check sees a stale gLastActionTick and fires the instant the
     // menu closes, destroying whatever's still targeted
-    gLastMineTick = gTickCount;
+    gLastActionTick = gTickCount;
     int ww, wh; glfwGetWindowSize(window, &ww, &wh);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
@@ -234,7 +261,8 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    signCount = 0;
+    tntCount = 0;
+    smolderCount = 0;
 
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, size, size, 64);
@@ -266,6 +294,13 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     // behave identically: hotbar and arrow count always reset on regen
     Inventory_init(&player.inventory);
     player.arrows = 20;
+
+    // c0.27_st: matches SurvivalGameMode's new spawn hook: a genuinely
+    // fresh player (which this always is here, given the inventory reset
+    // right above) starts with 10 TNT in the last hotbar slot, written
+    // directly rather than through the normal stacking/addResource path
+    player.inventory.id[8] = TILE_TNT.id;
+    player.inventory.count[8] = 10;
 
     Entity_resetPosition(&player.e);
 }
@@ -328,7 +363,8 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    signCount = 0;
+    tntCount = 0;
+    smolderCount = 0;
     netPlayerCount = 0;
     gLoading = false;
 }
@@ -570,7 +606,7 @@ static void charCallback(GLFWwindow* w, unsigned int codepoint) {
 // before (subtracts instead of adds), matching the real source exactly.
 // c0.24_st_03: the c0.0.21a "Select block screen stays scrollable while
 // open" exception is gone along with that screen itself (see the removed
-// InventoryScreen note above) - this is back to a plain "only while no
+// InventoryScreen note above); this is back to a plain "only while no
 // screen is up" gate
 static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
     (void)w; (void)xoffset;
@@ -589,6 +625,12 @@ static void scrollCallback(GLFWwindow* w, double xoffset, double yoffset) {
 // (clouds render fully unlit).
 static void setupFog(int type) {
     if (type == -1) {
+        // every other branch below explicitly enables GL_FOG; this one
+        // skipped it and relied on it still being enabled from the earlier
+        // terrain pass, which is fragile (order dependent, and drawGui's own
+        // glDisable(GL_FOG) or any future reordering would silently leave
+        // clouds/sky completely unfogged)
+        glEnable(GL_FOG);
         glFogi(GL_FOG_MODE, GL_LINEAR);
         glFogf(GL_FOG_START, 0.0f);
         glFogf(GL_FOG_END, LevelRenderer_getFogEndDistance(&levelRenderer));
@@ -642,6 +684,75 @@ static void setupFog(int type) {
     glEnable(GL_LIGHTING);
 }
 
+// c0.27_st: F5 toggle, singleplayer only (see handleGameplayKeys), replaces
+// the old debug "B places a Sign" hook entirely, matching real source's own
+// Minecraft.H field exactly
+static bool gRaining = false;
+
+// c0.27_st: matches a/d.java's new d(float) exactly: animated rain quads
+// tiled across an 11x11 column grid around the player, each column's
+// vertical span clipped to [playerY-5, playerY+5] and the terrain height in
+// that column (skipped entirely if the terrain there is already above the
+// whole span), alpha fading with horizontal distance from the player
+static void renderRain(const Player* p, float partialTicks) {
+    int px = (int)p->e.x, pz = (int)p->e.z, py = (int)p->e.y;
+
+    // NOTE: real source disables GL_CULL_FACE here then re-enables it at the
+    // end, but this port never enables face culling anywhere at all (a
+    // confirmed, deliberate deviation matching the real client's own culling
+    // being permanently inert, see the glCullFace/glFrontFace comment in
+    // init()). Calling glEnable(GL_CULL_FACE) at the end like real source
+    // does would have broken that invariant for every draw call for the
+    // rest of the frame (hand, crossed plant sprites, etc, all rely on
+    // double-sided rendering), so this deliberately doesn't touch
+    // GL_CULL_FACE at all, rather than copying real source's own bracket
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    static int rainTex = 0;
+    if (!rainTex) rainTex = loadTexture("resources/rain.png", GL_NEAREST);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, rainTex);
+
+    for (int x = px - 5; x <= px + 5; ++x) {
+        for (int z = pz - 5; z <= pz + 5; ++z) {
+            int highest = Level_getHighestTile(&level, x, z);
+            int y0 = py - 5; if (y0 < highest) y0 = highest;
+            int y1 = py + 5; if (y1 < highest) y1 = highest;
+            if (y0 == y1) continue;
+
+            float phase = (float)((gTickCount + x * 3121 + z * 418711) % 32) + partialTicks;
+            phase /= 32.0f;
+            float dx = (float)x + 0.5f - p->e.x;
+            float dz = (float)z + 0.5f - p->e.z;
+            float dist = sqrtf(dx * dx + dz * dz) / 5.0f;
+            float alpha = (1.0f - dist * dist) * 0.7f;
+            if (alpha < 0.0f) alpha = 0.0f;
+            glColor4f(1.0f, 1.0f, 1.0f, alpha);
+
+            float v0 = (float)y0 * 2.0f / 8.0f + phase * 2.0f;
+            float v1 = (float)y1 * 2.0f / 8.0f + phase * 2.0f;
+
+            // matches real source's own diagonal, double sided quad (drawn
+            // corner to corner across the cell, not axis aligned)
+            Tessellator_begin(&hudTess);
+            Tessellator_vertexUV(&hudTess, (float)x,       (float)y0, (float)z,       0.0f, v0);
+            Tessellator_vertexUV(&hudTess, (float)(x + 1), (float)y0, (float)(z + 1), 2.0f, v0);
+            Tessellator_vertexUV(&hudTess, (float)(x + 1), (float)y1, (float)(z + 1), 2.0f, v1);
+            Tessellator_vertexUV(&hudTess, (float)x,       (float)y1, (float)z,       0.0f, v1);
+            Tessellator_vertexUV(&hudTess, (float)x,       (float)y0, (float)(z + 1), 0.0f, v0);
+            Tessellator_vertexUV(&hudTess, (float)(x + 1), (float)y0, (float)z,       2.0f, v0);
+            Tessellator_vertexUV(&hudTess, (float)(x + 1), (float)y1, (float)z,       2.0f, v1);
+            Tessellator_vertexUV(&hudTess, (float)x,       (float)y1, (float)(z + 1), 0.0f, v1);
+            Tessellator_end(&hudTess);
+        }
+    }
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+}
+
 // c0.0.20a_02: real per face lit shading for mobs/other players, layered on
 // top of their own brightness tinted vertex color. Bracket the entity render
 // loop with true then false, matching the real source exactly
@@ -689,9 +800,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
     if (gIsFullscreen) {
-        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.25_05   SURVIVAL TEST", monitor, NULL);
+        window = glfwCreateWindow(mode->width, mode->height, "Minecraft 0.27   SURVIVAL TEST", monitor, NULL);
     } else {
-        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.25_05   SURVIVAL TEST", NULL, NULL);
+        window = glfwCreateWindow(gWinWidth, gWinHeight, "Minecraft 0.27   SURVIVAL TEST", NULL, NULL);
     }
 
     if (!window) {
@@ -742,9 +853,10 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     Tile_registerAll();
     Options_init(&gOptions);
+    Textures_setAnaglyph(gOptions.anaglyph3d);
     Sound_init(gOptions.music, gOptions.sound);
 
-    // c0.24_st_03: no more pre-filled Creative hotbar - player.inventory
+    // c0.24_st_03: no more pre-filled Creative hotbar; player.inventory
     // (initialized in Player_init below) starts empty, matching the real
     // source's own player/d.java constructor
 
@@ -756,10 +868,11 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     const char* connectName = gConnectUsername[0] ? gConnectUsername : "guest";
     User_init(&user, gConnectHost[0] ? connectName : "anonymous");
 
-    texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
-    texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
-    texGui     = loadTexture("resources/gui.png", GL_NEAREST);
-    texIcons   = loadTexture("resources/icons.png", GL_NEAREST);
+    texTerrain   = loadTexture("resources/terrain.png", GL_NEAREST);
+    texDirt      = loadTexture("resources/dirt.png", GL_NEAREST);
+    texGui       = loadTexture("resources/gui.png", GL_NEAREST);
+    texIcons     = loadTexture("resources/icons.png", GL_NEAREST);
+    texParticles = loadTexture("resources/particles.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.png"); // c0.0.17a: was default.gif
 
     // c0.0.19a_04: register the water/lava animators against their tile's
@@ -782,7 +895,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    signCount = 0;
+    tntCount = 0;
+    smolderCount = 0;
 
     Level_init(lvl, 256, 256, 64);
     LevelRenderer_init(lr, lvl, texTerrain);
@@ -792,7 +906,12 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Player_init(p, lvl);
     Level_setPlayer(lvl, &p->e); // c0.24_st_03: mob AI chase/attack target
 
-    ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain);
+    // c0.27_st: matches SurvivalGameMode's new spawn hook: a fresh player
+    // starts with 10 TNT in the last hotbar slot
+    p->inventory.id[8] = TILE_TNT.id;
+    p->inventory.count[8] = 10;
+
+    ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain, (GLuint)texParticles);
 
     Timer_init(&timer, 20.0f);
 
@@ -830,8 +949,62 @@ static void destroy(Level* lvl) {
 
 /* camera */
 
-static void moveCameraToPlayer(Player* p, float t) {
-    glTranslatef(0.0f, 0.0f, -0.3f); // eye offset
+// matches a/d.java's a(float): an always-on camera rotation, not gated by
+// any option. Spins the view when dead (death-spiral, formula/constants
+// bytecode matched exactly), and shakes it side to side, decaying over
+// hurtDuration, whenever the player was just hit. hurtDir is the angle
+// toward whatever hurt the player (or a random 0/180 flip for environmental
+// damage, see Mob_hurt/Mob_knockback), so the shake itself always happens
+// around that same axis regardless of view direction
+static void applyHurtTilt(Player* p, float t) {
+    Entity* e = &p->e;
+    float hurtProgress = (float)e->hurtTime - t;
+    if (e->health <= 0) {
+        float deathProgress = (float)e->deathTime + t;
+        glRotatef(40.0f - 8000.0f / (deathProgress + 200.0f), 0.0f, 0.0f, 1.0f);
+    }
+    if (hurtProgress < 0.0f) return;
+    hurtProgress /= (float)e->hurtDuration;
+    float shake = sinf(hurtProgress * hurtProgress * hurtProgress * hurtProgress * (float)M_PI);
+    float dir = e->hurtDir;
+    glRotatef(-dir, 0.0f, 1.0f, 0.0f);
+    glRotatef(-shake * 14.0f, 0.0f, 0.0f, 1.0f);
+    glRotatef(dir, 0.0f, 1.0f, 0.0f);
+}
+
+// matches a/d.java's b(float): the view-bob effect, gated by the bobView
+// option. walkDistBob's phase drives a sideways sway (sin) and a bounce
+// (abs cos) timed to footsteps, tilt adds a small pitch-back as the player
+// falls, all smoothed between ticks by the partial-tick blend just like
+// every other rendered/interpolated value in this port
+static void applyViewBob(Player* p, float t) {
+    float walkDelta = p->walkDistBob - p->walkDistBobO;
+    float walk = p->walkDistBob + walkDelta * t;
+    float bob = p->oBob + (p->bob - p->oBob) * t;
+    float tilt = p->oTilt + (p->tilt - p->oTilt) * t;
+    glTranslatef(sinf(walk * (float)M_PI) * bob * 0.5f,
+                 -fabsf(cosf(walk * (float)M_PI) * bob), 0.0f);
+    glRotatef(sinf(walk * (float)M_PI) * bob * 3.0f, 0.0f, 0.0f, 1.0f);
+    glRotatef(fabsf(cosf(walk * (float)M_PI + 0.2f) * bob) * 5.0f, 1.0f, 0.0f, 0.0f);
+    glRotatef(tilt, 1.0f, 0.0f, 0.0f);
+}
+
+// pass is 0/1, only meaningful (and only ever nonzero-effect) when
+// anaglyph3d is on: the whole frame renders twice, once per eye, and this
+// is the modelview half of that eye separation, matching l.java's own
+// (pass*2-1)*0.1f translate exactly, applied before anything else so it
+// shifts the entire camera including hurt-tilt/bob/look-rotation
+static void moveCameraToPlayer(Player* p, float t, int pass) {
+    if (gOptions.anaglyph3d) {
+        glTranslatef((float)(pass * 2 - 1) * 0.1f, 0.0f, 0.0f);
+    }
+
+    applyHurtTilt(p, t);
+    if (gOptions.bobView) applyViewBob(p, t);
+
+    // matches l.java's own -0.1f eye offset here exactly (was wrongly -0.3f,
+    // a stale constant from before hurt-tilt/view-bob existed in this port)
+    glTranslatef(0.0f, 0.0f, -0.1f);
 
     glRotatef(p->e.xRotation, 1.0f, 0.0f, 0.0f);
     glRotatef(p->e.yRotation, 0.0f, 1.0f, 0.0f);
@@ -843,10 +1016,18 @@ static void moveCameraToPlayer(Player* p, float t) {
     glTranslated(-x, -y, -z);
 }
 
-static void setupCamera(Player* p, float t) {
+static void setupCamera(Player* p, float t, int pass) {
     int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
+
+    // matches l.java's own -(pass*2-1)*0.07f translate here: the projection
+    // half of the anaglyph eye separation, an asymmetric frustum shift in
+    // the opposite direction of moveCameraToPlayer's modelview shift, so
+    // both eyes still converge on the same focal plane
+    if (gOptions.anaglyph3d) {
+        glTranslatef(-(float)(pass * 2 - 1) * 0.07f, 0.0f, 0.0f);
+    }
 
     // c0.24_st_03: FOV narrows as the death animation plays, formula and
     // constants matched exactly against the real source (k.java, the block
@@ -856,10 +1037,15 @@ static void setupCamera(Player* p, float t) {
         double deathTime = (double)p->e.deathTime + (double)t;
         fov /= (1.0 - 500.0 / (deathTime + 500.0)) * 2.0 + 1.0;
     }
+    // c0.27_st: real source's own gluPerspective zFar is
+    // 512 >> (viewDistance*2) (512/128/32/8 for FAR/NORMAL/SHORT/TINY,
+    // bytecode confirmed), but this has been tried and reverted more than
+    // once at the user's own request; kept as a flat 1000.0 by deliberate
+    // choice, not an oversight
     gluPerspective(fov, (double)fbw / (double)fbh, 0.05, 1000.0);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    moveCameraToPlayer(p, t);
+    moveCameraToPlayer(p, t, pass);
 }
 
 // c0.0.19a_04: blits a sprite from the 256x64 gui.png atlas at pixel
@@ -956,7 +1142,7 @@ static void drawGui(float partialTicks) {
     }
 
     // c0.24_st_03: air bubbles, only while actually submerged (eye level tile
-    // is water) - matches c/l.java:90 exactly. Standing in shallow/waist deep
+    // is water), matches c/l.java:90 exactly. Standing in shallow/waist deep
     // water with isInWater() true but eyes above the surface must not show
     // or drain bubbles at all
     if (Entity_isUnderWater(&player.e)) {
@@ -1045,7 +1231,7 @@ static void drawGui(float partialTicks) {
     // top left corner: version and stats
     // c0.25_05_st: real source's own version string for this build, note the
     // literal 3 spaces before "SURVIVAL", confirmed via decompile
-    Font_drawShadow(&gFont, &hudTess, "0.25_05   SURVIVAL TEST", 2, 2, 0xFFFFFF);
+    Font_drawShadow(&gFont, &hudTess, "0.27   SURVIVAL TEST", 2, 2, 0xFFFFFF);
 
     if (gOptions.showFrameRate) {
         char stats[64];
@@ -1247,13 +1433,19 @@ static void pick(float t) {
     // nudge origin to match the 0.3 view space translate
     x += dx * 0.3; y += dy * 0.3; z += dz * 0.3;
 
-    // c0.0.23a_01: real source's reach is a straight 5.0 block cast (Level.clip),
-    // matching vanilla Minecraft's well known reach distance. The old axis
-    // aligned 3 block cube check this replaces could reject a valid hit near
-    // 5 blocks away when looking nearly along one axis (sqrt(a^2+b^2+c^2)<=5
-    // does not imply each axis alone is <=3), so the raycast's own distance
-    // cap is now the sole reach authority, matching the real single mechanism
-    const double reach = 5.0;
+    // c0.0.23a_01: real source's reach is a straight distance cast
+    // (Level.clip), not the old axis aligned 3 block cube check this
+    // replaces (which could reject a valid hit near the true reach distance
+    // when looking nearly along one axis, since sqrt(a^2+b^2+c^2)<=r does
+    // not imply each axis alone is <=3), so the raycast's own distance cap
+    // is now the sole reach authority, matching the real single mechanism.
+    // CORRECTION: the distance itself is 4.0, not 5.0; bytecode confirmed
+    // the real raycast dynamically calls the active GameMode's own reach
+    // getter (com.mojang.minecraft.e.a.b()), and the actual instance in
+    // play is SurvivalGameMode, whose own override returns 4.0F, not the
+    // abstract base class's unused 5.0F default. 5.0 is vanilla Minecraft's
+    // well known reach in later versions, but not this one
+    const double reach = 4.0;
     HitResult hr;
     double blockDist;
     bool hasBlock = raycast_block(&level, x, y, z, dx, dy, dz, reach, &hr, &blockDist) != 0;
@@ -1350,13 +1542,24 @@ void Minecraft_checkArrowPickups(Entity* playerEntity) {
 // source. Bytecode confirmed the distance ratio check compares the freshly
 // computed distanceTo(source)/radius value itself, not the locally
 // uninitialized variable CFR's own decompile of this method mis-scopes it as
-// implemented for Creeper's own death explosion, matches the real source's
-// own particle spawn there exactly: 500 particles textured as Leaves (real
-// source's a.y constant, id 18 tex 22, confirmed via the tile registry;
-// purely a texture reuse, not an actual leaves block spawn)
-void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz) {
+// used by both Creeper's own death explosion (500 particles textured as
+// Leaves, real source's a.y constant, id 18 tex 22, confirmed via the tile
+// registry, purely a texture reuse, not an actual leaves block spawn) and
+// PrimedTnt's own 100 particle debris burst (textured as TNT itself,
+// a.aa). Generalized to take the tile explicitly rather than hardcoding
+// Leaves, since real source's own two callers use different tiles
+void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz, const Tile* tile) {
     Particle p;
-    Particle_init(&p, lvl, x, y, z, mx, my, mz, &TILE_LEAVES);
+    Particle_init(&p, lvl, x, y, z, mx, my, mz, tile);
+    ParticleEngine_add(&particleEngine, &p);
+}
+
+// implemented for PrimedTnt's own per tick fuse smoke, matches
+// this.level.particleEngine.a(new SmokeParticle(this.level, this.x,
+// this.y + 0.6f, this.z)) exactly
+void Minecraft_spawnSmokeParticle(Level* lvl, float x, float y, float z) {
+    Particle p;
+    Particle_initSmoke(&p, lvl, x, y, z);
     ParticleEngine_add(&particleEngine, &p);
 }
 
@@ -1405,6 +1608,32 @@ bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z) {
 void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource) {
     if (itemCount >= MAX_ITEMS) return;
     Item_init(&items[itemCount++], lvl, x, y, z, resource);
+}
+
+// implemented for tile.c's own Tnt_onRemoved, spawns into tnts[]
+void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z) {
+    if (tntCount >= MAX_TNTS) return;
+    PrimedTnt_init(&tnts[tntCount++], lvl, x, y, z);
+}
+
+// implemented for tile.c's own Tnt_onRemoved, used specifically when a TNT
+// block is destroyed by another explosion's blast (Level.explode sets
+// level->inExplosion around its destroy loop for exactly this). Matches the
+// real TNT tile's own f(Level,x,y,z) "wasExploded" hook exactly (bytecode
+// confirmed via javap): random.nextInt(life/4) + life/8 against the fresh
+// PrimedTnt's own life=40, i.e. a short 5-14 tick fuse instead of a full 40
+void Minecraft_spawnPrimedTntChainFuse(Level* lvl, float x, float y, float z) {
+    if (tntCount >= MAX_TNTS) return;
+    PrimedTnt* t = &tnts[tntCount++];
+    PrimedTnt_init(t, lvl, x, y, z);
+    t->fuse = rand() % (t->fuse / 4) + t->fuse / 8;
+}
+
+// implemented for level.c's own Level_explode, spawns into smolders[],
+// matching Level.explode's own addEntity(new Smolder(this,x,y,z)) call sites
+void Minecraft_spawnSmolder(Level* lvl, int x, int y, int z) {
+    if (smolderCount >= MAX_SMOLDERS) return;
+    Smolder_init(&smolders[smolderCount++], lvl, x, y, z);
 }
 
 // c0.24_st_03: matches Player.aiStep()'s own
@@ -1457,21 +1686,39 @@ static void handleGameplayKeys(GLFWwindow* w) {
     // 1..9 = select hotbar slot directly
     handleHotbarNumberKeys(w);
 
-    // c0.24_st_03: the "Build" key used to open the full inventory/select
-    // block screen (c0.0.20a_02). That screen doesn't exist in the real
-    // source for this version at all - Survival Test has no Creative style
-    // free block picker - the exact same binding (`this.B.n.b`, "Build" is
-    // literally the field name in the real Options class) is repurposed to
-    // place a Sign instead, singleplayer only, matching the real source's
-    // own `this.y == null` gate exactly like the Tab/Arrow binding above
-    int kB = glfwGetKey(w, gOptions.keys[OPT_KEY_BUILD].glfwKey);
-    if (kB == GLFW_PRESS && prevB == GLFW_RELEASE && !gConnected && signCount < MAX_SIGNS) {
-        Sign_init(&signs[signCount++], &level, player.e.x, player.e.y, player.e.z, player.e.yRotation);
+    // DEBUG ONLY, not from real source: F6 gives one of the 5 new-this-version
+    // tiles with no legitimate obtainment path in Survival Test (world
+    // generation is byte-identical to c0.25_05_st, so Double Slab/Slab/Brick/
+    // Bookshelf/Moss Stone never spawn anywhere and can't be mined). Cycles
+    // through the list on each press so repeated presses fill the hotbar.
+    // Remove this block once these tiles have a real way to reach the
+    // player (crafting/structures/etc, whichever a later version adds)
+    int kF6 = glfwGetKey(w, GLFW_KEY_F6);
+    if (kF6 == GLFW_PRESS && prevF6 == GLFW_RELEASE) {
+        static const int debugGiveTiles[] = { 43, 44, 45, 47, 48 }; // Double Slab, Slab, Brick, Bookshelf, Moss Stone
+        static int debugGiveIndex = 0;
+        Inventory_addResource(&player.inventory, debugGiveTiles[debugGiveIndex]);
+        debugGiveIndex = (debugGiveIndex + 1) % (int)(sizeof debugGiveTiles / sizeof debugGiveTiles[0]);
     }
-    prevB = kB;
+    prevF6 = kF6;
+
+    // c0.27_st: F5 toggles rain, matches real source's own Minecraft.H
+    // field/keycode 63 exactly (singleplayer only, "this.y==null" gate)
+    int kF5 = glfwGetKey(w, GLFW_KEY_F5);
+    if (kF5 == GLFW_PRESS && prevF5 == GLFW_RELEASE && !gConnected) {
+        gRaining = !gRaining;
+    }
+    prevF5 = kF5;
+
+    // c0.27_st: the "Build" key used to place a Sign (itself a repurposing
+    // of the old Creative style block picker binding, c0.24_st_03). Real
+    // source confirms Sign is removed as a feature entirely this version,
+    // not renamed, not merged into something else, just gone, so Build is
+    // now a dead keybind with no action at all, matching the real source
+    // exactly rather than inventing a new use for it
 
     // Tab shoots an arrow, singleplayer only (matches the real source's own
-    // `this.y == null` gate - `y` there is a connection reference, not the
+    // `this.y == null` gate; `y` there is a connection reference, not the
     // Controls screen its own declared type would suggest; CFR picked the
     // wrong same-named obfuscated class across two different packages,
     // confirmed via raw bytecode). No conflict with the existing Tab
@@ -1522,7 +1769,10 @@ static void handleGameplayKeys(GLFWwindow* w) {
     prevT = kT;
 }
 
-static void mineOrPlace(void);
+static void attackEntity(void);
+static void rightClickAction(void);
+static void resetMining(void);
+static void updateMining(void);
 
 static void handleBlockClicks(GLFWwindow* w) {
     int left  = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
@@ -1541,14 +1791,9 @@ static void handleBlockClicks(GLFWwindow* w) {
         return;
     }
 
-    if (right == GLFW_PRESS && prevRight == GLFW_RELEASE) {
-        gEditMode = (gEditMode + 1) % 2;
-    }
-    prevRight = right;
-
     // c0.0.14a_08: middle click picks the block under the crosshair (grass
     // picks dirt instead of grass itself). c0.24_st_03: this no longer
-    // force-acquires the tile into a fixed Creative hotbar slot - it only
+    // force-acquires the tile into a fixed Creative hotbar slot; it only
     // switches to a slot that already holds that tile id (Inventory_findSlot,
     // matches the real source's own inventory.a(tileId) lookup, returning -1
     // and leaving selection untouched if the player doesn't have any)
@@ -1563,122 +1808,270 @@ static void handleBlockClicks(GLFWwindow* w) {
     // c0.25_05_st: the first person hand's own punch swing, matches the real
     // source triggering it unconditionally on every fresh left click event,
     // even one that hits nothing at all, before any mine/place/attack logic
-    // even runs
+    // even runs. c0.27_st CORRECTION: previously throttled this to 1/sec,
+    // reading the wiki's "swing speed slowed to 1/sec" too broadly. Direct,
+    // full re-read of the real click dispatcher shows its cooldown field
+    // only ever gets SET when swinging at nothing at all (no tile/entity
+    // hit) and is never touched by an actual mine or attack hit, so
+    // continuous mining/combat swings are NOT throttled at all in real
+    // source; reverted back to unconditional triggering. Left click only:
+    // real source's own swing-trigger is button-0-specific, right click
+    // never swings the arm
     if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE) {
         handSwinging = true;
         handSwingTicks = -1;
     }
 
-    // left click performs the current mode: on a fresh press immediately,
-    // then c0.0.14a_08 auto-repeats every ticksPerSecond/4 ticks (~5 ticks at
-    // 20 TPS) for as long as the button stays held, instead of requiring
-    // discrete repeated clicks
-    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && !isHitNull) {
-        mineOrPlace();
-        gLastMineTick = gTickCount;
-    } else if (left == GLFW_PRESS && !isHitNull && (gTickCount - gLastMineTick) >= timer.ticksPerSecond / 4.0f) {
-        mineOrPlace();
-        gLastMineTick = gTickCount;
+    // c0.24_st_03: real progressive mining (see updateMining), checked every
+    // frame while LEFT is held on a tile so progress accumulates smoothly
+    if (left == GLFW_PRESS && !isHitNull && hitResult.type == HITRESULT_TILE) {
+        updateMining();
+        // matches l.java's own click repeat calling b(0) every quarter
+        // second while held (separately from the per-tick progressive mining
+        // path updateMining implements above), whose first action is
+        // unconditionally re-triggering the arm swing regardless of whether
+        // that call's own instant-destroy attempt did anything, so the arm
+        // keeps swinging throughout a multi-tick mine, not just on the
+        // initial click. Not throttled, see correction note above
+        if (gTickCount - gLastActionTick >= timer.ticksPerSecond / 4.0f) {
+            handSwinging = true;
+            handSwingTicks = -1;
+            gLastActionTick = gTickCount;
+        }
+    } else {
+        resetMining();
     }
+
+    // c0.27_st CORRECTION: real source has no "edit mode" toggle at all; a
+    // leftover from a much earlier pre-Survival-Test version of this
+    // project. Direct read of the real click dispatcher (l.java's own
+    // b(int), called separately for button 0 and button 1) shows left click
+    // always mines/attacks and right click always places, dispatched
+    // directly per button, sharing one quarter-second repeat timer between
+    // them (gLastActionTick) exactly like real source's own single shared
+    // field does
+    bool wantsAttack = !isHitNull && hitResult.type == HITRESULT_ENTITY;
+
+    if (left == GLFW_PRESS && prevLeft == GLFW_RELEASE && wantsAttack) {
+        attackEntity();
+    } else if (left == GLFW_PRESS && wantsAttack && gTickCount - gLastActionTick >= timer.ticksPerSecond / 4.0f) {
+        attackEntity();
+        handSwinging = true;
+        handSwingTicks = -1;
+        gLastActionTick = gTickCount;
+    }
+
+    if (right == GLFW_PRESS && prevRight == GLFW_RELEASE) {
+        rightClickAction();
+        gLastActionTick = gTickCount;
+    } else if (right == GLFW_PRESS && gTickCount - gLastActionTick >= timer.ticksPerSecond / 4.0f) {
+        rightClickAction();
+        gLastActionTick = gTickCount;
+    }
+
     prevLeft = left;
+    prevRight = right;
 }
 
-static void mineOrPlace(void) {
-    // matches the real source's own combined click handler, which checks
-    // for an entity hit before any block mine/place logic and, if found,
-    // attacks instead - flat 4 damage, no weapon variance, since no weapons
-    // exist yet. c0.24_st_03's own real source let either mouse button land
-    // this hit; c0.25_05_st changed that to left click only (bytecode
-    // confirmed: the entity branch now checks which button fired before
-    // calling hurt(), where it used to fire unconditionally), matching the
-    // wiki's "players can no longer right click to deal damage". This
-    // port's own right click was already a dedicated mine/place mode
-    // toggle, never itself reaching mineOrPlace(), so it already matched
-    // the fixed behavior before this version even existed; nothing to
-    // change here beyond this comment
-    if (hitResult.type == HITRESULT_ENTITY) {
-        Mob_hurt(hitResult.entity, &player.e, 4);
+// c0.24_st_03: shared block-removal steps (sound, break particles, survival
+// drops, netSetTile), used by the real progressive mining tracker below
+static void destroyTargetTile(int x, int y, int z) {
+    int id = Level_getTile(&level, x, y, z);
+    // c0.0.20a_02: Bedrock can't be broken unless userType>=100 (an
+    // operator flag from the Login reply). Stays 0 in singleplayer, so
+    // Bedrock is unbreakable there too, matching the real source exactly
+    if (id == TILE_BEDROCK.id && player.userType < 100) return;
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    // c0.0.19a_04: the player's own break/place always uses the
+    // ungated Level_netSetTile, matching the real source calling
+    // netSetTile directly here, not the gated setTile. Only derivative
+    // world-simulation reactions (grass spread, liquid flow, falling
+    // blocks, sponge) route through the gated level_setTile/Level_swap
+    bool changed = Level_netSetTile(&level, x, y, z, 0);
+    if (t && changed) {
+        // type field is the currently selected tile even on destroy,
+        // matching the real source; the server ignores it for mode 0
+        if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 0, Inventory_getSelected(&player.inventory));
+        // c0.0.23a_01: block break sound, same "step." family as
+        // footsteps, matching the real source's own volume/pitch formula
+        // exactly ((volume+1)/2, pitch*0.8, both already jittered)
+        if (t->soundType != SOUND_NONE) {
+            char name[32];
+            snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
+            Sound_play(name, (SoundType_getVolume(t->soundType) + 1.0f) / 2.0f,
+                       SoundType_getPitch(t->soundType) * 0.8f,
+                       x + 0.5f, y + 0.5f, z + 0.5f);
+        }
+        // c0.27_st: TNT's own real tile class skips this debris burst
+        // entirely when mined (it spawns a primed entity instead of chunks
+        // flying off); bytecode confirmed via javap, its override of the
+        // mining-destroy particle hook never calls the super particle spawn
+        if (!t->skipDestroyParticles) Tile_onDestroy(t, &level, x, y, z, &particleEngine);
+        // c0.24_st_03: survival tile drops, matching Tile.e()/Tile.a()'s own
+        // count/resource hooks. CORRECTION: this was gated on !gConnected
+        // despite its own comment already (correctly) saying it shouldn't
+        // be; direct read of SurvivalGameMode's own destroy override
+        // confirms the drop call has no network-state check at all, same as
+        // the block break particles just above. Currently unobservable
+        // either way since gConnected is never actually true in a working
+        // session, but a real, confirmed divergence from real source
+        Tile_dropItems(t, &level, x, y, z);
+    }
+}
+
+// c0.24_st_03: matches SurvivalGameMode's own a(): abandons mining progress
+// the instant the target changes, the mouse is released, or the player
+// switches to place mode
+static void resetMining(void) {
+    gMineX = gMineY = gMineZ = -1;
+    gMineProgress = 0;
+    gMineFraction = 0.0f;
+}
+
+// c0.24_st_03: matches SurvivalGameMode's own a(x,y,z,face)/a(float) pair:
+// real hardness gated progressive mining. Looking away resets progress;
+// holding the same block accumulates one tick of progress per elapsed real
+// game tick (frame rate independent) until it exceeds the tile's own
+// hardnessTicks, then actually breaks it and starts a short 5 tick cooldown
+// before the next block can be started, matching the real source exactly
+static void updateMining(void) {
+    if (gTickCount < gMineCooldownUntil) {
+        gMineFraction = 0.0f;
         return;
     }
 
-    if (gEditMode == 0) {
-        // destroy
-        int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
-        // c0.0.20a_02: Bedrock can't be broken unless userType>=100 (an
-        // operator flag from the Login reply). Stays 0 in singleplayer, so
-        // Bedrock is unbreakable there too, matching the real source exactly
-        if (id == TILE_BEDROCK.id && player.userType < 100) return;
-        const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
-        // c0.0.19a_04: the player's own break/place always uses the
-        // ungated Level_netSetTile, matching the real source calling
-        // netSetTile directly here, not the gated setTile. Only derivative
-        // world-simulation reactions (grass spread, liquid flow, falling
-        // blocks, sponge) route through the gated level_setTile/Level_swap
-        bool changed = Level_netSetTile(&level, hitResult.x, hitResult.y, hitResult.z, 0);
-        if (t && changed) {
-            // type field is the currently selected tile even on destroy,
-            // matching the real source; the server ignores it for mode 0
-            if (gConnected) NetConnection_sendSetBlock(&gConn, hitResult.x, hitResult.y, hitResult.z, 0, Inventory_getSelected(&player.inventory));
-            // c0.0.23a_01: block break sound, same "step." family as
-            // footsteps, matching the real source's own volume/pitch formula
-            // exactly ((volume+1)/2, pitch*0.8, both already jittered)
-            if (t->soundType != SOUND_NONE) {
-                char name[32];
-                snprintf(name, sizeof name, "step.%s", SOUND_TYPES[t->soundType].name);
-                Sound_play(name, (SoundType_getVolume(t->soundType) + 1.0f) / 2.0f,
-                           SoundType_getPitch(t->soundType) * 0.8f,
-                           hitResult.x + 0.5f, hitResult.y + 0.5f, hitResult.z + 0.5f);
-            }
-            Tile_onDestroy(t, &level, hitResult.x, hitResult.y, hitResult.z, &particleEngine);
-            // c0.24_st_03: survival tile drops, matching Tile.e()/Tile.a()'s
-            // own count/resource hooks (task #63 fills in the per-tile
-            // overrides; every tile drops one of itself for now). Not gated
-            // on gConnected: the real source drops these client side
-            // regardless, same as the block-break particles just above
-            if (!gConnected) Tile_dropItems(t, &level, hitResult.x, hitResult.y, hitResult.z);
-        }
-    } else {
-        // c0.24_st_03: nothing selected (empty handed, or the selected
-        // stack just ran out) - can't place a -1 "tile"
-        int placeId = Inventory_getSelected(&player.inventory);
-        if (placeId < 0) return;
+    if (hitResult.x != gMineX || hitResult.y != gMineY || hitResult.z != gMineZ) {
+        gMineX = hitResult.x; gMineY = hitResult.y; gMineZ = hitResult.z;
+        gMineProgress = 0;
+        gMineLastTick = gTickCount;
+    }
 
-        // place on adjacent face
-        int nx=0, ny=0, nz=0;
-        switch (hitResult.f) {
-            case 0: ny = -1; break; // bottom
-            case 1: ny =  1; break; // top
-            case 2: nz = -1; break; // negative Z
-            case 3: nz =  1; break; // positive Z
-            case 4: nx = -1; break; // negative X
-            case 5: nx =  1; break; // positive X
-        }
-        int x = hitResult.x + nx;
-        int y = hitResult.y + ny;
-        int z = hitResult.z + nz;
+    int elapsed = gTickCount - gMineLastTick;
+    if (elapsed > 0) {
+        gMineProgress += elapsed;
+        gMineLastTick = gTickCount;
+    }
 
-        // AABB collision check, disallow placing inside player, mobs, or
-        // connected network players. Matches Level.isFree(AABB), which walks
-        // the real source's unified entities list. This port keeps
-        // mobs[]/netPlayers[] as separate arrays instead, so both need
-        // checking here to get the same result
-        AABB aabb = Level_getTilePickAABB(&level, x, y, z);
-        if (!AABB_intersects(&player.e.boundingBox, &aabb)) {
-            bool blocked = false;
-            for (int i = 0; i < mobCount; ++i) {
-                if (AABB_intersects(&mobs[i].e.boundingBox, &aabb)) { blocked = true; break; }
-            }
-            for (int i = 0; !blocked && i < netPlayerCount; ++i) {
-                if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) { blocked = true; }
-            }
-            if (!blocked) {
-                if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, placeId);
-                Level_netSetTile(&level, x, y, z, placeId);
-                // c0.24_st_03: placing spends one of the selected stack,
-                // matches Inventory_consume (player/d.java's own c(int))
-                if (!gConnected) Inventory_consume(&player.inventory, placeId);
-            }
+    int id = Level_getTile(&level, gMineX, gMineY, gMineZ);
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    int hardness = t ? t->hardnessTicks : 0;
+
+    if (gMineProgress > hardness) {
+        destroyTargetTile(gMineX, gMineY, gMineZ);
+        gMineCooldownUntil = gTickCount + 5;
+        resetMining();
+        return;
+    }
+
+    // matches the real source's own partial-tick blend exactly:
+    // ((f + partialTicks - 1) / hardness)
+    gMineFraction = hardness > 0 ? ((float)gMineProgress + timer.partialTicks - 1.0f) / (float)hardness : 0.0f;
+    if (gMineFraction < 0.0f) gMineFraction = 0.0f;
+    if (gMineFraction > 1.0f) gMineFraction = 1.0f;
+}
+
+// c0.25_05_st: flat 4 damage, no weapon variance, since no weapons exist
+// yet. c0.24_st_03's own real source let either mouse button land this hit;
+// c0.25_05_st changed that to left click only (bytecode confirmed: the
+// entity branch now checks which button fired before calling hurt(), where
+// it used to fire unconditionally), matching the wiki's "players can no
+// longer right click to deal damage"; already gated to left click only by
+// this function's own caller
+static void attackEntity(void) {
+    Mob_hurt(hitResult.entity, &player.e, 4);
+}
+
+// c0.27_st: matches l.java's own b(1) (right-click dispatch) exactly: a
+// mushroom eat intercept first, checked unconditionally even with no
+// block/entity actually targeted, then placement on a tile hit. A hit on an
+// entity, or no hit at all, is a real no-op here (right click never
+// attacks and never does anything without a valid placement target)
+static void rightClickAction(void) {
+    // matches SurvivalGameMode's own a(Player,int): two hardcoded Survival
+    // Test food items with an instant effect, standing in for the real food
+    // system which didn't exist yet: Brown Mushroom heals 5, Red Mushroom
+    // hurts 3, both consuming one on use. Was entirely missing; right
+    // clicking either mushroom used to just try to place it as a block
+    int selected = Inventory_getSelected(&player.inventory);
+    if (selected == TILE_MUSHROOM_BROWN.id && Inventory_consume(&player.inventory, selected)) {
+        Mob_heal(&player.e, 5);
+        gMineFraction = 0.0f;
+        return;
+    }
+    if (selected == TILE_MUSHROOM_RED.id && Inventory_consume(&player.inventory, selected)) {
+        Mob_hurt(&player.e, NULL, 3);
+        gMineFraction = 0.0f;
+        return;
+    }
+
+    if (isHitNull || hitResult.type != HITRESULT_TILE) return;
+
+    // c0.24_st_03: nothing selected (empty handed, or the selected
+    // stack just ran out); can't place a -1 "tile"
+    int placeId = Inventory_getSelected(&player.inventory);
+    if (placeId < 0) return;
+
+    // place on adjacent face
+    int nx=0, ny=0, nz=0;
+    switch (hitResult.f) {
+        case 0: ny = -1; break; // bottom
+        case 1: ny =  1; break; // top
+        case 2: nz = -1; break; // negative Z
+        case 3: nz =  1; break; // positive Z
+        case 4: nx = -1; break; // negative X
+        case 5: nx =  1; break; // positive X
+    }
+    int x = hitResult.x + nx;
+    int y = hitResult.y + ny;
+    int z = hitResult.z + nz;
+
+    // c0.27_st CORRECTION: matches the real source's own placement gate
+    // exactly: the target cell must already be air or a liquid (you cannot
+    // place a block into an existing solid one), a check that was entirely
+    // missing before
+    int targetId = Level_getTile(&level, x, y, z);
+    bool targetIsOpen = targetId == 0 || targetId == TILE_WATER.id || targetId == TILE_CALM_WATER.id ||
+                         targetId == TILE_LAVA.id || targetId == TILE_CALM_LAVA.id;
+    if (!targetIsOpen) return;
+
+    // AABB collision check, disallow placing inside player, mobs, or
+    // connected network players. Matches Level.isFree(AABB), which walks
+    // the real source's unified entities list. This port keeps
+    // mobs[]/netPlayers[] as separate arrays instead, so both need
+    // checking here to get the same result. CORRECTION: the shape checked
+    // is the PLACED tile's own real collision box (its getAABB, already used
+    // for physics elsewhere), not an assumed full unit cube; a tile with no
+    // meaningful collision box at all (plants, matching real source's own
+    // null AABB) skips the entity check entirely and is always allowed
+    const Tile* placeTile = (placeId >= 0 && placeId < 256) ? gTiles[placeId] : NULL;
+    AABB aabb;
+    bool hasShape = placeTile && placeTile->getAABB(placeTile, x, y, z, &aabb);
+    if (hasShape) {
+        if (AABB_intersects(&player.e.boundingBox, &aabb)) return;
+        for (int i = 0; i < mobCount; ++i) {
+            if (AABB_intersects(&mobs[i].e.boundingBox, &aabb)) return;
         }
+        for (int i = 0; i < netPlayerCount; ++i) {
+            if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, &aabb)) return;
+        }
+    }
+
+    // c0.27_st CORRECTION: real source consumes the item BEFORE actually
+    // setting the tile, not after; matters if netSetTile ends up a no-op
+    // (e.g. the target already happens to be the exact same tile id), where
+    // real source still spends the item anyway
+    if (!gConnected) {
+        if (!Inventory_consume(&player.inventory, placeId)) return;
+    }
+    if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, placeId);
+    if (Level_netSetTile(&level, x, y, z, placeId)) {
+        gMineFraction = 0.0f;
+        // c0.27_st: matches the real source's own explicit onPlacedByPlayer
+        // hook call right here; a normal tile placement already fires the
+        // generic onPlace via Level_netSetTile, but this one only fires from
+        // the player's own explicit right click (Sand/Gravel's immediate
+        // fall check, Liquid's immediate re-tick)
+        if (placeTile && placeTile->onPlacedByPlayer) placeTile->onPlacedByPlayer(placeTile, &level, x, y, z);
     }
 }
 
@@ -1746,7 +2139,7 @@ static void syncGameplayKeyEdges(GLFWwindow* w) {
 // isn't reproduced, invisible at this scale and this port's own Cube has no
 // mirror flag to begin with). No custom skin download, matches this port's
 // own offline-only scope decision for this feature
-static void renderHand(Player* p, float partialTicks) {
+static void renderHand(Player* p, float partialTicks, int pass) {
     if (!handArmCubeBuilt) {
         // matches the exact arm the real source's first person hand draws:
         // the humanoid model's own field f (d/h.java), box origin (-1,-2,-2)
@@ -1793,13 +2186,13 @@ static void renderHand(Player* p, float partialTicks) {
     // source exactly. l.java's own hand pass does glLoadIdentity then layers
     // only hurt-camera tilt (d.a) and view bobbing (d.b) on top, never the
     // look rotation itself (the xRot/yRot rotate in that method is inside its
-    // own push/pop, used only to aim the light, then discarded). This port's
-    // own simplified camera implements neither hurt tilt nor bobbing (see
-    // moveCameraToPlayer omitting both for the world camera too), so a plain
-    // glLoadIdentity is the exact equivalent here: it drops the world camera
-    // transform entirely, leaving the hand's own fixed offset below measured
-    // straight in eye space
+    // own push/pop, used only to aim the light, then discarded)
     glLoadIdentity();
+    if (gOptions.anaglyph3d) {
+        glTranslatef((float)(pass * 2 - 1) * 0.1f, 0.0f, 0.0f);
+    }
+    applyHurtTilt(p, partialTicks);
+    if (gOptions.bobView) applyViewBob(p, partialTicks);
 
     const float baseScale = 0.8f;
     if (handSwinging) {
@@ -1908,11 +2301,35 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         glfwSetCursorPos(window, cx, cy);
     }
 
+    // matches l.java's own for(i3<2) loop: when anaglyph3d is off this runs
+    // once (pass 0, no color mask applied, gOptions.anaglyph3d gates every
+    // eye-shift above to a no-op). When it's on, the entire world+entity+
+    // hand pass below runs twice, once per eye, each restricted to its own
+    // color channels and shifted by setupCamera/moveCameraToPlayer/
+    // renderHand's own anaglyph3d checks, composing into a red/cyan
+    // stereo image
+    int passCount = gOptions.anaglyph3d ? 2 : 1;
+    for (int pass = 0; pass < passCount; ++pass) {
+        if (gOptions.anaglyph3d) {
+            if (pass == 0) glColorMask(GL_FALSE, GL_TRUE, GL_TRUE, GL_FALSE);
+            else           glColorMask(GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE);
+        }
+
+    // matches the real source: glClearColor is recomputed every frame from
+    // the current fog color, not set once at init and left alone. This was
+    // still the one-time init call's stale hardcoded 0.5/0.8/1.0 (the old
+    // pre-Survival-Test sky tint), so any empty space (world edge, a gap
+    // between blocks, geometry beyond the tiny draw distance's chunk
+    // radius) always showed that fixed blue instead of matching the actual
+    // fog color; most visible as a persistent unfogged blue sliver right at
+    // the horizon on the TINY view distance setting, since fog there is
+    // otherwise supposed to fully hide it
+    glClearColor(fogColorDaylight[0], fogColorDaylight[1], fogColorDaylight[2], 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glEnable(GL_MULTISAMPLE);
 
-    setupCamera(p, t);
+    setupCamera(p, t, pass);
 
     Frustum frustum;
     frustum_calculate(&frustum);
@@ -1932,38 +2349,49 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     setupEntityLighting(true);
 
+    // c0.27_st: matches Entity.shouldRender(Vec3)'s own camera position
+    // exactly: the player's plain interpolated position (no eye height
+    // offset), bytecode confirmed as the Vec3 passed into BlockMap's own
+    // generic entity render dispatch. A per-entity size based distance cull,
+    // independent of (and in addition to) the frustum test below, was
+    // entirely missing, so entities rendered at any distance as long as
+    // they were in the view frustum
+    float camX = p->e.prevX + (p->e.x - p->e.prevX) * t;
+    float camY = p->e.prevY + (p->e.y - p->e.prevY) * t;
+    float camZ = p->e.prevZ + (p->e.z - p->e.prevZ) * t;
+
     for (int i = 0; i < mobCount; ++i) {
         const Creature* c = &mobs[i];
-        if (frustum_isVisible(&frustum, &c->e.boundingBox)) {
+        if (Entity_shouldRender(&c->e, camX, camY, camZ) && frustum_isVisible(&frustum, &c->e.boundingBox)) {
             Creature_render(c, t);
         }
     }
 
     for (int i = 0; i < netPlayerCount; ++i) {
         const NetworkPlayer* np = &netPlayers[i];
-        if (frustum_isVisible(&frustum, &np->base.boundingBox)) {
+        if (Entity_shouldRender(&np->base, camX, camY, camZ) && frustum_isVisible(&frustum, &np->base.boundingBox)) {
             NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
         }
     }
 
     for (int i = 0; i < arrowCount; ++i) {
         const Arrow* a = &arrows[i];
-        if (frustum_isVisible(&frustum, &a->e.boundingBox)) {
+        if (Entity_shouldRender(&a->e, camX, camY, camZ) && frustum_isVisible(&frustum, &a->e.boundingBox)) {
             Arrow_render(a, t);
         }
     }
 
     for (int i = 0; i < itemCount; ++i) {
         const Item* it = &items[i];
-        if (frustum_isVisible(&frustum, &it->e.boundingBox)) {
+        if (Entity_shouldRender(&it->e, camX, camY, camZ) && frustum_isVisible(&frustum, &it->e.boundingBox)) {
             Item_render(it, t);
         }
     }
 
-    for (int i = 0; i < signCount; ++i) {
-        const Sign* s = &signs[i];
-        if (frustum_isVisible(&frustum, &s->e.boundingBox)) {
-            Sign_render(s, t, &gFont);
+    for (int i = 0; i < tntCount; ++i) {
+        const PrimedTnt* tnt = &tnts[i];
+        if (Entity_shouldRender(&tnt->e, camX, camY, camZ) && frustum_isVisible(&frustum, &tnt->e.boundingBox)) {
+            PrimedTnt_render(tnt, t);
         }
     }
 
@@ -1981,13 +2409,14 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     setupFog(1);
     glEnable(GL_LIGHTING);
 
-    // c0.24_st_03: only tile hits get the wireframe/break-progress overlay;
-    // an entity hit has no meaningful x/y/z block position to draw one at
+    // c0.24_st_03: only tile hits get the wireframe outline; an entity hit
+    // has no meaningful x/y/z block position to draw one at. The crack
+    // overlay itself only needs to draw once (below, after the translucent
+    // water layer), so this first pass is outline-only
     if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
-        LevelRenderer_renderHitOutline(&hitResult, gEditMode);
+        LevelRenderer_renderHitOutline(&levelRenderer, &hitResult);
         glEnable(GL_ALPHA_TEST);
         glEnable(GL_LIGHTING);
     }
@@ -2013,10 +2442,17 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     if (!isHitNull && hitResult.type == HITRESULT_TILE) {
         glDepthFunc(GL_LESS);
         glDisable(GL_ALPHA_TEST);
-        LevelRenderer_renderHit(&levelRenderer, &player, &hitResult, gEditMode, Inventory_getSelected(&player.inventory));
-        LevelRenderer_renderHitOutline(&hitResult, gEditMode);
+        LevelRenderer_renderHit(&levelRenderer, &hitResult, gMineFraction);
+        LevelRenderer_renderHitOutline(&levelRenderer, &hitResult);
         glEnable(GL_ALPHA_TEST);
         glDepthFunc(GL_LEQUAL);
+    }
+
+    // c0.27_st: rain, drawn right before the hand pass, matching real
+    // source's own exact position in the frame (after the liquid layer and
+    // lighting/fog disable, before the hand's own depth clear)
+    if (gRaining) {
+        renderRain(p, t);
     }
 
     // c0.25_05_st: first person hand, drawn last among the 3D passes,
@@ -2026,7 +2462,12 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // the final 3D pass, right before the 2D HUD. Drawn whenever a level is
     // loaded, screen open or not, matching the real source; render() is
     // already only reached once a level exists
-    renderHand(p, t);
+    renderHand(p, t, pass);
+    }
+
+    if (gOptions.anaglyph3d) {
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    }
 
     drawGui(t);
 
@@ -2037,6 +2478,16 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     // budget tracking. timeBeginPeriod(1) in timer.c already requests the 1ms
     // Sleep() granularity this needs to actually land on 200fps on Windows
     sleepMillis(5);
+    // c0.27_st: the new Limit framerate toggle is a genuinely separate,
+    // additional Thread.sleep(5) in real source's own render loop, layered
+    // on top of whatever base frame timing already exists there. This
+    // port's own frame timing already has its own unconditional 200fps cap
+    // (above, since c0.0.23a_01, which real source doesn't have at all at
+    // that point in its history), so this can't be bit-exact; kept as a
+    // second, additive 5ms sleep when the option is on, which reproduces
+    // the toggle's real effect (roughly halving the frame rate) rather than
+    // silently doing nothing
+    if (gOptions.limitFramerate) sleepMillis(5);
 }
 
 /* main loop */
@@ -2097,7 +2548,7 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
 
                 // c0.24_st_03: the c0.0.21a Select block screen's Screen.e
                 // passthrough (walking/hotbar switching while a screen is
-                // open) is gone along with that screen - nothing in this
+                // open) is gone along with that screen; nothing in this
                 // version's real source ever sets that flag anymore
             }
 
@@ -2142,6 +2593,26 @@ static void tick(Player* p, GLFWwindow* w) {
     (void)w;
 
     gTickCount++;
+
+    // c0.27_st: matches real source's own per tick rain-splash spawn exactly:
+    // 50 random samples per tick in a 9x9 column square around the
+    // player, each only landing a WaterDropParticle if that column's
+    // terrain height is within 4 blocks of the player's own Y (skips columns
+    // whose ground is far above or below, e.g. looking down into a ravine)
+    if (gRaining) {
+        int px = (int)p->e.x, py = (int)p->e.y, pz = (int)p->e.z;
+        for (int i = 0; i < 50; ++i) {
+            int x = px + (rand() % 9) - 4;
+            int z = pz + (rand() % 9) - 4;
+            int highest = Level_getHighestTile(&level, x, z);
+            if (highest > py + 4 || highest < py - 4) continue;
+            float jx = (float)rand() / (float)RAND_MAX;
+            float jz = (float)rand() / (float)RAND_MAX;
+            Particle drop;
+            Particle_initWaterDrop(&drop, &level, (float)x + jx, (float)highest + 0.1f, (float)z + jz);
+            ParticleEngine_add(&particleEngine, &drop);
+        }
+    }
 
     // c0.0.19a_04: advance the water/lava animation one step and patch the
     // result directly into the live terrain.png texture at that tile's
@@ -2258,11 +2729,21 @@ static void tick(Player* p, GLFWwindow* w) {
         i++;
     }
 
-    for (int i = 0; i < signCount; ) {
-        Sign_onTick(&signs[i]);
-        if (signs[i].e.removed) {
-            signs[i] = signs[signCount - 1];
-            signCount--;
+    for (int i = 0; i < tntCount; ) {
+        PrimedTnt_onTick(&tnts[i]);
+        if (tnts[i].e.removed) {
+            tnts[i] = tnts[tntCount - 1];
+            tntCount--;
+            continue;
+        }
+        i++;
+    }
+
+    for (int i = 0; i < smolderCount; ) {
+        Smolder_onTick(&smolders[i]);
+        if (smolders[i].e.removed) {
+            smolders[i] = smolders[smolderCount - 1];
+            smolderCount--;
             continue;
         }
         i++;

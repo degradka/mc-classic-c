@@ -22,6 +22,7 @@ void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage) {
     ai->onDeathTimeout = NULL;
     ai->onAfterUpdate = NULL;
     ai->onAfterAttack = NULL;
+    ai->onJumpFromGround = NULL;
 }
 
 // matches BasicAttackAI.attack(Entity): blocked by a solid block in the way
@@ -157,7 +158,10 @@ void Ai_tick(Ai* ai, Entity* mob) {
     if (ai->wantsJump) {
         if (inWater)            mob->motionY += 0.04f;
         else if (inLava)        mob->motionY += 0.04f;
-        else if (mob->onGround) mob->motionY = 0.42f;
+        else if (mob->onGround) {
+            if (ai->onJumpFromGround) ai->onJumpFromGround(ai, mob);
+            else mob->motionY = 0.42f;
+        }
     }
 
     ai->speedX *= 0.98f;

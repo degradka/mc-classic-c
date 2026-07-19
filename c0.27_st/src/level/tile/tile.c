@@ -37,8 +37,13 @@ static int Tile_default_isSolid(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_blocksLight(const Tile* self){ (void)self; return 1; }
 static int Tile_default_mayPick(const Tile* self)    { (void)self; return 1; }
 static int Tile_default_getAABB(const Tile* self, int x,int y,int z, AABB* out) {
-    (void)self;
-    if (out) *out = AABB_create(x, y, z, x+1, y+1, z+1);
+    // c0.27_st: matches real source's own b(x,y,z), which builds the world
+    // AABB from the tile's own shape bounds, not a hardcoded full cube. Was
+    // hardcoded here, so a Slab (yy1=0.5f) still collided as a full block;
+    // no effect on every other tile registered so far, since they're all
+    // still the default 0,0,0..1,1,1 shape
+    if (out) *out = AABB_create(x + self->xx0, y + self->yy0, z + self->zz0,
+                                 x + self->xx1, y + self->yy1, z + self->zz1);
     return 1; // has AABB
 }
 
@@ -172,6 +177,11 @@ static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, in
 }
 
 static int Tile_default_getDropCount(const Tile* self) { (void)self; return 1; }
+// TNT never drops an item copy of itself; removing it (mining, or being
+// caught in another explosion) always converts it directly into a primed
+// entity via Tnt_onRemoved, never a pickup, matching the real source having
+// no separate drop mechanic for it at all
+static int Tnt_getDropCount(const Tile* self) { (void)self; return 0; }
 static int Tile_default_getDropResource(const Tile* self) { return self->id; }
 
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
@@ -181,6 +191,8 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
     t->tickDelay = 0;
     t->particleGravity = 1.0f;
+    t->hardnessTicks = 20; // overridden per tile below, matches real source's own explicit hardness set at every registration
+    t->explosionResistant = 0; // overridden true for a handful of sturdier tiles below
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
@@ -229,6 +241,13 @@ Tile TILE_ROSE;
 Tile TILE_MUSHROOM_BROWN;
 Tile TILE_MUSHROOM_RED;
 Tile TILE_GOLD_BLOCK;
+Tile TILE_IRON_BLOCK;
+Tile TILE_DOUBLE_SLAB;
+Tile TILE_SLAB;
+Tile TILE_BRICK;
+Tile TILE_TNT;
+Tile TILE_BOOKSHELF;
+Tile TILE_MOSSSTONE;
 
 /* Grass has per face textures: top is 0, bottom is 2, sides are 3 */
 static int Grass_getTexture(const Tile* self, int face) {
@@ -245,11 +264,31 @@ static int Grass_getTexture(const Tile* self, int face) {
 // genuine Dirt drops
 static int Grass_getDropResource(const Tile* self) { (void)self; return TILE_DIRT.id; }
 
+// c0.27_st: Rock's own g() gains an override too, dropping Cobblestone
+// (this port's TILE_STONEBRICK) instead of self, same reasoning as Grass
+// above; matches level/tile/k.java's own new getDropResource() override
+static int Rock_getDropResource(const Tile* self) { (void)self; return TILE_STONEBRICK.id; }
+
+// c0.27_st: Gold/Iron Ore now drop their refined block instead of
+// themselves, matching each ore tile's own new getDropResource() override
+static int GoldOre_getDropResource(const Tile* self) { (void)self; return TILE_GOLD_BLOCK.id; }
+static int IronOre_getDropResource(const Tile* self) { (void)self; return TILE_IRON_BLOCK.id; }
+// c0.27_st: real source's own Coal Ore drop, confirmed directly from
+// level/tile/f.java's own g(): genuinely drops a Slab, not itself or coal.
+// Thematically odd, but the real 0.26 changelog independently confirms
+// it's correct
+static int CoalOre_getDropResource(const Tile* self) { (void)self; return TILE_SLAB.id; }
+// matches f.java's own f(): all 3 ore ancestors drop 1-3, not a flat 1
+static int Ore_getDropCount(const Tile* self) { (void)self; return rand() % 3 + 1; }
+
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
     if (rand() % 4 != 0) return; // c0.0.13a throttles grass ticks to 25%
 
-    if (!Level_isLit(lvl, x, y + 1, z)) {
+    // c0.27_st: was y+1, matches the isLit heightmap semantics shift in
+    // level.c's calcLightDepths (net no change to grass's own behavior,
+    // both sides of the comparison moved down one block together)
+    if (!Level_isLit(lvl, x, y, z)) {
         // no sunlight reaching the block above: turn into dirt
         level_setTile(lvl, x, y, z, TILE_DIRT.id);
     } else {
@@ -258,7 +297,7 @@ static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
             int tx = x + (rand() % 3) - 1;
             int ty = y + (rand() % 5) - 3;
             int tz = z + (rand() % 3) - 1;
-            if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty + 1, tz)) {
+            if (Level_getTile(lvl, tx, ty, tz) == TILE_DIRT.id && Level_isLit(lvl, tx, ty, tz)) {
                 level_setTile(lvl, tx, ty, tz, TILE_GRASS.id);
             }
         }
@@ -341,12 +380,26 @@ static void Liquid_tick(const Tile* self, Level* lvl, int x, int y, int z) {
 }
 
 static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    // c0.27_st CORRECTION: matches the real source's own neighborChanged
+    // exactly: the rock conversion uses the GATED setTile (fires
+    // onRemoved/onPlace, relights, notifies neighbors, refreshes the
+    // renderer), not setTileNoUpdate. Only the separate "resume flowing"
+    // reaction elsewhere in this file uses the ungated call. This was wrongly
+    // using setTileNoUpdate for the conversion too, silently skipping all of
+    // that bookkeeping
     if (self->liquidType == LIQUID_WATER && (type == TILE_LAVA.id || type == TILE_CALM_LAVA.id)) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
     }
     if (self->liquidType == LIQUID_LAVA && (type == TILE_WATER.id || type == TILE_CALM_WATER.id)) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
     }
+}
+
+// c0.27_st: matches flowing Liquid's own b(Level,x,y,z) override exactly:
+// schedules an immediate tick the instant a player places a source block
+// directly, rather than waiting for the next random ambient tick to notice
+static void Liquid_onPlacedByPlayer(const Tile* self, Level* lvl, int x, int y, int z) {
+    Level_addToTickNextTick(lvl, x, y, z, self->tileId);
 }
 
 // Water only shows in the dedicated liquid layer (1, renumbered down from 2
@@ -388,13 +441,16 @@ static void CalmLiquid_neighborChanged(const Tile* self, Level* lvl, int x, int 
 
     // c0.0.14a_08: the rock conversion check now returns immediately, and
     // restarting flow now also schedules a tick right away instead of
-    // waiting for an ambient random tick to notice the tile is flowing again
+    // waiting for an ambient random tick to notice the tile is flowing again.
+    // c0.27_st CORRECTION: the conversion itself uses the GATED setTile,
+    // matching the real source exactly; only the "resume flowing" branch
+    // below uses the ungated call
     if (self->liquidType == LIQUID_WATER && type == TILE_LAVA.id) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
         return;
     }
     if (self->liquidType == LIQUID_LAVA && type == TILE_WATER.id) {
-        Level_setTileNoUpdate(lvl, x, y, z, TILE_ROCK.id);
+        level_setTile(lvl, x, y, z, TILE_ROCK.id);
         return;
     }
     if (hasAirNeighbor) {
@@ -490,7 +546,7 @@ static void Bush_renderItem(const Tile* self, Tessellator* t, float brightness) 
 }
 
 // c0.24_st_03: Bush is this codebase's own name for what the real source
-// calls Sapling (level\tile\i.java) - same tile, id 6, same class hierarchy
+// calls Sapling (level\tile\i.java): same tile, id 6, same class hierarchy
 static void Bush_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     int below = Level_getTile(lvl, x, y-1, z);
     if (!Level_isLit(lvl, x, y, z) || (below != TILE_DIRT.id && below != TILE_GRASS.id)) {
@@ -525,6 +581,13 @@ static void FallingTile_neighborChanged(const Tile* self, Level* lvl, int x, int
     (void)self; (void)type;
     FallingTile_fall(lvl, x, y, z);
 }
+// c0.27_st: matches Sand/Gravel's own b(Level,x,y,z) override exactly: an
+// immediate fall check the instant the player places it, not just on a
+// neighbor change or the next random ambient tick
+static void FallingTile_onPlacedByPlayer(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    FallingTile_fall(lvl, x, y, z);
+}
 
 /* Log: new in c0.0.14a_08, per face texture, rings on top/bottom, bark on sides */
 static int Log_getTexture(const Tile* self, int face) {
@@ -536,12 +599,98 @@ static int Log_getTexture(const Tile* self, int face) {
 static int Log_getDropCount(const Tile* self)    { (void)self; return rand() % 3 + 3; }
 static int Log_getDropResource(const Tile* self) { (void)self; return TILE_WOOD.id; }
 
+// c0.27_st: new tiles 41-48's per-face texture layouts, same face convention
+// as Grass/Log above (face 0 = bottom, 1 = top, 2-5 = sides)
+static int GoldBlock_getTexture(const Tile* self, int face) {
+    (void)self; return (face == 1) ? 56 : (face == 0) ? 24 : 40;
+}
+static int IronBlock_getTexture(const Tile* self, int face) {
+    (void)self; return (face == 1) ? 55 : (face == 0) ? 23 : 39;
+}
+static int Slab_getTexture(const Tile* self, int face) {
+    (void)self; return (face == 0 || face == 1) ? 6 : 5;
+}
+// CORRECTION: this was backwards (bottom=8/side=9/top=10), sourced from an
+// earlier research summary never personally verified against bytecode.
+// Real source's own j.java: b(0)=bottom=ad+2, b(1)=top=ad+1, else=side=ad,
+// with ad (the tile's own base texture, also what particles use) = 8.
+// So: side (the "TNT" text face, default case) = 8, top (fuse/spark) = 9,
+// bottom (plain) = 10
+static int Tnt_getTexture(const Tile* self, int face) {
+    (void)self; return (face == 0) ? 10 : (face == 1) ? 9 : 8;
+}
+
+// implemented in minecraft.c: allocates a slot in the tnts[] array and
+// spawns a ticking PrimedTnt there, matching Minecraft_spawnItem's own
+// cross-file layering pattern (tile.c has no access to that array)
+extern void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z);
+// same, but with a short randomized chain-ignite fuse, see level->inExplosion
+extern void Minecraft_spawnPrimedTntChainFuse(Level* lvl, float x, float y, float z);
+
+// c0.27_st: matches the real source's TNT tile: removing it (mining it, or
+// having it caught in another explosion's blast, both routed through this
+// same onRemoved hook via Level_netSetTile) spawns a primed, ticking TNT
+// entity at its center instead of ever dropping itself as an item. Real
+// source actually has two distinct hooks here (a normal-fuse one for mining,
+// a short-random-fuse one for chain-ignition via Level.explode's own
+// f(Level,x,y,z)); level->inExplosion is how this shared hook tells which
+// one it's standing in for
+static void Tnt_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    if (lvl->inExplosion) {
+        Minecraft_spawnPrimedTntChainFuse(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f);
+    } else {
+        Minecraft_spawnPrimedTnt(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f);
+    }
+}
+// matches p.java's own c(): the single half-height Slab is not solid for
+// face culling purposes (its own field an, set false in the ctor), only
+// Double Slab is (an=true, so it keeps the inherited default isSolid=1).
+// Without this, a full cube neighboring a Slab had its own shared face
+// wrongly culled as if the Slab covered the whole cell, showing an X-ray
+// hole above the exposed half. Real source's actual physics collision is
+// driven entirely by the tile's AABB (already correctly half-height here
+// via TILE_SLAB.yy1=0.5f), not by this flag, so this change is purely
+// visual and doesn't affect standing/walking on a slab
+static int Slab_isSolid(const Tile* self) { (void)self; return 0; }
+
+// c0.27_st: matches p.java's own neighborChanged override exactly (this
+// port's earlier attempt skipped this entirely as "a simplification, since
+// Double Slab already exists as its own independently placeable tile," but
+// that was wrong, since real source really does auto-merge). Only the single
+// Slab (not Double Slab) has this behavior, matching the real source's own
+// `if (this != Y) return` guard. Whenever a neighbor changes: if the cell
+// directly above this slab is now occupied by ANY tile (not just another
+// slab), this slab immediately becomes a Double Slab, and if that tile
+// above happened to be a slab too, it gets cleared since it merged in. Also
+// checks below: if the tile directly below is a Slab, this one clears
+// itself and the one below becomes the Double Slab instead. Both branches
+// can fire from the same call, matching real source exactly (no early
+// return between them)
+static void Slab_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
+    (void)self; (void)type;
+    int above = Level_getTile(lvl, x, y + 1, z);
+    if (above > 0) {
+        level_setTile(lvl, x, y, z, TILE_DOUBLE_SLAB.id);
+        if (above == TILE_SLAB.id) {
+            level_setTile(lvl, x, y + 1, z, 0);
+        }
+    }
+    if (Level_getTile(lvl, x, y - 1, z) == TILE_SLAB.id) {
+        level_setTile(lvl, x, y, z, 0);
+        level_setTile(lvl, x, y - 1, z, TILE_DOUBLE_SLAB.id);
+    }
+}
+static int Bookshelf_getTexture(const Tile* self, int face) {
+    (void)self; return (face == 0 || face == 1) ? 4 : 35;
+}
+
 /* Leaves: new in c0.0.14a_08, non solid, non light blocking, planted by
    world generation's new tree pass */
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 // c0.25_05_st: 1-in-10 chance of a single sapling (was 1-in-6), matches
-// level\tile\e.java's own f()/g() exactly - returning a drop count of 0 the
+// level\tile\e.java's own f()/g() exactly; returning a drop count of 0 the
 // other 9/10 of the time naturally yields "no drop" via Tile_dropItems' own
 // count-driven loop, no separate chance check needed on top of it
 static int Leaves_getDropCount(const Tile* self)    { (void)self; return (rand() % 10 == 0) ? 1 : 0; }
@@ -612,8 +761,39 @@ void Tile_registerAll(void) {
     TILE_WOOD.soundType       = SOUND_WOOD;
     TILE_BEDROCK.soundType    = SOUND_STONE;
 
+    // c0.27_st: explosion resistance; Bedrock is deliberately NOT included
+    // here, a confirmed genuine quirk of the real source (explosions do
+    // destroy Bedrock in this version)
+    TILE_ROCK.explosionResistant       = 1;
+    TILE_STONEBRICK.explosionResistant = 1;
+
+    // c0.24_st_03: real per tile hardness (seconds*20, read directly from
+    // each tile's own constructor call), matching the real source's
+    // progressive mining: hold the crosshair on the same block for
+    // hardnessTicks+1 ticks before it actually breaks
+    TILE_ROCK.hardnessTicks       = 20;
+    TILE_GRASS.hardnessTicks      = 12;
+    TILE_DIRT.hardnessTicks       = 10;
+    // c0.27_st: CORRECTION: Stonebrick/Wood dropped from 2.0 (40 ticks) to
+    // 1.5 (30 ticks), and Bedrock rose from 100.0 (2000 ticks) to 999.0
+    // (19980 ticks) versus c0.24_st_03's own values, confirmed by directly
+    // re-reading this version's own tile table rather than assuming
+    // hardness carried forward unchanged
+    TILE_STONEBRICK.hardnessTicks = 30;
+    TILE_WOOD.hardnessTicks       = 30;
+    TILE_BUSH.hardnessTicks       = 0; // instant, matches every plant/flower/mushroom
+    TILE_BEDROCK.hardnessTicks    = 19980;
+    // c0.27_st: CORRECTION: Bedrock is not explosion-destructible, contrary
+    // to the "confirmed genuine quirk" note above. Direct bytecode reading
+    // of level/tile/a.java's own tile table shows `new a(7, 17)....ap = false`
+    // (id 7, tex 17, unmistakably Bedrock) is in the exact same
+    // explosion-resistant set as Rock/Stonebrick/ore/the new
+    // metal-slab-brick-moss blocks. It does NOT get destroyed by explosions
+    TILE_BEDROCK.explosionResistant = 1;
+
     TILE_GRASS.onTick     = Grass_onTick;
     TILE_GRASS.getDropResource = Grass_getDropResource;
+    TILE_ROCK.getDropResource  = Rock_getDropResource;
 
     TILE_BUSH.isSolid     = Bush_isSolid;
     TILE_BUSH.blocksLight = Bush_blocksLight;
@@ -621,12 +801,27 @@ void Tile_registerAll(void) {
     TILE_BUSH.render      = Bush_render;
     TILE_BUSH.renderItem  = Bush_renderItem;
     TILE_BUSH.onTick      = Bush_onTick;
+    // c0.27_st: real source's own footprint shape for Bush/plants, confirmed
+    // directly from this version's own constructor (0.5-f2..0.5+f2 on x/z,
+    // 0..2*f2 on y, f2=0.4); was left at the registerTile default full 0..1
+    // cube, which made the wireframe-highlight box around a targeted plant
+    // too large. Note this is LARGER than c0.25_05_st's own f2=0.2 footprint,
+    // the opposite direction from what the 0.26 changelog's "plant hitboxes
+    // reduced" line describes; noting the discrepancy rather than
+    // guessing, but matching this exact version's own confirmed bytecode
+    TILE_BUSH.xx0 = 0.1f; TILE_BUSH.yy0 = 0.0f; TILE_BUSH.zz0 = 0.1f;
+    TILE_BUSH.xx1 = 0.9f; TILE_BUSH.yy1 = 0.8f; TILE_BUSH.zz1 = 0.9f;
 
     // tex 14 = water, tex 30 = lava (terrain.png atlas slots, matching LiquidTile.java)
     registerTile(&TILE_WATER,      8, 14, NULL);
     registerTile(&TILE_CALM_WATER, 9, 14, NULL);
     registerTile(&TILE_LAVA,      10, 30, NULL);
     registerTile(&TILE_CALM_LAVA, 11, 30, NULL);
+
+    TILE_WATER.hardnessTicks      = 2000;
+    TILE_CALM_WATER.hardnessTicks = 2000;
+    TILE_LAVA.hardnessTicks       = 2000;
+    TILE_CALM_LAVA.hardnessTicks  = 2000;
 
     TILE_WATER.liquidType      = LIQUID_WATER;
     TILE_CALM_WATER.liquidType = LIQUID_WATER;
@@ -700,11 +895,28 @@ void Tile_registerAll(void) {
     TILE_CALM_WATER.neighborChanged = CalmLiquid_neighborChanged;
     TILE_CALM_LAVA.neighborChanged  = CalmLiquid_neighborChanged;
 
+    // matches real source's calm liquid class inheriting the flowing
+    // variant's own b(Level,x,y,z) override unchanged (never overridden)
+    TILE_WATER.onPlacedByPlayer      = Liquid_onPlacedByPlayer;
+    TILE_LAVA.onPlacedByPlayer       = Liquid_onPlacedByPlayer;
+    TILE_CALM_WATER.onPlacedByPlayer = Liquid_onPlacedByPlayer;
+    TILE_CALM_LAVA.onPlacedByPlayer  = Liquid_onPlacedByPlayer;
+
     registerTile(&TILE_SAND,       12, 18, NULL);
     registerTile(&TILE_GRAVEL,     13, 19, NULL);
     registerTile(&TILE_GOLD_ORE,   14, 32, NULL);
     registerTile(&TILE_IRON_ORE,   15, 33, NULL);
     registerTile(&TILE_COAL_ORE,   16, 34, NULL);
+    // c0.27_st: drop the refined block instead of self
+    TILE_GOLD_ORE.getDropResource = GoldOre_getDropResource;
+    TILE_IRON_ORE.getDropResource = IronOre_getDropResource;
+    TILE_COAL_ORE.getDropResource = CoalOre_getDropResource;
+    TILE_GOLD_ORE.getDropCount = Ore_getDropCount;
+    TILE_IRON_ORE.getDropCount = Ore_getDropCount;
+    TILE_COAL_ORE.getDropCount = Ore_getDropCount;
+    TILE_GOLD_ORE.explosionResistant = 1;
+    TILE_IRON_ORE.explosionResistant = 1;
+    TILE_COAL_ORE.explosionResistant = 1;
     // c0.0.23a_01: textureId (used for break particles, see Particle_init)
     // is 20, not 0. Confirmed directly against the real source's Log
     // subclass, which explicitly sets its base texture field to 20 (the bark
@@ -713,8 +925,17 @@ void Tile_registerAll(void) {
     registerTile(&TILE_LOG,        17, 20, Log_getTexture);
     registerTile(&TILE_LEAVES,     18, 22, NULL);
 
+    TILE_SAND.hardnessTicks     = 10;
+    TILE_GRAVEL.hardnessTicks   = 12;
+    TILE_GOLD_ORE.hardnessTicks = 60;
+    TILE_IRON_ORE.hardnessTicks = 60;
+    TILE_COAL_ORE.hardnessTicks = 60;
+    TILE_LOG.hardnessTicks      = 50;
+    TILE_LEAVES.hardnessTicks   = 4;
+
     TILE_SAND.onTick   = TILE_GRAVEL.onTick   = FallingTile_onTick;
     TILE_SAND.neighborChanged = TILE_GRAVEL.neighborChanged = FallingTile_neighborChanged;
+    TILE_SAND.onPlacedByPlayer = TILE_GRAVEL.onPlacedByPlayer = FallingTile_onPlacedByPlayer;
 
     TILE_LEAVES.isSolid     = Leaves_isSolid;
     TILE_LEAVES.blocksLight = Leaves_blocksLight;
@@ -746,6 +967,9 @@ void Tile_registerAll(void) {
     registerTile(&TILE_SPONGE, 19, 48, NULL);
     registerTile(&TILE_GLASS,  20, 49, NULL);
 
+    TILE_SPONGE.hardnessTicks = 12;
+    TILE_GLASS.hardnessTicks  = 6;
+
     TILE_SPONGE.onPlace   = Sponge_onPlace;
     TILE_SPONGE.onRemoved = Sponge_onRemoved;
     TILE_SPONGE.soundType = SOUND_CLOTH;
@@ -766,6 +990,7 @@ void Tile_registerAll(void) {
     for (int i = 0; i < 16; ++i) {
         registerTile(&TILE_CLOTH[i], 21 + i, 64 + i, NULL);
         TILE_CLOTH[i].soundType = SOUND_CLOTH;
+        TILE_CLOTH[i].hardnessTicks = 16;
     }
 
     // c0.0.20a_02: Dandelion/Rose/Mushrooms reuse Bush's tile class outright,
@@ -783,52 +1008,69 @@ void Tile_registerAll(void) {
         plants[i]->render      = Bush_render;
         plants[i]->renderItem  = Bush_renderItem;
         plants[i]->onTick      = Bush_onTick;
+        plants[i]->hardnessTicks = 0; // instant, matches Bush
+        plants[i]->xx0 = 0.1f; plants[i]->yy0 = 0.0f; plants[i]->zz0 = 0.1f;
+        plants[i]->xx1 = 0.9f; plants[i]->yy1 = 0.8f; plants[i]->zz1 = 0.9f;
     }
 
-    // c0.0.20a_02: Gold Block, plain tile, no special behavior
-    registerTile(&TILE_GOLD_BLOCK, 41, 40, NULL);
+    // c0.27_st: Gold Block gains real per-face textures this version (was a
+    // plain single-texture tile since c0.0.20a_02)
+    registerTile(&TILE_GOLD_BLOCK, 41, 40, GoldBlock_getTexture);
     TILE_GOLD_BLOCK.soundType = SOUND_METAL;
-}
+    TILE_GOLD_BLOCK.hardnessTicks = 60;
+    TILE_GOLD_BLOCK.explosionResistant = 1;
 
-/* untextured single face helper for hit highlight */
-// only draws a face if the player is on the side it faces, matching the real
-// game's block highlight (was drawing all 6 faces unconditionally)
-void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz) {
-    const float minX = (float)x,     maxX = (float)x + 1.0f;
-    const float minY = (float)y,     maxY = (float)y + 1.0f;
-    const float minZ = (float)z,     maxZ = (float)z + 1.0f;
+    registerTile(&TILE_IRON_BLOCK, 42, 39, IronBlock_getTexture);
+    TILE_IRON_BLOCK.soundType = SOUND_METAL;
+    TILE_IRON_BLOCK.hardnessTicks = 100;
+    TILE_IRON_BLOCK.explosionResistant = 1;
 
-    if (face == 0 && y > py) { // bottom
-        Tessellator_vertex(t, minX, minY, maxZ);
-        Tessellator_vertex(t, minX, minY, minZ);
-        Tessellator_vertex(t, maxX, minY, minZ);
-        Tessellator_vertex(t, maxX, minY, maxZ);
-    } else if (face == 1 && y < py) { // top
-        Tessellator_vertex(t, maxX, maxY, maxZ);
-        Tessellator_vertex(t, maxX, maxY, minZ);
-        Tessellator_vertex(t, minX, maxY, minZ);
-        Tessellator_vertex(t, minX, maxY, maxZ);
-    } else if (face == 2 && z > pz) { // negative Z
-        Tessellator_vertex(t, minX, maxY, minZ);
-        Tessellator_vertex(t, maxX, maxY, minZ);
-        Tessellator_vertex(t, maxX, minY, minZ);
-        Tessellator_vertex(t, minX, minY, minZ);
-    } else if (face == 3 && z < pz) { // positive Z
-        Tessellator_vertex(t, minX, maxY, maxZ);
-        Tessellator_vertex(t, minX, minY, maxZ);
-        Tessellator_vertex(t, maxX, minY, maxZ);
-        Tessellator_vertex(t, maxX, maxY, maxZ);
-    } else if (face == 4 && x > px) { // negative X
-        Tessellator_vertex(t, minX, maxY, maxZ);
-        Tessellator_vertex(t, minX, maxY, minZ);
-        Tessellator_vertex(t, minX, minY, minZ);
-        Tessellator_vertex(t, minX, minY, maxZ);
-    } else if (face == 5 && x < px) { // +X
-        Tessellator_vertex(t, maxX, minY, maxZ);
-        Tessellator_vertex(t, maxX, minY, minZ);
-        Tessellator_vertex(t, maxX, maxY, minZ);
-        Tessellator_vertex(t, maxX, maxY, maxZ);
-    }
+    // Double Slab: full cube, same textures as Slab below
+    registerTile(&TILE_DOUBLE_SLAB, 43, 6, Slab_getTexture);
+    TILE_DOUBLE_SLAB.soundType = SOUND_STONE;
+    TILE_DOUBLE_SLAB.hardnessTicks = 40;
+    TILE_DOUBLE_SLAB.explosionResistant = 1;
+
+    // Slab: half height box. Auto-merges into Double Slab via
+    // Slab_neighborChanged (see its own comment) whenever a tile appears
+    // directly above it, matching the real source exactly; a corrected
+    // earlier attempt at this had wrongly skipped that as unnecessary
+    registerTile(&TILE_SLAB, 44, 6, Slab_getTexture);
+    TILE_SLAB.soundType = SOUND_STONE;
+    TILE_SLAB.yy1 = 0.5f;
+    TILE_SLAB.hardnessTicks = 40;
+    TILE_SLAB.isSolid = Slab_isSolid;
+    TILE_SLAB.explosionResistant = 1;
+    TILE_SLAB.neighborChanged = Slab_neighborChanged;
+
+    registerTile(&TILE_BRICK, 45, 7, NULL);
+    TILE_BRICK.soundType = SOUND_STONE;
+    TILE_BRICK.hardnessTicks = 40;
+    TILE_BRICK.explosionResistant = 1;
+
+    // TNT: instant break (mining it just primes it, matches Tnt_onRemoved).
+    // Sound type confirmed cloth from the real source's own tile table.
+    // Base texture 8 (CORRECTED from 9); this is also what TerrainParticle
+    // uses for TNT's own explosion debris (reads the tile's base textureId
+    // field directly, not the per face override)
+    registerTile(&TILE_TNT, 46, 8, Tnt_getTexture);
+    TILE_TNT.hardnessTicks = 0;
+    TILE_TNT.soundType = SOUND_CLOTH;
+    TILE_TNT.onRemoved = Tnt_onRemoved;
+    TILE_TNT.getDropCount = Tnt_getDropCount;
+    // matches the real TNT tile's own mining-destroy override, which skips
+    // the usual debris-particle burst entirely (spawns the primed entity
+    // only, bytecode confirmed no super particle-spawn call)
+    TILE_TNT.skipDestroyParticles = 1;
+
+    registerTile(&TILE_BOOKSHELF, 47, 4, Bookshelf_getTexture);
+    TILE_BOOKSHELF.soundType = SOUND_WOOD;
+    TILE_BOOKSHELF.hardnessTicks = 30;
+
+    registerTile(&TILE_MOSSSTONE, 48, 36, NULL);
+    TILE_MOSSSTONE.soundType = SOUND_STONE;
+    TILE_MOSSSTONE.hardnessTicks = 20;
+    TILE_MOSSSTONE.explosionResistant = 1;
 }
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine) {

@@ -11,20 +11,27 @@ void Cube_init(Cube* c, int tx, int ty) {
     c->xRot = c->yRot = c->zRot = 0.0f;
     c->displayList = 0;
     c->built = 0;
+    c->visible = 1;
 }
 
 Cube* Cube_addBox(Cube* c, float ox, float oy, float oz, int w, int h, int d) {
+    return Cube_addBoxExpanded(c, ox, oy, oz, w, h, d, 0.0f);
+}
+
+Cube* Cube_addBoxExpanded(Cube* c, float ox, float oy, float oz, int w, int h, int d, float expand) {
     const float x = ox + w, y = oy + h, z = oz + d;
+    ox -= expand; oy -= expand; oz -= expand;
+    const float xe = x + expand, ye = y + expand, ze = z + expand;
 
     const Vertex b1 = Vertex_make(ox, oy, oz, 0, 0);
-    const Vertex b2 = Vertex_make(x,  oy, oz, 0, 8);
-    const Vertex b3 = Vertex_make(ox, oy, z,  0, 0);
-    const Vertex b4 = Vertex_make(x,  oy, z,  0, 8);
+    const Vertex b2 = Vertex_make(xe, oy, oz, 0, 8);
+    const Vertex b3 = Vertex_make(ox, oy, ze, 0, 0);
+    const Vertex b4 = Vertex_make(xe, oy, ze, 0, 8);
 
-    const Vertex t1 = Vertex_make(x,  y,  z,  8, 8);
-    const Vertex t2 = Vertex_make(ox, y,  z,  8, 0);
-    const Vertex t3 = Vertex_make(x,  y,  oz, 8, 8);
-    const Vertex t4 = Vertex_make(ox, y,  oz, 8, 0);
+    const Vertex t1 = Vertex_make(xe, ye, ze, 8, 8);
+    const Vertex t2 = Vertex_make(ox, ye, ze, 8, 0);
+    const Vertex t3 = Vertex_make(xe, ye, oz, 8, 8);
+    const Vertex t4 = Vertex_make(ox, ye, oz, 8, 0);
 
     // right
     Quad_init_uv(&c->polys[0], b4, b2, t3, t1,
@@ -68,6 +75,8 @@ void Cube_setPos(Cube* c, float x, float y, float z) {
 // glCallList every frame after, instead of re-issuing all 24 vertices in
 // immediate mode every single frame
 void Cube_render(Cube* c) {
+    if (!c->visible) return;
+
     if (!c->built) {
         c->displayList = glGenLists(1);
         glNewList(c->displayList, GL_COMPILE);

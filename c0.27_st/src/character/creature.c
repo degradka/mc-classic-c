@@ -5,6 +5,8 @@
 #include "mob_skeleton_model.h"
 #include "mob_pig_model.h"
 #include "mob_creeper_model.h"
+#include "mob_spider_model.h"
+#include "humanoid_armor_model.h"
 #include "../renderer/textures.h"
 #include "../mob.h"
 #include "../player.h"
@@ -35,7 +37,7 @@ extern bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, fl
 extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
 // implemented in minecraft.c: spawns a Leaves textured particle (real
 // source's own a.y constant), used only by Creeper's own death scatter
-extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz);
+extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz, const Tile* tile);
 
 // matches Skeleton$1's own tick() override: while alive and a target is
 // locked, a 1 in 30 chance per tick to fire, on top of everything
@@ -100,30 +102,61 @@ static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
         float mx = dx / mag / mag;
         float my = dy / mag / mag;
         float mz = dz / mag / mag;
-        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz);
+        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz, &TILE_LEAVES);
     }
 }
 
+// matches JumpAttackAI's own jumpFromGround() override: with no locked
+// target, an ordinary jump (the same 0.42f hop every other mob gets, since
+// this hook fully replaces the default rather than layering on it). With a
+// target, zero all horizontal drift and lunge forward along the current
+// facing instead, at a higher arc than a normal jump, a pounce rather than
+// continuous movement
+static void Spider_onJumpFromGround(Ai* ai, Entity* mob) {
+    if (!ai->attackTarget) {
+        mob->motionY = 0.42f;
+        return;
+    }
+    mob->motionX = 0.0f;
+    mob->motionZ = 0.0f;
+    Entity_moveRelative(mob, 0.0f, 1.0f, 0.6f);
+    mob->motionY = 0.5f;
+}
+
 // score awarded per kind on a credited kill, Mob_hurt's attacker argument,
-// matches each species' own die(Entity) override. Skeleton has none of its
-// own, mob/Skeleton.java doesn't override die(), so killing one silently
-// credits Zombie's own value instead. This is a genuine original quirk,
-// preserved faithfully rather than corrected
+// c0.27_st: Creeper/Zombie's own die() overrides are gone in real source,
+// replaced by a deathScore field set in each species' constructor instead
+// (Mob's own base die() reads it generically). Skeleton's constructor now
+// sets its own deathScore too, running after Zombie's inherited default and
+// overwriting it, so it's no longer silently tied to Zombie's value the way
+// it was every earlier version (100, via the missing override this comment
+// used to describe as "a genuine original quirk, preserved faithfully",
+// but that framing is now stale, since this really did change here)
 static void Creature_onDeath(Entity* self, Entity* attacker) {
     Creature* c = (Creature*)self;
 
-    if (attacker) { // only a credited kill awards score
+    if (attacker) {
         // an Arrow is itself the attacker, so knockback and hurtDir resolve
         // relative to where it struck, but redirects credit to whoever shot
-        // it via killCredit. Anything else attacking is the local Player
-        // directly
+        // it via killCredit
         if (attacker->killCredit) attacker = attacker->killCredit;
-        Player* killer = (Player*)attacker;
-        switch (c->kind) {
-            case CREATURE_ZOMBIE:
-            case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
-            case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
-            case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+        // CORRECTION: matches real source's own awardKillScore dispatch, where
+        // Entity's own base implementation is an empty no-op, only Player
+        // overrides it to actually add score. A mob can retaliate-lock onto
+        // and kill another mob (Ai_onHurt's own cross-species aggro, a
+        // genuine intentional feature), so attacker here is not always the
+        // Player, but it used to get unconditionally cast to Player* and
+        // written through regardless, corrupting whatever memory actually
+        // sits at that offset inside the real (non-Player) attacker
+        if (attacker->aiClassTag == AI_CLASS_PLAYER) {
+            Player* killer = (Player*)attacker;
+            switch (c->kind) {
+                case CREATURE_ZOMBIE:   Player_awardKillScore(killer, 80);  break;
+                case CREATURE_SKELETON: Player_awardKillScore(killer, 120); break;
+                case CREATURE_CREEPER:  Player_awardKillScore(killer, 200); break;
+                case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+                case CREATURE_SPIDER:   Player_awardKillScore(killer, 105); break;
+            }
         }
     }
 
@@ -150,6 +183,13 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     c->e.aiClassTag = (int)kind;
     c->kind = kind;
 
+    // c0.27_st: matches HumanoidMob's own per-instance field initializers
+    // exactly, a 20% independent chance each, rolled once at construction.
+    // Real source only has these fields on HumanoidMob (Zombie/Skeleton's
+    // own base class), so every other kind leaves them false
+    c->hasHelmet = (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) && frand01() < 0.2f;
+    c->hasArmor  = (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) && frand01() < 0.2f;
+
     switch (kind) {
         case CREATURE_ZOMBIE:
             c->e.heightOffset = 1.62f;
@@ -157,7 +197,15 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
             break;
         case CREATURE_SKELETON:
             c->e.heightOffset = 1.62f;
-            Ai_init(&c->ai, true, 30, 0.3f, 8);
+            // CORRECTION: wander pitch 0, not 30. Skeleton's real ctor chains
+            // to Zombie's own ctor (which sets 30 on a throwaway BasicAttackAI),
+            // then immediately builds a brand new Skeleton$1 instance and
+            // reassigns this.ai to it, discarding that throwaway object
+            // entirely. Skeleton$1 never touches defaultLookAngle, so it
+            // keeps AI's own field-initializer default of 0, bytecode
+            // confirmed via javap (no defaultLookAngle write reaches the
+            // object that ends up as Skeleton's real ai)
+            Ai_init(&c->ai, true, 0, 0.3f, 8);
             c->ai.onAfterUpdate = Skeleton_onAfterUpdate;
             c->ai.onDeathTimeout = Skeleton_onDeathTimeout;
             break;
@@ -171,6 +219,16 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
             c->e.heightOffset = 1.72f;
             Entity_setSize(&c->e, 1.4f, 1.2f);
             Ai_init(&c->ai, false, 0, 0.7f, 6);
+            break;
+        case CREATURE_SPIDER:
+            // matches Spider's own ctor: heightOffset 0.72, size 1.4x0.9
+            // (shorter than Pig's 1.2), JumpAttackAI (chase=true,
+            // defaultLookAngle 0, runSpeed 0.7*0.8=0.56, damage unchanged
+            // at BasicAttackAI's own default of 6)
+            c->e.heightOffset = 0.72f;
+            Entity_setSize(&c->e, 1.4f, 0.9f);
+            Ai_init(&c->ai, true, 0, 0.56f, 6);
+            c->ai.onJumpFromGround = Spider_onJumpFromGround;
             break;
     }
 
@@ -192,17 +250,55 @@ static const char* textureForKind(CreatureKind kind) {
         case CREATURE_SKELETON: return "resources/mob/skeleton.png";
         case CREATURE_CREEPER:  return "resources/mob/creeper.png";
         case CREATURE_PIG:      return "resources/mob/pig.png";
+        case CREATURE_SPIDER:   return "resources/mob/spider.png";
     }
     return "resources/mob/zombie.png";
+}
+
+// c0.27_st: matches Mob's new bobStrength field (default 1.0), multiplied
+// into the walk head-bob calc in Creature_render. Only Spider overrides it,
+// to 0, so it doesn't head-bob while walking
+static float bobStrengthForKind(CreatureKind kind) {
+    return (kind == CREATURE_SPIDER) ? 0.0f : 1.0f;
+}
+
+// c0.27_st: matches HumanoidMob's own armor overlay pass exactly, binding
+// /armor/plate.png, copying the just-posed base model's own head/rightArm/
+// leftArm rotation onto the shared armor model (body never rotates), and
+// rendering whichever parts showHelmet/showArmor enable. Wrapped in
+// GL_ALPHA_TEST so the parts of plate.png not covered by armor (transparent)
+// don't draw as solid black. GL_CULL_FACE toggling is intentionally omitted
+// here, per the standing project invariant that it is never enabled anywhere
+// in this port; real source's own enable/disable pair around this pass would
+// be a no-op reproduction of that same invariant anyway
+static void renderArmorOverlay(bool showHelmet, bool showArmor,
+                               float headXRot, float headYRot,
+                               float rightArmXRot, float rightArmZRot,
+                               float leftArmXRot, float leftArmZRot) {
+    if (!showHelmet && !showArmor) return;
+
+    static int texArmor = 0;
+    if (!texArmor) texArmor = loadTexture("resources/armor/plate.png", GL_NEAREST);
+    static HumanoidArmorModel sArmor; static bool armorInit = false;
+    if (!armorInit) { HumanoidArmorModel_init(&sArmor); armorInit = true; }
+
+    glBindTexture(GL_TEXTURE_2D, texArmor);
+    glEnable(GL_ALPHA_TEST);
+    HumanoidArmorModel_render(&sArmor, showHelmet, showArmor,
+                              headXRot, headYRot,
+                              rightArmXRot, rightArmZRot,
+                              leftArmXRot, leftArmZRot);
+    glDisable(GL_ALPHA_TEST);
 }
 
 // binds this kind's own texture and renders its model, factored out of
 // Creature_render so the invulnerability flash overlay, a second additive
 // blended rerender of the exact same pose, doesn't have to duplicate the
 // whole switch
-static void renderModelForKind(CreatureKind kind, float animStep, float run, float age,
+static void renderModelForKind(CreatureKind kind, bool hasHelmet, bool hasArmor,
+                                float animStep, float run, float age,
                                 float headYaw, float headPitch, float attackSwing) {
-    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0;
+    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0, texSpider = 0;
     switch (kind) {
         case CREATURE_ZOMBIE:
             if (!texZombie) texZombie = loadTexture(textureForKind(kind), GL_NEAREST);
@@ -211,6 +307,10 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobZombieModel sModel; static bool init = false;
                 if (!init) { MobZombieModel_init(&sModel); init = true; }
                 MobZombieModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmorOverlay(hasHelmet, hasArmor,
+                                   sModel.head.xRot, sModel.head.yRot,
+                                   sModel.rightArm.xRot, sModel.rightArm.zRot,
+                                   sModel.leftArm.xRot, sModel.leftArm.zRot);
             }
             break;
         case CREATURE_SKELETON:
@@ -220,6 +320,10 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobSkeletonModel sModel; static bool init = false;
                 if (!init) { MobSkeletonModel_init(&sModel); init = true; }
                 MobSkeletonModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmorOverlay(hasHelmet, hasArmor,
+                                   sModel.head.xRot, sModel.head.yRot,
+                                   sModel.rightArm.xRot, sModel.rightArm.zRot,
+                                   sModel.leftArm.xRot, sModel.leftArm.zRot);
             }
             break;
         case CREATURE_CREEPER:
@@ -238,6 +342,15 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobPigModel sModel; static bool init = false;
                 if (!init) { MobPigModel_init(&sModel); init = true; }
                 MobPigModel_render(&sModel, animStep, run, age, headYaw, headPitch);
+            }
+            break;
+        case CREATURE_SPIDER:
+            if (!texSpider) texSpider = loadTexture(textureForKind(kind), GL_NEAREST);
+            glBindTexture(GL_TEXTURE_2D, texSpider);
+            {
+                static MobSpiderModel sModel; static bool init = false;
+                if (!init) { MobSpiderModel_init(&sModel); init = true; }
+                MobSpiderModel_render(&sModel, animStep, run, age, headYaw, headPitch);
             }
             break;
     }
@@ -315,7 +428,7 @@ void Creature_render(const Creature* c, float partialTicks) {
     glScalef(1.0f, -1.0f, 1.0f);
     const float scale = 0.0625f;
     glScalef(scale, scale, scale); // pixel-unit model boxes -> world block units
-    float bobY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
+    float bobY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run * bobStrengthForKind(c->kind)) - 23.0f;
     glTranslatef(0.0f, bobY, 0.0f);
     glRotatef(renderYaw, 0.0f, 1.0f, 0.0f);
     // real source's Mob.render() branches here on allowAlpha, default true,
@@ -330,7 +443,7 @@ void Creature_render(const Creature* c, float partialTicks) {
     glScalef(-1.0f, 1.0f, 1.0f); // c0.0.19a_04 style mirroring fix, same as NetworkPlayer and Zombie
 
     glEnable(GL_TEXTURE_2D);
-    renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+    renderModelForKind(c->kind, c->hasHelmet, c->hasArmor, animStep, run, age, headYaw, headPitch, attackSwing);
     glDisable(GL_TEXTURE_2D);
 
     // real source's own render() also does a second, additive blended
@@ -343,7 +456,7 @@ void Creature_render(const Creature* c, float partialTicks) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         glEnable(GL_TEXTURE_2D);
-        renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+        renderModelForKind(c->kind, c->hasHelmet, c->hasArmor, animStep, run, age, headYaw, headPitch, attackSwing);
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_BLEND);
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f); // matches Mob.java:271, restored before any other entity/HUD draw sees it

@@ -18,6 +18,11 @@ typedef struct {
     Cube body;
     Cube rightArm, leftArm;
     Cube rightLeg, leftLeg;
+    // c0.27_st: matches HumanoidMob's own always-on "hair" second head layer
+    // (real source's hasHair defaults true, never overridden), a slightly
+    // enlarged (+0.5 expand) copy of the head box, same texture, offset to
+    // atlas position (32,0), that always follows the head's own rotation
+    Cube hair;
 } MobZombieModel;
 
 void MobZombieModel_init(MobZombieModel* m);

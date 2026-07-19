@@ -62,6 +62,17 @@ typedef struct Level {
     // Player's own constructor). NULL until Minecraft's own init sets it,
     // never reassigned afterward for the lifetime of the process
     Entity* player;
+
+    // c0.27_st: true for the duration of Level_explode's own destroy loop.
+    // TNT's real tile class has two genuinely distinct removal hooks:
+    // direct mining spawns a primed entity with the normal fresh 40 tick
+    // fuse, but being caught in another explosion's blast (Level.explode's
+    // own f(Level,x,y,z) "wasExploded" hook, bytecode-confirmed via javap
+    // since CFR's decompile of it looked internally inconsistent) spawns one
+    // with a much shorter randomized fuse instead. Both paths route through
+    // this port's single shared onRemoved hook (Tnt_onRemoved), so this flag
+    // is how it tells which real hook it's standing in for
+    bool inExplosion;
 } Level;
 
 typedef struct {
@@ -103,8 +114,6 @@ bool  level_setTile(Level* level, int x, int y, int z, int type);
 bool  Level_netSetTile(Level* level, int x, int y, int z, int type);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
 int   Level_getTile(const Level* level, int x, int y, int z);
-
-AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);
 
 bool  Level_isLit(const Level* level, int x, int y, int z);
 float Level_getBrightness(const Level* level, int x, int y, int z);

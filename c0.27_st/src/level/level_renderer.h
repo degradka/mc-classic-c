@@ -52,8 +52,14 @@ void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
 void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);
 
-void LevelRenderer_renderHit(LevelRenderer* renderer, const Player* player, struct HitResult* h, int mode, int tileId);
-void LevelRenderer_renderHitOutline(struct HitResult* h, int mode);
+// digFraction is the current mining progress (0..1, see updateMining in
+// minecraft.c); draws the real source's 10 frame crack overlay, and only
+// that; no-op while not actively mining (digFraction<=0). CORRECTION: no
+// more mode/player/tileId parameters, since real source's own render-hit method
+// never draws anything else (confirmed via direct read + javap on the real
+// call site, which always passes a hardcoded mode of 0)
+void LevelRenderer_renderHit(LevelRenderer* renderer, struct HitResult* h, float digFraction);
+void LevelRenderer_renderHitOutline(const LevelRenderer* renderer, struct HitResult* h);
 
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player);
 

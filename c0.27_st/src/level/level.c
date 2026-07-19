@@ -27,6 +27,7 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->tickListCapacity = 0;
     level->networkMode = false;
     level->player = NULL; // set once by Minecraft's own init, via Level_setPlayer
+    level->inExplosion = false;
 
     level->blocks = (byte*)malloc((size_t)width * height * depth);
     level->lightDepths = (int*)malloc((size_t)width * height * sizeof(int));
@@ -125,7 +126,15 @@ void calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ) {
             int prev = level->lightDepths[x + z * level->width];
             int d = level->depth - 1;
             while (d > 0 && !Level_isLightBlocker(level, x, d, z)) d--;
-            level->lightDepths[x + z * level->width] = d + 1;
+            // c0.27_st: stores d directly now, was d+1. isLit's own
+            // comparison (y >= lightDepths[...]) is unchanged, so this
+            // shifts what counts as lit down by exactly one block: the
+            // topmost blocking tile itself now reads as lit too, not just
+            // everything strictly above it. Grass's own isLit calls drop
+            // their matching +1 offset below, so grass's own behavior is
+            // unchanged; every other isLit caller (mob spawn daylight
+            // check, particle spawn, etc) genuinely shifts by one block
+            level->lightDepths[x + z * level->width] = d;
 
             if (prev != d && level->renderer) {
                 int ylMin = prev < d ? prev : d;
@@ -537,11 +546,6 @@ bool Level_maybeGrowTree(Level* level, int x, int y, int z) {
     return true;
 }
 
-AABB Level_getTilePickAABB(const Level* level, int x, int y, int z) {
-    (void)level;
-    return AABB_create(x, y, z, x+1, y+1, z+1);
-}
-
 bool Level_isLit(const Level* level, int x, int y, int z) {
     return (x < 0 || y < 0 || z < 0 || x >= level->width || y >= level->depth || z >= level->height) ||
            (y >= level->lightDepths[x + z * level->width]);
@@ -656,13 +660,16 @@ void Level_onTick(Level* level) {
     // population cap checked against the current mob count, player included
     // since Player extends Mob in the real source, see Minecraft_countMobs.
     // Only actually spawns using this same tick's roll of attempts as the
-    // site search count, reusing LevelGen_maybeSpawnMobs, the player is the
-    // reference point for the 16 block exclusion zone this time, not the
-    // level's own spawn point
+    // site search count, reusing LevelGen_maybeSpawnMobs. CORRECTION: real
+    // source passes the live player in here too, but its own exclusion zone
+    // check discards that reference and always measures from the level's
+    // fixed spawn point regardless (dead code in the real source, verified
+    // by direct read), so this port's own reference-entity parameter was
+    // removed entirely rather than kept unused
     int spawnAttempts = level->width * level->height * level->depth / 64 / 64 / 64;
     if (rand() % 100 < spawnAttempts) {
         if (Minecraft_countMobs() < spawnAttempts * 20) {
-            LevelGen_maybeSpawnMobs(level, spawnAttempts, level->player, false);
+            LevelGen_maybeSpawnMobs(level, spawnAttempts, false);
         }
     }
 
@@ -721,6 +728,11 @@ void Level_onTick(Level* level) {
 // lives in minecraft.c instead
 extern void Minecraft_hurtEntitiesInExplosion(Level* level, Entity* source, float x, float y, float z, float radius);
 
+// implemented for Level_explode's own per-cell ambient smoke, matches
+// Level.explode's own addEntity(new Smolder(this,x,y,z)) call sites (one per
+// destroyed or already-empty cell within the blast radius)
+extern void Minecraft_spawnSmolder(Level* level, int x, int y, int z);
+
 static inline float explodeRandf(void) { return (float)rand() / (float)RAND_MAX; }
 
 // matches Level.explode(Entity,x,y,z,radius) exactly: clears every block
@@ -738,6 +750,17 @@ void Level_explode(Level* level, Entity* source, float x, float y, float z, floa
     int z0 = (int)(z - radius - 1.0f);
     int z1 = (int)(z + radius + 1.0f);
 
+    // c0.27_st: matches the real source's own Level.explode() calling TNT's
+    // dedicated f(Level,x,y,z) "wasExploded" hook on every tile this loop
+    // destroys, a short randomized fuse for chain-ignited TNT instead of a
+    // fresh 40, bytecode-confirmed via javap (there is no "life" field
+    // anywhere in the Tile class hierarchy; a decompiled reference to one
+    // was actually a reused local variable slot mislabeled by the decompiler).
+    // This port's TNT removal spawn is a single shared onRemoved hook reused by
+    // both the mining path and this one, so this flag is how it tells them
+    // apart and picks the right fuse
+    level->inExplosion = true;
+
     for (int bx = x0; bx < x1; ++bx) {
         for (int by = y1 - 1; by >= y0; --by) {
             for (int bz = z0; bz < z1; ++bz) {
@@ -747,13 +770,32 @@ void Level_explode(Level* level, Entity* source, float x, float y, float z, floa
                 float dz = (float)bz + 0.5f - z;
                 if (!(dx * dx + dy * dy + dz * dz < radius * radius)) continue;
                 int id = Level_getTile(level, bx, by, bz);
-                if (id <= 0) continue;
+                if (id <= 0) {
+                    // c0.27_st: matches the real source's own else branch:
+                    // a cell that's already empty air still gets a Smolder
+                    // puff of ambient smoke
+                    Minecraft_spawnSmolder(level, bx, by, bz);
+                    continue;
+                }
                 const Tile* t = (id < 256) ? gTiles[id] : NULL;
+                // c0.27_st: matches the real source's own new i() check:
+                // stone/cobblestone/ore/the new metal/slab/brick/moss blocks,
+                // and Bedrock, all survive a blast untouched
+                if (t && t->explosionResistant) continue;
+                // c0.27_st: matches the real source's own Smolder spawn,
+                // right alongside the drop roll, before the tile is cleared
+                Minecraft_spawnSmolder(level, bx, by, bz);
                 if (t && explodeRandf() < 0.3f) Tile_dropItems(t, level, bx, by, bz);
+                // matches the real source: removing a tile this way still
+                // fires its onRemoved hook (TILE_TNT's spawns a primed
+                // entity), which is how one exploding TNT chain-ignites
+                // any other TNT blocks caught in its own blast radius
                 level_setTile(level, bx, by, bz, 0);
             }
         }
     }
+
+    level->inExplosion = false;
 
     Minecraft_hurtEntitiesInExplosion(level, source, x, y, z, radius);
 }

@@ -18,8 +18,10 @@
 
 struct Ai {
     // head pitch used while just wandering, not currently locked onto a
-    // target, matches AI's own defaultLookAngle field: 0 for Pig, 30 for
-    // Zombie and Skeleton, 45 for Creeper
+    // target, matches AI's own defaultLookAngle field: 0 for Pig and
+    // Skeleton (Skeleton's own ctor replaces Zombie's throwaway AI instance
+    // with a fresh one that never sets this, so it keeps AI's own 0
+    // default), 30 for Zombie, 45 for Creeper
     int wanderPitch;
     // true selects BasicAttackAI's behavior: wander, then acquire, track,
     // and melee (or, per species, shoot) a locked target. False is plain
@@ -64,6 +66,12 @@ struct Ai {
     // doing its own extra thing. NULL for anything with no extra behavior
     // on a landed hit
     void (*onAfterAttack)(Ai* ai, Entity* mob, Entity* target);
+
+    // c0.27_st: matches BasicAI's own jumpFromGround() seam, added so
+    // JumpAttackAI (Spider) can override the plain 0.42f hop with a lunging
+    // pounce toward a locked target instead. NULL keeps the original inline
+    // behavior (every other mob)
+    void (*onJumpFromGround)(Ai* ai, Entity* mob);
 };
 
 // zeroes wander/chase state and sets the per species runSpeed/damage

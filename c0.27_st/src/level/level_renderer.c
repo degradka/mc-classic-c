@@ -215,7 +215,10 @@ void LevelRenderer_renderClouds(LevelRenderer* r, float partialTicks) {
     glDisable(GL_TEXTURE_2D);
 
     Tessellator_begin(&TESSELLATOR);
-    Tessellator_color(&TESSELLATOR, 0.5f, 0.8f, 1.0f);
+    // matches real Level.skyColor (0x99CCFF = 0.6,0.8,1.0), never overwritten
+    // anywhere in this version's own source, same fix as c0.24_st_03's
+    // identical bug (was still the old pre-Survival-Test 0.5/0.8/1.0)
+    Tessellator_color(&TESSELLATOR, 0.6f, 0.8f, 1.0f);
     const float y2 = (float)(r->level->depth + 10);
     for (int xx = -2048; xx < r->level->width + 2048; xx += 512) {
         for (int zz = -2048; zz < r->level->height + 2048; zz += 512) {
@@ -335,71 +338,90 @@ int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
     return limit;
 }
 
-/*
-   mode 0 is additive pulsing, only the cube faces facing the player
-   mode 1 is alpha blended, a textured preview block on the adjacent cell,
-   rendered in both layers (0 and 1)
-*/
-void LevelRenderer_renderHit(LevelRenderer* r, const Player* player, HitResult* h, int mode, int tileId) {
-    if (!h) return;
+// c0.24_st_03: real source's mining crack overlay (a/g.java's own a(HitResult,int,int),
+// only drawn while this.h>0). Draws a generic full cube (always Rock/Stone's
+// own face shape in the real source, com.mojang.minecraft.level.tile.a.h,
+// regardless of the actual targeted tile's real shape) scaled up 1.01x
+// around its center to avoid z fighting with the real block face, textured
+// with one of 10 crack frames at terrain.png atlas cells 240-249 (row 15)
+// chosen by mining progress, using the same multiplicative GL_DST_COLOR/
+// GL_SRC_COLOR blend real source uses so it darkens rather than tints
+static void renderDigOverlay(int terrainTex, int x, int y, int z, float fraction) {
+    int frame = 240 + (int)(fraction * 10.0f);
+    if (frame > 249) frame = 249;
+    int xt = (frame % 16) * 16;
+    int yt = (frame / 16) * 16;
+    float u0 = xt / 256.0f;
+    float u1 = (xt + 15.99f) / 256.0f;
+    float v0 = yt / 256.0f;
+    float v1 = (yt + 15.99f) / 256.0f;
 
-    if (mode == 0) {
-        // destroy highlight: additive, pulsing, only faces facing the player
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        float a = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f;
-        glColor4f(1.f, 1.f, 1.f, a);
+    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, terrainTex);
+    glColor4f(1.f, 1.f, 1.f, 0.5f);
 
-        Tessellator_begin(&TESSELLATOR);
-        for (int face = 0; face < 6; ++face) {
-            Face_render(&TESSELLATOR, h->x, h->y, h->z, face, player->e.x, player->e.y, player->e.z);
-        }
-        Tessellator_end(&TESSELLATOR);
+    glPushMatrix();
+    glTranslatef(x + 0.5f, y + 0.5f, z + 0.5f);
+    glScalef(1.01f, 1.01f, 1.01f);
+    glTranslatef(-(x + 0.5f), -(y + 0.5f), -(z + 0.5f));
 
-        glDisable(GL_BLEND);
-        return;
-    }
+    glDepthMask(GL_FALSE);
+    float x0 = (float)x, x1 = (float)x + 1.0f;
+    float y0 = (float)y, y1 = (float)y + 1.0f;
+    float z0 = (float)z, z1 = (float)z + 1.0f;
+    Tessellator_begin(&TESSELLATOR);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z1, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z1, u0, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y0, z0, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x0, y1, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z1, u0, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y0, z0, u1, v1);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z0, u1, v0);
+    Tessellator_vertexUV(&TESSELLATOR, x1, y1, z1, u0, v0);
+    Tessellator_end(&TESSELLATOR);
+    glDepthMask(GL_TRUE);
 
-    // place preview: alpha blend, pulsing tint and alpha on adjacent cell
+    glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
+}
+
+// c0.27_st CORRECTION: real source's own render-hit method (a/g.java's
+// a(HitResult,int,int)) draws ONLY the animated crack/dig overlay, gated on
+// this.h>0 (the mining-progress fraction); it never draws any extra
+// highlight/glow on a merely-targeted block otherwise. Direct read (and
+// javap disassembly of the real call site, which always passes a hardcoded
+// 0) confirmed the previous always-on additive pulsing tint on the 6 faces,
+// and the alpha-blended placement preview block on the adjacent cell, were
+// both invented/carried forward from elsewhere; neither corresponds to
+// anything in real 0.27 source. Simplified to match exactly: no more mode/
+// player/tileId parameters, since only the crack overlay behavior exists
+void LevelRenderer_renderHit(LevelRenderer* r, HitResult* h, float digFraction) {
+    if (!h || digFraction <= 0.0f) return;
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    float br = (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.8);
-    float al = (float)(sin((double)currentTimeMillis() / 200.0) * 0.2 + 0.5);
-    glColor4f(br, br, br, al);
-
-    int nx = 0, ny = 0, nz = 0;
-    switch (h->f) {
-        case 0: ny = -1; break; // bottom
-        case 1: ny =  1; break; // top
-        case 2: nz = -1; break; // negative Z
-        case 3: nz =  1; break; // positive Z
-        case 4: nx = -1; break; // negative X
-        case 5: nx =  1; break; // positive X
-    }
-    const int x = h->x + nx, y = h->y + ny, z = h->z + nz;
-
-    const Tile* t = (tileId >= 0 && tileId < 256) ? gTiles[tileId] : NULL;
-    if (t && t->render) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, r->terrainTex);
-
-        Tessellator_setIgnoreColor(&TESSELLATOR, 1); // Java: t.noColor()
-        Tessellator_begin(&TESSELLATOR);
-        t->render(t, &TESSELLATOR, r->level, 0, x, y, z);
-        t->render(t, &TESSELLATOR, r->level, 1, x, y, z);
-        Tessellator_end(&TESSELLATOR);
-        Tessellator_setIgnoreColor(&TESSELLATOR, 0);
-
-        glDisable(GL_TEXTURE_2D);
-    }
-
+    renderDigOverlay(r->terrainTex, h->x, h->y, h->z, digFraction);
     glDisable(GL_BLEND);
 }
 
 // c0.0.13a addition: literal thin black wireframe box around the targeted
-// block/placement cell (separate from the pulsing tint in LevelRenderer_renderHit).
-void LevelRenderer_renderHitOutline(HitResult* h, int mode) {
+// block.
+void LevelRenderer_renderHitOutline(const LevelRenderer* r, HitResult* h) {
     if (!h) return;
 
     glEnable(GL_BLEND);
@@ -407,38 +429,49 @@ void LevelRenderer_renderHitOutline(HitResult* h, int mode) {
     glColor4f(0.0f, 0.0f, 0.0f, 0.4f);
 
     float x = (float)h->x, y = (float)h->y, z = (float)h->z;
-    if (mode == 1) {
-        switch (h->f) {
-            case 0: y -= 1.0f; break;
-            case 1: y += 1.0f; break;
-            case 2: z -= 1.0f; break;
-            case 3: z += 1.0f; break;
-            case 4: x -= 1.0f; break;
-            case 5: x += 1.0f; break;
-        }
-    }
+    // c0.27_st: matches l.java's own outline draw exactly: it wraps the
+    // real targeted tile's own AABB (tile.a(x,y,z), grown by a tiny 0.002
+    // epsilon to avoid z fighting with the block's real face), not a
+    // hardcoded unit cube. Previously always drew a full 0..1 box regardless
+    // of shape, which made a half-height Slab's outline float a full block
+    // tall above the actual block; that only mattered once a non-full-cube tile
+    // (Slab) existed to expose it. CORRECTION: the mode-1 (placement
+    // preview) face-offset branch that used to live here is gone, since real
+    // source's own outline draw only ever targets the actual looked-at
+    // tile, never an adjacent placement cell
+    float xx0 = 0.0f, yy0 = 0.0f, zz0 = 0.0f, xx1 = 1.0f, yy1 = 1.0f, zz1 = 1.0f;
+    int id = Level_getTile(r->level, h->x, h->y, h->z);
+    const Tile* t = (id >= 0 && id < 256) ? gTiles[id] : NULL;
+    if (t) { xx0 = t->xx0; yy0 = t->yy0; zz0 = t->zz0; xx1 = t->xx1; yy1 = t->yy1; zz1 = t->zz1; }
+    const float grow = 0.002f;
+    xx0 -= grow; yy0 -= grow; zz0 -= grow;
+    xx1 += grow; yy1 += grow; zz1 += grow;
+
+    float x0 = x + xx0, x1 = x + xx1;
+    float y0 = y + yy0, y1 = y + yy1;
+    float z0 = z + zz0, z1 = z + zz1;
 
     glBegin(GL_LINE_STRIP);
-    glVertex3f(x,        y, z);
-    glVertex3f(x + 1.0f, y, z);
-    glVertex3f(x + 1.0f, y, z + 1.0f);
-    glVertex3f(x,        y, z + 1.0f);
-    glVertex3f(x,        y, z);
+    glVertex3f(x0, y0, z0);
+    glVertex3f(x1, y0, z0);
+    glVertex3f(x1, y0, z1);
+    glVertex3f(x0, y0, z1);
+    glVertex3f(x0, y0, z0);
     glEnd();
 
     glBegin(GL_LINE_STRIP);
-    glVertex3f(x,        y + 1.0f, z);
-    glVertex3f(x + 1.0f, y + 1.0f, z);
-    glVertex3f(x + 1.0f, y + 1.0f, z + 1.0f);
-    glVertex3f(x,        y + 1.0f, z + 1.0f);
-    glVertex3f(x,        y + 1.0f, z);
+    glVertex3f(x0, y1, z0);
+    glVertex3f(x1, y1, z0);
+    glVertex3f(x1, y1, z1);
+    glVertex3f(x0, y1, z1);
+    glVertex3f(x0, y1, z0);
     glEnd();
 
     glBegin(GL_LINES);
-    glVertex3f(x,        y,        z);        glVertex3f(x,        y + 1.0f, z);
-    glVertex3f(x + 1.0f, y,        z);        glVertex3f(x + 1.0f, y + 1.0f, z);
-    glVertex3f(x + 1.0f, y,        z + 1.0f); glVertex3f(x + 1.0f, y + 1.0f, z + 1.0f);
-    glVertex3f(x,        y,        z + 1.0f); glVertex3f(x,        y + 1.0f, z + 1.0f);
+    glVertex3f(x0, y0, z0); glVertex3f(x0, y1, z0);
+    glVertex3f(x1, y0, z0); glVertex3f(x1, y1, z0);
+    glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1);
+    glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1);
     glEnd();
 
     glDisable(GL_BLEND);

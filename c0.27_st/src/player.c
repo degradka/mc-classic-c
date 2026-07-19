@@ -25,6 +25,8 @@ void Player_init(Player* p, Level* level) {
     p->score = 0;
     // c0.25_05_st: matches Player's own field initializer, arrows = 20
     p->arrows = 20;
+    p->bob = p->oBob = p->tilt = p->oTilt = 0.0f;
+    p->walkDistBob = p->walkDistBobO = 0.0f;
 
     // c0.24_st_03: Player now extends Mob in the real source (health,
     // invulnerability, drowning/lava/fall damage, knockback)
@@ -97,6 +99,12 @@ void Player_onTick(Player* p) {
     Entity_onTick(&p->e);
     Mob_onTick(&p->e);
     Inventory_onTick(&p->inventory);
+    // matches Mob.tick()'s oTilt=tilt and Player.aiStep()'s oBob=bob, both
+    // captured before this tick's own movement runs
+    p->oTilt = p->tilt;
+    p->oBob = p->bob;
+    p->walkDistBobO = p->walkDistBob;
+    float bobStartX = p->e.x, bobStartZ = p->e.z;
 
     float forward = 0.0f, strafe = 0.0f;
 
@@ -165,4 +173,22 @@ void Player_onTick(Player* p) {
         Minecraft_checkItemPickups(&p->e);
         Minecraft_checkArrowPickups(&p->e);
     }
+
+    // matches Entity.move()'s own walkDist accumulation, kept as a separate
+    // never-wrapped copy for the view-bob phase (see walkDistBob's own
+    // comment in player.h)
+    float bobDx = p->e.x - bobStartX, bobDz = p->e.z - bobStartZ;
+    p->walkDistBob += sqrtf(bobDx * bobDx + bobDz * bobDz) * 0.6f;
+
+    // matches Player.aiStep()'s own bob/tilt calc, read after this tick's
+    // movement/friction already ran, same as real source reading xd/zd/yd
+    // right after its own super.aiStep() call. bob drives the camera's
+    // footstep sway/bounce, tilt drives a small pitch-back when falling
+    float speed = sqrtf(p->e.motionX * p->e.motionX + p->e.motionZ * p->e.motionZ);
+    float tiltTarget = atanf(-p->e.motionY * 0.2f) * 15.0f;
+    if (speed > 0.1f) speed = 0.1f;
+    if (!p->e.onGround || p->e.health <= 0) speed = 0.0f;
+    if (p->e.onGround || p->e.health <= 0) tiltTarget = 0.0f;
+    p->bob += (speed - p->bob) * 0.4f;
+    p->tilt += (tiltTarget - p->tilt) * 0.8f;
 }

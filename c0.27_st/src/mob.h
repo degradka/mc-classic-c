@@ -11,7 +11,10 @@
 #include <stdbool.h>
 
 #define MOB_MAX_HEALTH            20
-#define MOB_INVULNERABLE_DURATION 30
+// c0.27_st: was 30, matches Mob.invulnerableDuration exactly. Also shrinks
+// the hurt flash overlay window in creature.c, which derives from this same
+// constant
+#define MOB_INVULNERABLE_DURATION 20
 #define MOB_HURT_DURATION         10
 #define MOB_ATTACK_DURATION       5
 #define MOB_TOTAL_AIR_SUPPLY      300
@@ -40,6 +43,12 @@ void Mob_causeFallDamage(Entity* e, float fallDistance);
 // hurt animation state, knockback, and death, calling e->onDeath once, the
 // tick health first reaches <=0. No op if !e->isMob
 void Mob_hurt(Entity* e, Entity* attacker, int damage);
+
+// c0.27_st: matches Mob.heal(int) exactly: no-op if already dead, otherwise
+// adds and clamps to MOB_MAX_HEALTH, and grants a half invulnerability
+// window (same as landing a hit does, just halved); used by the two
+// Survival Test mushroom eat-on-right-click items
+void Mob_heal(Entity* e, int amount);
 
 // halves current velocity, then displaces away from attacker by a
 // normalized push of magnitude 0.4 plus a flat 0.4 vertical hop

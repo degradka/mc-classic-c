@@ -13,13 +13,14 @@ struct Player;  typedef struct Player Player;
 
 typedef struct ParticleEngine {
     Level* level;
-    GLuint texture;
+    GLuint texture;         // terrain.png, TerrainParticle debris
+    GLuint particlesTexture; // particles.png, WaterDropParticle, SmokeParticle
     Particle* items;
     int count, capacity;
     Tessellator tess;
 } ParticleEngine;
 
-void ParticleEngine_init  (ParticleEngine* pe, Level* level, GLuint terrainTex);
+void ParticleEngine_init  (ParticleEngine* pe, Level* level, GLuint terrainTex, GLuint particlesTex);
 void ParticleEngine_onTick(ParticleEngine* pe);
 // c0.0.14a_08 drops the lit/shadow layer split (replaced by per particle
 // brightness tinting), so this is now a single unconditional pass

@@ -181,5 +181,9 @@ void Item_render(const Item* it, float partialTicks) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    // CORRECTION: real source explicitly re-enables texturing as its very
+    // last statement, restoring it for whatever renders next; this was
+    // missing, leaving global GL texture state disabled on exit
+    glEnable(GL_TEXTURE_2D);
     glPopMatrix();
 }

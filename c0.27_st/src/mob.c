@@ -16,6 +16,10 @@ void Mob_init(Entity* e) {
     e->deathTime = 0;
     e->attackTime = 0;
     e->dead = false;
+    // c0.27_st: new auto-step mechanic, matches Mob's own constructor
+    // setting footSize=0.5 for every Mob (and Player, which also routes
+    // through here), letting them climb a half block ledge without jumping
+    e->footSize = 0.5f;
 }
 
 void Mob_knockback(Entity* e, Entity* attacker) {
@@ -84,6 +88,13 @@ void Mob_causeFallDamage(Entity* e, float fallDistance) {
     if (!e->isMob) return;
     int damage = (int)ceilf(fallDistance - 3.0f);
     if (damage > 0) Mob_hurt(e, NULL, damage);
+}
+
+void Mob_heal(Entity* e, int amount) {
+    if (e->health <= 0) return;
+    e->health += amount;
+    if (e->health > MOB_MAX_HEALTH) e->health = MOB_MAX_HEALTH;
+    e->invulnerableTime = MOB_INVULNERABLE_DURATION / 2;
 }
 
 void Mob_travel(Entity* e, float strafe, float forward) {

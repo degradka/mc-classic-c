@@ -19,5 +19,8 @@ float AABB_clipZCollide(const AABB* a, const AABB* b, float z);
 int   AABB_intersects(const AABB* a, const AABB* b);
 void  AABB_move(AABB* a, float x, float y, float z);
 AABB  AABB_offset(const AABB* a, float x, float y, float z);
+// c0.27_st: matches AABB.getSize() exactly: average of the three extents,
+// used by Entity_shouldRender's own distance-cull radius
+float AABB_getSize(const AABB* a);
 
 #endif // AABB_H

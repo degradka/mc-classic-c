@@ -14,9 +14,10 @@ static void ensure_capacity(ParticleEngine* pe, int need) {
     pe->capacity = newcap;
 }
 
-void ParticleEngine_init(ParticleEngine* pe, Level* level, GLuint terrainTex) {
+void ParticleEngine_init(ParticleEngine* pe, Level* level, GLuint terrainTex, GLuint particlesTex) {
     pe->level = level;
     pe->texture = terrainTex;
+    pe->particlesTexture = particlesTex;
     pe->items = NULL;
     pe->count = pe->capacity = 0;
     Tessellator_begin(&pe->tess);
@@ -43,8 +44,6 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     if (pe->count == 0) return;
 
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, pe->texture);
-
     glDisableClientState(GL_COLOR_ARRAY);
     GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     if (cullWasEnabled) glDisable(GL_CULL_FACE);
@@ -60,18 +59,38 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     float cameraXWithY = -cameraZ * sinf(pitchRad);
     float cameraZWithY =  cameraX * sinf(pitchRad);
 
-    Tessellator_begin(&pe->tess);
-    for (int i = 0; i < pe->count; ++i) {
-        Particle* p = &pe->items[i];
-        // c0.0.14a_08: per particle brightness tint replaces the old flat
-        // 0.8 gray and the binary lit/shadow two pass split
-        float b = 0.8f * Entity_getBrightness(&p->base);
-        Tessellator_color(&pe->tess, b, b, b);
-        Particle_render(p, &pe->tess, partialTicks,
-                        cameraX, cameraY, cameraZ,
-                        cameraXWithY, cameraZWithY);
+    // c0.27_st: real source's own ParticleEngine keeps two buckets: bucket 0
+    // (WaterDropParticle/SmokeParticle, particles.png) and bucket 1
+    // (TerrainParticle debris, terrain.png), and renders each in its own
+    // begin/bind/end pass so both atlases can coexist in the same frame.
+    // This port keeps one flat array instead of two lists (a particle's
+    // bucket membership never changes over its life, so filtering per pass
+    // is equivalent), matching bucket order 0 then 1
+    for (int bucket = 0; bucket < 2; ++bucket) {
+        bool wantParticlesAtlas = (bucket == 0);
+        bool any = false;
+        for (int i = 0; i < pe->count; ++i) {
+            if (pe->items[i].usesParticlesAtlas == wantParticlesAtlas) { any = true; break; }
+        }
+        if (!any) continue;
+
+        glBindTexture(GL_TEXTURE_2D, wantParticlesAtlas ? pe->particlesTexture : pe->texture);
+
+        Tessellator_begin(&pe->tess);
+        for (int i = 0; i < pe->count; ++i) {
+            Particle* p = &pe->items[i];
+            if (p->usesParticlesAtlas != wantParticlesAtlas) continue;
+            // c0.27_st: Particle_render now sets its own per-particle self-tint
+            // (rCol/gCol/bCol) times its own per-position brightness, matching real
+            // source's own Particle.render() exactly. That superseded this
+            // call's own flat 0.8-for-everyone tint (matching c0.0.14a_08
+            // through c0.25_05_st, before per-particle tints existed)
+            Particle_render(p, &pe->tess, partialTicks,
+                            cameraX, cameraY, cameraZ,
+                            cameraXWithY, cameraZWithY);
+        }
+        Tessellator_end(&pe->tess);
     }
-    Tessellator_end(&pe->tess);
 
     if (cullWasEnabled) glEnable(GL_CULL_FACE);
     glDisable(GL_TEXTURE_2D);

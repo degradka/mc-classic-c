@@ -236,13 +236,16 @@ void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, floa
 }
 
 void NetworkPlayer_queueMove(NetworkPlayer* np, int dx, int dy, int dz) {
+    // CORRECTION: Move has a position, no rotation: hasPos=true, hasRot=false
+    // (was backwards, matching this file's own doc comment but not its code)
     pushMoveEntry(np, (np->xp + dx / 2.0f) / 32.0f, (np->yp + dy / 2.0f) / 32.0f, (np->zp + dz / 2.0f) / 32.0f,
-                  0.0f, 0.0f, false, true);
+                  0.0f, 0.0f, true, false);
     np->xp += dx; np->yp += dy; np->zp += dz;
-    pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, 0.0f, 0.0f, false, true);
+    pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, 0.0f, 0.0f, true, false);
 }
 
 void NetworkPlayer_queueLook(NetworkPlayer* np, float yaw, float pitch) {
-    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, false);
-    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, yaw, pitch, true, false);
+    // CORRECTION: Look has a rotation, no position: hasPos=false, hasRot=true
+    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), false, true);
+    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, yaw, pitch, false, true);
 }

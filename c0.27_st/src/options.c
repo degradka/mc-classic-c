@@ -1,6 +1,7 @@
 // options.c
 
 #include "options.h"
+#include "renderer/textures.h"
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,9 @@ void Options_init(Options* o) {
     o->invertMouseY = false;
     o->showFrameRate = false;
     o->viewDistance = 0;
+    o->bobView = true;   // matches Options.f's own field initializer
+    o->anaglyph3d = false;
+    o->limitFramerate = false; // matches Options.i's own field initializer
 
     o->keys[OPT_KEY_FORWARD]   = (KeyBinding){ "Forward",       GLFW_KEY_W };
     o->keys[OPT_KEY_LEFT]      = (KeyBinding){ "Left",          GLFW_KEY_A };
@@ -49,6 +53,9 @@ void Options_load(Options* o) {
         else if (strcmp(key, "invertYMouse") == 0) o->invertMouseY = (strcmp(value, "true") == 0);
         else if (strcmp(key, "showFrameRate") == 0) o->showFrameRate = (strcmp(value, "true") == 0);
         else if (strcmp(key, "viewDistance") == 0) o->viewDistance = atoi(value) & 3;
+        else if (strcmp(key, "bobView") == 0) o->bobView = (strcmp(value, "true") == 0);
+        else if (strcmp(key, "anaglyph3d") == 0) o->anaglyph3d = (strcmp(value, "true") == 0);
+        else if (strcmp(key, "limitFramerate") == 0) o->limitFramerate = (strcmp(value, "true") == 0);
         else if (strncmp(key, "key_", 4) == 0) {
             const char* bindingName = key + 4;
             for (int i = 0; i < OPTIONS_KEY_COUNT; ++i) {
@@ -71,6 +78,9 @@ void Options_save(Options* o) {
     fprintf(f, "invertYMouse:%s\n", o->invertMouseY ? "true" : "false");
     fprintf(f, "showFrameRate:%s\n", o->showFrameRate ? "true" : "false");
     fprintf(f, "viewDistance:%d\n", o->viewDistance);
+    fprintf(f, "bobView:%s\n", o->bobView ? "true" : "false");
+    fprintf(f, "anaglyph3d:%s\n", o->anaglyph3d ? "true" : "false");
+    fprintf(f, "limitFramerate:%s\n", o->limitFramerate ? "true" : "false");
     for (int i = 0; i < OPTIONS_KEY_COUNT; ++i) {
         fprintf(f, "key_%s:%d\n", o->keys[i].label, o->keys[i].glfwKey);
     }
@@ -84,6 +94,9 @@ void Options_toggleLabel(const Options* o, int index, char* out, int outSize) {
         case 2: snprintf(out, outSize, "Invert mouse: %s", o->invertMouseY ? "ON" : "OFF"); break;
         case 3: snprintf(out, outSize, "Show FPS: %s", o->showFrameRate ? "ON" : "OFF"); break;
         case 4: snprintf(out, outSize, "Render distance: %s", OPTIONS_VIEW_DISTANCE_NAMES[o->viewDistance]); break;
+        case 5: snprintf(out, outSize, "View bobbing: %s", o->bobView ? "ON" : "OFF"); break;
+        case 6: snprintf(out, outSize, "3d anaglyph: %s", o->anaglyph3d ? "ON" : "OFF"); break;
+        case 7: snprintf(out, outSize, "Limit framerate: %s", o->limitFramerate ? "ON" : "OFF"); break;
         default: out[0] = '\0'; break;
     }
 }
@@ -95,6 +108,22 @@ void Options_toggleValue(Options* o, int index, int direction) {
         case 2: o->invertMouseY = !o->invertMouseY; break;
         case 3: o->showFrameRate = !o->showFrameRate; break;
         case 4: o->viewDistance = (o->viewDistance + direction) & 3; break;
+        case 5: o->bobView = !o->bobView; break;
+        // c0.25_05_st: real source also re-uploads every already-loaded
+        // texture through the same luminance remap the moment this flips
+        // (k.java's own toggle handler, index 6). This port applies the
+        // remap at texture load time only (see loadTexture/loadTextureTiled
+        // in textures.c): toggling here takes effect for the font's live
+        // per-glyph color codes immediately, and for any texture not yet
+        // loaded, but already uploaded world/GUI textures keep their
+        // current tint until the next restart. A full live-reload would
+        // need a path+id registry this port's texture loader doesn't have;
+        // documented simplification rather than a silent gap
+        case 6:
+            o->anaglyph3d = !o->anaglyph3d;
+            Textures_setAnaglyph(o->anaglyph3d);
+            break;
+        case 7: o->limitFramerate = !o->limitFramerate; break;
         default: break;
     }
     Options_save(o);

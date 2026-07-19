@@ -39,9 +39,22 @@ typedef struct Player {
     int arrows;
     // c0.24_st_03: survival inventory, replaces the old Creative style fixed
     // gHotbar[]/gSelectedSlot pair. Starts empty, matching player/d.java's
-    // own constructor - filling it back up is what breaking tiles and
+    // own constructor; filling it back up is what breaking tiles and
     // picking up the resulting Item entities is for
     Inventory inventory;
+    // matches Player.bob/oBob and Mob.tilt/oTilt: drives the camera view-bob
+    // effect (a small sideways sway plus a bounce timed to footsteps).
+    // Computed every tick in Player_onTick from horizontal speed (bob) and
+    // vertical speed (tilt), then applied as a camera transform in
+    // minecraft.c, gated by the bobView option
+    float bob, oBob, tilt, oTilt;
+    // matches Entity.walkDist/walkDistO, used only for the view-bob phase.
+    // This port's own Entity.walkDist (entity.h) is periodically wrapped to
+    // space out footstep sounds, unlike real source's version, which grows
+    // forever, so it can't double as the bob phase input here without
+    // corrupting the sin/cos phase on every wrap. Kept as a separate,
+    // never-wrapped accumulator instead, same formula, Player only
+    float walkDistBob, walkDistBobO;
 } Player;
 
 void Player_init(Player* player, Level* level);

@@ -51,7 +51,7 @@ static int* raiseHeightmap(int width, int height) {
 
             // c0.24_st_03: both height-bias constants changed from
             // c0.0.23a_01's own /8.0-8.0 and /6.0+6.0 (confirmed via direct
-            // source comparison, not an estimate) - shifts the overall
+            // source comparison, not an estimate), shifting the overall
             // terrain height distribution
             double d14 = distortA.synth.getValue(&distortA.synth, x * 1.3, y * 1.3) / 6.0 - 4.0;
             double d16 = distortB.synth.getValue(&distortB.synth, x * 1.3, y * 1.3) / 5.0 + 10.0 - 4.0;
@@ -131,7 +131,7 @@ static void buildBlocks(Level* level, int* heightmap) {
                 if (y <= surfaceY) id = TILE_DIRT.id;
                 if (y <= rockY) id = TILE_ROCK.id;
                 // c0.24_st_03: the absolute bottom layer of the map is lava
-                // instead of solid rock/bedrock - confirmed genuinely new
+                // instead of solid rock/bedrock, confirmed genuinely new
                 // this version (zero bedrock placement anywhere in this
                 // jar's own world-gen at all, and c0.0.23a_01's equivalent
                 // stage has no such override)
@@ -162,7 +162,7 @@ static void carveTunnels(Level* level) {
         float dira2 = 0.0f;
         // c0.24_st_03: one squared-random size scale per tunnel (skews
         // small, occasionally large), feeding into the new per-point size
-        // formula below - confirmed genuinely new vs c0.0.23a_01's own
+        // formula below, confirmed genuinely new vs c0.0.23a_01's own
         // fixed 2.5/1.0 constants
         float radiusScale = randf() * randf();
 
@@ -197,7 +197,7 @@ static void carveTunnels(Level* level) {
             // c0.24_st_03: size now also grows toward the bottom of the map
             // (depthFrac approaches 1 as cy approaches 0) and is scaled by
             // this tunnel's own radiusScale, then enveloped by the same
-            // sin(l*PI/length) taper as before - unlike the old fixed
+            // sin(l*PI/length) taper as before; unlike the old fixed
             // 2.5+1.0 formula, the taper now multiplies the WHOLE size
             // (including the former "+1.0" floor), so tunnels taper all the
             // way to a genuine point at both ends instead of a small stub
@@ -320,7 +320,7 @@ static void growBeaches(Level* level, const int* heightmap) {
 // c0.24_st_03: this stage's own inline trunk/canopy construction (4-5 block
 // trunk, fixed corner-dropping rule) is confirmed replaced by a scatter
 // search that calls the new shared Level_maybeGrowTree for each candidate
-// spot instead - same function task #63 added for live sapling growth,
+// spot instead, the same function task #63 added for live sapling growth,
 // confirmed via direct source comparison against c0.0.23a_01 (whose
 // equivalent stage still has the old construction inlined directly here).
 // Attempt count (w*h/4000) and the 20x20 site search itself are unchanged
@@ -403,24 +403,40 @@ static void plantMushrooms(Level* level, const int* heightmap) {
 // vanilla's dark cave spawn bias. Each surviving site then tries 3 separate
 // short random walks of 3 steps each, looking for a spot with solid ground
 // directly below and two clear tiles above for body and head, at least 16
-// blocks (256 squared) from referenceEntity if given, or from the level's
-// own spawn point otherwise, spawning the mob there if its own bounding box
-// also turns out to be clear. Bytecode confirms the walk's own y offset is
-// always zero, nextInt(1) minus nextInt(1), so only x and z actually wander
-int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress) {
+// blocks (256 squared) from the level's own fixed spawn point, spawning the
+// mob there if its own bounding box also turns out to be clear.
+//
+// CORRECTION: real source's Level.maybeSpawnMobs computes the distance
+// check against a passed-in reference entity first, then unconditionally
+// OVERWRITES that computation with a distance-to-xSpawn/ySpawn/zSpawn one
+// before the branch that appears to choose between them, and both ternary
+// branches end up reading the identical spawn-point-based value, verified
+// by direct read of Level.java. This is a genuine real-source quirk: the
+// 256 (16-block) exclusion radius always measures from the level's fixed
+// spawn point during the periodic in-game top-up too, never from the live
+// player, even though a live player entity is what actually gets passed in
+// there. This port used to genuinely branch on a reference entity, giving
+// the player a real mob-free bubble the actual client never enforces; the
+// parameter is gone now since real behavior never uses it.
+//
+// Bytecode confirms the walk's own y offset is always zero, nextInt(1)
+// minus nextInt(1), so only x and z actually wander
+int LevelGen_maybeSpawnMobs(Level* level, int attempts, bool reportProgress) {
     const int w = level->width, h = level->height, d = level->depth;
     // real source's n4 0/1/2/3 is Zombie, Skeleton, Pig, Creeper, a
     // different order than this port's own CreatureKind enum of Zombie,
     // Skeleton, Creeper, Pig, mapped explicitly rather than reordering the
-    // enum everywhere
-    static const int kindForRoll[4] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER };
+    // enum everywhere. c0.27_st: nextInt(4) became nextInt(5), adding
+    // Spider as a genuine 5th spawn option (index 4) at the same 1-in-N
+    // odds as every other kind, not a rarer roll layered on top
+    static const int kindForRoll[5] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER, CREATURE_SPIDER };
 
     int placed = 0;
 
     for (int a = 0; a < attempts; ++a) {
         if (reportProgress && a % 50 == 0) Minecraft_levelLoadProgress(a * 100 / (attempts > 1 ? attempts - 1 : 1));
 
-        int kind = kindForRoll[rand() % 4];
+        int kind = kindForRoll[rand() % 5];
         int sx = rand() % w;
         int sy = (int)(fminf(randf(), randf()) * (float)d);
         int sz = rand() % h;
@@ -444,16 +460,9 @@ int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceE
                 float fy = (float)y + 1.0f;
                 float fz = (float)z + 0.5f;
 
-                float dx, dy, dz;
-                if (referenceEntity) {
-                    dx = fx - referenceEntity->x;
-                    dy = fy - referenceEntity->y;
-                    dz = fz - referenceEntity->z;
-                } else {
-                    dx = fx - (float)level->xSpawn;
-                    dy = fy - (float)level->ySpawn;
-                    dz = fz - (float)level->zSpawn;
-                }
+                float dx = fx - (float)level->xSpawn;
+                float dy = fy - (float)level->ySpawn;
+                float dz = fz - (float)level->zSpawn;
                 if (dx * dx + dy * dy + dz * dz < 256.0f) continue;
 
                 if (Minecraft_spawnMob(level, kind, fx, fy, fz)) placed++;
@@ -579,7 +588,7 @@ static void addLava(Level* level) {
         int x = rand() % level->width;
         // c0.24_st_03: Y is now squared-random (skews toward 0, i.e. the
         // very bottom of the map) up to waterLevel-3, replacing the old
-        // uniform nextInt(depth/2-4) spread - each pocket lands much closer
+        // uniform nextInt(depth/2-4) spread; each pocket lands much closer
         // to the bottom of the world on average, genuinely matching the
         // wiki's "lava layer above bedrock" claim (confirmed via direct
         // source comparison against c0.0.23a_01, not an estimate)
@@ -626,7 +635,7 @@ void LevelGen_generateMap(Level* level) {
     free(heightmap);
 
     Minecraft_levelLoadUpdate("Spawning..");
-    int spawned = LevelGen_maybeSpawnMobs(level, level->width * level->height * level->depth / 800, NULL, true);
+    int spawned = LevelGen_maybeSpawnMobs(level, level->width * level->height * level->depth / 800, true);
     printf("%d mobs\n", spawned);
 
     level->createTime = (long long)time(NULL) * 1000;

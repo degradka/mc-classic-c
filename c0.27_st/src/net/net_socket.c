@@ -51,7 +51,7 @@ int NetSocket_connect(sock_t* out, const char* host, int port) {
     // times out in a few seconds instead of hanging the whole window for
     // however long the OS's own default TCP connect timeout is (can be a
     // minute or more for a silently dropped connection). Not what the real
-    // client does -- it blocks unconditionally -- but freezing indefinitely
+    // client does, since it blocks unconditionally, but freezing indefinitely
     // is a worse experience than one architectural deviation here
 #if defined(_WIN32)
     u_long mode = 1;

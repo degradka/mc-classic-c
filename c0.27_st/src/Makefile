@@ -14,7 +14,8 @@ SRC = minecraft.c player.c mob.c mob_ai.c timer.c  hitresult.c user.c options.c 
       inventory.c \
       level/chunk.c level/level.c level/level_renderer.c \
       level/tile/tile.c phys/aabb.c entity.c character/creature.c \
-      item/arrow.c item/item.c item/sign.c item/sign_model.c \
+      level/fx/smolder.c \
+      item/arrow.c item/item.c item/primed_tnt.c \
       character/polygon.c character/cube.c \
       level/levelgen/level_gen.c \
       level/levelgen/synth/synth.c level/levelgen/synth/improved_noise.c \
@@ -22,7 +23,9 @@ SRC = minecraft.c player.c mob.c mob_ai.c timer.c  hitresult.c user.c options.c 
       particle/particle_engine.c particle/particle.c \
       character/zombie_model.c character/mob_zombie_model.c \
       character/mob_skeleton_model.c character/mob_pig_model.c \
+      character/mob_spider_model.c \
       character/mob_creeper_model.c \
+      character/humanoid_armor_model.c \
       renderer/textures.c renderer/tessellator.c \
       renderer/texture_fx.c \
       renderer/frustum.c gui/font.c gui/screen.c gui/pause_screen.c \

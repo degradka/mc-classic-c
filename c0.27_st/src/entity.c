@@ -32,6 +32,8 @@ void Entity_init(Entity* e, Level* level) {
     e->removed = false;
     e->walkDist = 0.0f;
     e->makeStepSound = true;
+    e->footSize = 0.0f;
+    e->ySlideOffset = 0.0f;
 
     // c0.24_st_03: inert defaults; Mob_init overwrites health/airSupply/isMob
     // for entities that actually use them (Player and every mob)
@@ -110,6 +112,7 @@ void Entity_onTick(Entity* e) {
 void Entity_move(Entity* e, float dx, float dy, float dz) {
     const float ox = dx, oy = dy, oz = dz;
     const float startX = e->x, startZ = e->z;
+    const AABB origBox = e->boundingBox;
 
     AABB expanded = AABB_expand(&e->boundingBox, dx, dy, dz);
     ArrayList_AABB hits = Level_getCubes(e->level, &expanded);
@@ -117,27 +120,75 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
     for (int i = 0; i < hits.size; ++i) dy = AABB_clipYCollide(&hits.aabbs[i], &e->boundingBox, dy);
     AABB_move(&e->boundingBox, 0.0f, dy, 0.0f);
 
+    // matches real source exactly: "grounded" for the auto-step check below
+    // means either already on ground before this move, or just landed via
+    // this move's own Y clip
+    bool wasGrounded = e->onGround || (oy != dy && oy < 0.0f);
+
     for (int i = 0; i < hits.size; ++i) dx = AABB_clipXCollide(&hits.aabbs[i], &e->boundingBox, dx);
     AABB_move(&e->boundingBox, dx, 0.0f, 0.0f);
 
     for (int i = 0; i < hits.size; ++i) dz = AABB_clipZCollide(&hits.aabbs[i], &e->boundingBox, dz);
     AABB_move(&e->boundingBox, 0.0f, 0.0f, dz);
 
+    if (hits.aabbs) free(hits.aabbs);
+
+    // c0.27_st: new auto-step mechanic. If horizontal movement got blocked
+    // while grounded, retry the whole move from the pre-collision box with
+    // up to footSize of vertical rise allowed instead of the real dy. Only
+    // commit to the stepped result if it actually covers more horizontal
+    // ground than the original attempt; otherwise revert. Matches real
+    // source's own footSize/ySlideOffset mechanic exactly (Player and every
+    // Mob get footSize=0.5, see Mob_init); previously entirely missing, so
+    // mobs (and the player) could not climb a single half block ledge
+    // without jumping
+    if (e->footSize > 0.0f && wasGrounded && e->ySlideOffset < 0.05f && (ox != dx || oz != dz)) {
+        // CORRECTION: must compare against the already blocked dx/dz (this
+        // normal pass's own clipped result), not the original pre-clip
+        // ox/oz, since comparing against ox/oz meant a fully successful step
+        // (which recovers exactly the original requested distance) always
+        // came out "equal, not greater" and never actually committed
+        const float blockedDx = dx, blockedDz = dz;
+
+        AABB stepBox = origBox;
+        AABB stepExpanded = AABB_expand(&stepBox, ox, e->footSize, oz);
+        ArrayList_AABB stepHits = Level_getCubes(e->level, &stepExpanded);
+
+        float sdy = e->footSize, sdx = ox, sdz = oz;
+        for (int i = 0; i < stepHits.size; ++i) sdy = AABB_clipYCollide(&stepHits.aabbs[i], &stepBox, sdy);
+        AABB_move(&stepBox, 0.0f, sdy, 0.0f);
+        for (int i = 0; i < stepHits.size; ++i) sdx = AABB_clipXCollide(&stepHits.aabbs[i], &stepBox, sdx);
+        AABB_move(&stepBox, sdx, 0.0f, 0.0f);
+        for (int i = 0; i < stepHits.size; ++i) sdz = AABB_clipZCollide(&stepHits.aabbs[i], &stepBox, sdz);
+        AABB_move(&stepBox, 0.0f, 0.0f, sdz);
+
+        if (stepHits.aabbs) free(stepHits.aabbs);
+
+        if (blockedDx * blockedDx + blockedDz * blockedDz < sdx * sdx + sdz * sdz) {
+            // the stepped attempt covers more ground than the blocked
+            // normal attempt did, so keep it
+            dx = sdx; dy = sdy; dz = sdz;
+            e->boundingBox = stepBox;
+            e->ySlideOffset += 0.5f;
+        }
+        // else: the step didn't help, keep the original (already applied) result
+    }
+
     e->horizontalCollision = !(ox == dx && oz == dz);
     e->onGround = (oy != dy) && (oy < 0.0f);
 
-    // fall damage. Accumulates while actually falling, using the requested
-    // pre collision oy, matching the real source tracking the fall by motion
-    // rather than the collision clipped result. Fires once on the tick
-    // landing is detected, and clears whenever not currently falling
-    if (oy < 0.0f) {
-        e->fallDistance -= oy;
-    } else {
-        e->fallDistance = 0.0f;
-    }
+    // fall damage. CORRECTION: bytecode confirmed real source keys this off
+    // the FINAL dy (post collision, post auto step), not the original
+    // requested oy, and while airborne with dy>=0 (e.g. a mid air knockback
+    // bounce interrupting a fall) fallDistance is left completely untouched
+    // rather than reset to 0, since only actually landing (onGround) clears it.
+    // The previous version zeroed fallDistance early on any such interruption,
+    // understating eventual fall damage
     if (e->onGround) {
-        Mob_causeFallDamage(e, e->fallDistance);
+        if (e->fallDistance > 0.0f) Mob_causeFallDamage(e, e->fallDistance);
         e->fallDistance = 0.0f;
+    } else if (dy < 0.0f) {
+        e->fallDistance -= dy;
     }
 
     if (ox != dx) e->motionX = 0.0f;
@@ -145,8 +196,12 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
     if (oz != dz) e->motionZ = 0.0f;
 
     e->x = (e->boundingBox.minX + e->boundingBox.maxX) * 0.5f;
-    e->y =  e->boundingBox.minY + e->heightOffset;
+    // c0.27_st: subtracts ySlideOffset, smoothing the auto-step's visual
+    // rise over a few ticks instead of snapping straight to the new height
+    e->y =  e->boundingBox.minY + e->heightOffset - e->ySlideOffset;
     e->z = (e->boundingBox.minZ + e->boundingBox.maxZ) * 0.5f;
+
+    e->ySlideOffset *= 0.4f;
 
     // c0.0.23a_01: footstep sounds, matching the real source's Entity.move()
     // tail exactly. walkDist accumulates the actual post collision horizontal
@@ -166,8 +221,6 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
                        e->x, e->y, e->z);
         }
     }
-
-    if (hits.aabbs) free(hits.aabbs);
 }
 
 void Entity_moveRelative(Entity* e, float x, float z, float speed) {
@@ -190,7 +243,17 @@ bool Entity_isLit(const Entity* e) {
 }
 
 float Entity_getBrightness(const Entity* e) {
-    return Level_getBrightness(e->level, (int)e->x, (int)(e->y + e->heightOffset / 2.0f), (int)e->z);
+    // CORRECTION: missing the real source's own -0.5f term (bytecode
+    // confirmed: y + heightOffset/2 - 0.5f), shifting the sampled lighting
+    // column up by half a block for every consumer: mobs, particles,
+    // arrows, network players
+    return Level_getBrightness(e->level, (int)e->x, (int)(e->y + e->heightOffset / 2.0f - 0.5f), (int)e->z);
+}
+
+bool Entity_shouldRender(const Entity* e, float camX, float camY, float camZ) {
+    float dx = e->x - camX, dy = e->y - camY, dz = e->z - camZ;
+    float size = AABB_getSize(&e->boundingBox) * 64.0f;
+    return (dx * dx + dy * dy + dz * dz) < size * size;
 }
 
 bool Entity_isFree(const Entity* e, float dx, float dy, float dz) {

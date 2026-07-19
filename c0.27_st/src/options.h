@@ -32,6 +32,19 @@ typedef struct Options {
     bool invertMouseY;
     bool showFrameRate;
     int viewDistance; // 0..3: FAR/NORMAL/SHORT/TINY
+    // c0.25_05_st: matches Options.f/g exactly (both already present in this
+    // version's real source, just never wired up here before). bobView
+    // gates the camera view-bob effect (see applyViewBob in minecraft.c);
+    // anaglyph3d gates the red/cyan stereo dual-pass render plus a
+    // luminance-weighted desaturation of every loaded texture and chat
+    // color code
+    bool bobView;
+    bool anaglyph3d;
+    // c0.27_st: new toggle. When on, the main loop does an extra 5ms sleep
+    // per frame after swapping buffers (a simple frame limiter, not
+    // vsync/swap-interval based, matching Options.i and l.java's own
+    // Thread.sleep(5) call exactly)
+    bool limitFramerate;
 
     KeyBinding keys[OPTIONS_KEY_COUNT];
 
@@ -44,9 +57,9 @@ void Options_init(Options* o);
 void Options_load(Options* o);
 void Options_save(Options* o);
 
-// c0.0.23a_01: Options/Controls screen support. index is 0..4, matching the
+// c0.0.23a_01: Options/Controls screen support. index is 0..7, matching the
 // real source's j.b(int)/j.b(int,int): 0=music, 1=sound, 2=invertMouseY,
-// 3=showFrameRate, 4=viewDistance
+// 3=showFrameRate, 4=viewDistance, 5=bobView, 6=anaglyph3d, 7=limitFramerate
 void Options_toggleLabel(const Options* o, int index, char* out, int outSize);
 void Options_toggleValue(Options* o, int index, int direction); // toggles/cycles, then saves
 

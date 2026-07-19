@@ -27,6 +27,9 @@ void MobSkeletonModel_init(MobSkeletonModel* m) {
     Cube_init(&m->leftLeg, 0, 16);
     Cube_addBox(&m->leftLeg, -1, 0, -1, 2, 12, 2);
     Cube_setPos(&m->leftLeg, 2, 12, 0);
+
+    Cube_init(&m->hair, 32, 0);
+    Cube_addBoxExpanded(&m->hair, -4, -8, -4, 8, 8, 8, 0.5f);
 }
 
 void MobSkeletonModel_render(MobSkeletonModel* m, float animStep, float run, float age,
@@ -50,10 +53,14 @@ void MobSkeletonModel_render(MobSkeletonModel* m, float animStep, float run, flo
     m->rightLeg.xRot = (float)cos(animStep * 0.6662) * 1.4f * run;
     m->leftLeg.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
 
+    m->hair.xRot = m->head.xRot;
+    m->hair.yRot = m->head.yRot;
+
     Cube_render(&m->head);
     Cube_render(&m->body);
     Cube_render(&m->rightArm);
     Cube_render(&m->leftArm);
     Cube_render(&m->rightLeg);
     Cube_render(&m->leftLeg);
+    Cube_render(&m->hair);
 }

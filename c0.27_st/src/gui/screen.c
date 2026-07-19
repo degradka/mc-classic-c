@@ -136,12 +136,14 @@ void Screen_renderButtons(Screen* self, Button* buttons, int count, int xMouse, 
     }
 }
 
-// the real click dispatch only checks visibility, not enabled, so a greyed
-// out button still fires its click handler if something is drawn there
+// CORRECTION: the real click dispatch checks both visibility and enabled
+// (`d2.g &&` is the first condition in real source's own click loop, c/n.java
+// line 67), so a greyed out button never fires its click handler. The previous
+// comment here claiming otherwise was wrong
 int Screen_buttonClickedAt(Button* buttons, int count, int x, int y) {
     for (int i = 0; i < count; ++i) {
         Button* b = &buttons[i];
-        if (!b->visible) continue;
+        if (!b->visible || !b->enabled) continue;
         if (x >= b->x && y >= b->y && x < b->x + b->w && y < b->y + b->h) return b->id;
     }
     return -1;

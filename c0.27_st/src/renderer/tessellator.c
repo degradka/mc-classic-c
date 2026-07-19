@@ -76,4 +76,10 @@ void Tessellator_clear(Tessellator* t) {
     t->vertices   = 0;
     t->hasTexture = 0;
     t->hasColor   = 0;
+    // CORRECTION: matches the real Tessellator's own begin()/clear():
+    // ignoreColor resets every time too, not just an implicit assumption
+    // that every caller pairs its own set(1) with a clear(0). Every call
+    // site today does pair them, so this was harmless in practice, but it's
+    // a latent divergence from real source's own unconditional reset
+    t->ignoreColor = 0;
 }

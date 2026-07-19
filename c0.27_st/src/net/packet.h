@@ -5,8 +5,8 @@
 // The client decompile's own registry (com.mojang.minecraft.net.a) only has
 // 14 entries, ids 0-13, with no ping packet at all. But the real server1.2
 // jar's registry (com.mojang.minecraft.a.a) has an extra zero-payload ping
-// packet inserted at id 1 -- sent periodically from the main server loop,
-// not just at connect time -- which shifts every packet from LevelInit
+// packet inserted at id 1, sent periodically from the main server loop,
+// not just at connect time, which shifts every packet from LevelInit
 // onward up by one id compared to the client-only reading. This must be a
 // server revision that shipped slightly ahead of this client build. Since
 // interop with the real server is the whole point, this table follows the

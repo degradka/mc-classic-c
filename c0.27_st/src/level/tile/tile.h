@@ -60,6 +60,27 @@ struct Tile {
     // base). 1.0 for every tile except Leaves, which falls at 0.4x.
     float particleGravity;
 
+    // c0.24_st_03: how many game ticks of continuous mining this tile takes
+    // to break, matching the real source's Tile.h() (itself set at
+    // construction from a hardness-in-seconds float times 20). The player
+    // must keep the crosshair on the same block for hardnessTicks+1 ticks
+    // before it actually breaks; looking away resets progress to 0. 0 means
+    // instant break (every plant/sapling/flower/mushroom, and TNT)
+    int hardnessTicks;
+
+    // c0.27_st: matches the real source's own i(): false for a handful of
+    // sturdier tiles (stone, cobblestone, ore, the new metal/slab/brick/moss
+    // blocks), true (explosion destroys it) for everything else, including
+    // Bedrock, a confirmed genuine quirk in this version's real source, not
+    // a porting bug. Checked by Level_explode before clearing a block
+    int explosionResistant;
+
+    // c0.27_st: TNT's own real tile class overrides the mining-destroy
+    // particle hook to skip the usual debris-particle burst entirely (it
+    // spawns a primed entity instead, no chunks flying off). Every other
+    // tile leaves this false and gets the normal burst from Tile_onDestroy
+    int skipDestroyParticles;
+
     // Render shape, in block local coordinates. Default is a full cube
     // (0,0,0) to (1,1,1). Liquids crop the top so the surface sits slightly
     // below a full block.
@@ -85,6 +106,16 @@ struct Tile {
     // other tile (no op)
     void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
     void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
+
+    // c0.27_st: matches the real Tile base class's own separate b(Level,x,y,z)
+    // hook, a no-op by default, distinct from onPlace above (which fires for
+    // ANY tile change, including world gen/sponge/network sync); this one
+    // only fires from the player's own explicit right-click placement.
+    // Sand/Gravel override it to immediately check whether they should start
+    // falling (world gen sand never gets this check, only player-placed sand
+    // does, since otherwise a player-placed sand block over open air would just
+    // sit there until some unrelated neighbor change happened to notice it)
+    void (*onPlacedByPlayer)(const Tile* self, Level* lvl, int x, int y, int z);
 
     // Per face visibility test and per face vertex emission, used by the
     // shared render() to draw the 6 faces of a shaped tile. Liquids override
@@ -159,12 +190,21 @@ extern Tile TILE_ROSE;           // id=38, tex=12
 extern Tile TILE_MUSHROOM_BROWN; // id=39, tex=29
 extern Tile TILE_MUSHROOM_RED;   // id=40, tex=28
 
-extern Tile TILE_GOLD_BLOCK; // id=41, tex=40, plain tile, no special behavior
+// c0.27_st: ids 41-48 are all genuinely new tiles this version (id 41 Gold
+// Block already existed in c0.25_05_st as a plain single texture tile;
+// c0.27 gives it real per-face top/bottom/side textures like every other
+// tile here). TNT (id 46) is a normal tile like the rest; its ticking/
+// exploding half lives in item/primed_tnt.h, spawned via TILE_TNT.onRemoved
+extern Tile TILE_GOLD_BLOCK;  // id=41, per-face: top 56, bottom 24, sides 40
+extern Tile TILE_IRON_BLOCK;  // id=42, per-face: top 55, bottom 23, sides 39
+extern Tile TILE_DOUBLE_SLAB; // id=43, full cube, top/bottom tex 6, side tex 5
+extern Tile TILE_SLAB;        // id=44, half height box, same textures as 43
+extern Tile TILE_BRICK;       // id=45, tex=7, uniform
+extern Tile TILE_TNT;         // id=46, per-face: top 10, side 9, bottom 8. See item/primed_tnt.h
+extern Tile TILE_BOOKSHELF;   // id=47, per-face: side 35, top/bottom 4 (wood)
+extern Tile TILE_MOSSSTONE;   // id=48, tex=36, uniform
 
 void Tile_registerAll(void);
-
-// Helper to render a plain, untextured face (for highlights)
-void Face_render(Tessellator* t, int x, int y, int z, int face, float px, float py, float pz);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 

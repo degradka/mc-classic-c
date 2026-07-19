@@ -13,6 +13,11 @@ typedef struct {
     Cube body;
     Cube rightArm, leftArm;
     Cube rightLeg, leftLeg;
+    // c0.27_st: matches HumanoidMob's own always-on hair layer, see
+    // mob_zombie_model.h's own identical field for the full explanation.
+    // Skeleton's real geometry override only touches arms/legs, so this
+    // uses the same head-sized box as Zombie's own hair
+    Cube hair;
 } MobSkeletonModel;
 
 void MobSkeletonModel_init(MobSkeletonModel* m);

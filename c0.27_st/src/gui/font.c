@@ -99,6 +99,17 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
             color = color_from_code(code);
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);
+            // c0.27_st: new this version. Explicit &x color codes get the
+            // same luminance-weighted remap as textures when anaglyph3d is
+            // on (matches c/k.java exactly); the base/default color passed
+            // into this draw call is deliberately left alone, same as real
+            // source
+            if (Textures_isAnaglyph()) {
+                float nr = (r * 0.30f + g * 0.59f + b * 0.11f);
+                float ng = (r * 0.30f + g * 0.70f);
+                float nb = (r * 0.30f + b * 0.70f);
+                r = nr; g = ng; b = nb;
+            }
             Tessellator_color(t, r,g,b);
             i++; // skip code char
             continue;
