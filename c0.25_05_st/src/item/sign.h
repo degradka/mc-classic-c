@@ -9,7 +9,7 @@
 
 typedef struct {
     Entity e;
-    float rot;
+    float rot; // the board's facing, not the entity's yRotation
 } Sign;
 
 // yaw in degrees, where the player looks

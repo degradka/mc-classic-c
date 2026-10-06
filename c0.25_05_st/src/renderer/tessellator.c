@@ -5,8 +5,8 @@
 
 void Tessellator_begin(Tessellator* t) {
     Tessellator_clear(t);
-    t->hasTexture  = 0;
-    t->hasColor    = 0;
+    t->hasTexture = 0;
+    t->hasColor = 0;
     t->ignoreColor = 0;
 }
 
@@ -52,28 +52,30 @@ void Tessellator_setIgnoreColor(Tessellator* t, int ignore) {
 }
 
 void Tessellator_end(Tessellator* t) {
-    if (t->vertices > 0) {
-        glVertexPointer(3, GL_FLOAT, 0, t->vertexBuffer);
-        glEnableClientState(GL_VERTEX_ARRAY);
-        if (t->hasTexture) {
-            glTexCoordPointer(2, GL_FLOAT, 0, t->texBuffer);
-            glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        }
-        if (t->hasColor) {
-            glColorPointer(3, GL_FLOAT, 0, t->colorBuffer);
-            glEnableClientState(GL_COLOR_ARRAY);
-        }
+    if (t->vertices <= 0) return;
 
-        glDrawArrays(GL_QUADS, 0, t->vertices);
+    glVertexPointer(3, GL_FLOAT, 0, t->vertexBuffer);
+    glEnableClientState(GL_VERTEX_ARRAY);
 
-        glDisableClientState(GL_VERTEX_ARRAY);
-        if (t->hasTexture) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        if (t->hasColor) glDisableClientState(GL_COLOR_ARRAY);
+    if (t->hasTexture) {
+        glTexCoordPointer(2, GL_FLOAT, 0, t->texBuffer);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     }
+    if (t->hasColor) {
+        glColorPointer(3, GL_FLOAT, 0, t->colorBuffer);
+        glEnableClientState(GL_COLOR_ARRAY);
+    }
+
+    glDrawArrays(GL_QUADS, 0, t->vertices);
+
+    glDisableClientState(GL_VERTEX_ARRAY);
+    if (t->hasTexture) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    if (t->hasColor)   glDisableClientState(GL_COLOR_ARRAY);
+
     Tessellator_clear(t);
 }
 
-// flags stay until the next init
+// an end, even the automatic one, keeps the texture and colour flags until the next begin
 void Tessellator_clear(Tessellator* t) {
     t->vertices = 0;
 }

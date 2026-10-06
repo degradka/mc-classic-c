@@ -21,6 +21,7 @@ typedef struct ParticleEngine {
 
 void ParticleEngine_init  (ParticleEngine* pe, Level* level, GLuint terrainTex);
 void ParticleEngine_onTick(ParticleEngine* pe);
+// one pass, the particles tint themselves by brightness
 void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks);
 
 void ParticleEngine_add(ParticleEngine* pe, const Particle* p);

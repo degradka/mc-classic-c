@@ -7,6 +7,8 @@
 #include "phys/aabb.h"
 #include <stdbool.h>
 
+struct Ai; typedef struct Ai Ai;
+
 typedef struct Entity {
     Level* level;
 
@@ -14,45 +16,73 @@ typedef struct Entity {
     float prevX, prevY, prevZ;
     float motionX, motionY, motionZ;
     float xRotation, yRotation;
-    // the rotation at the last tick, turning moves these along with it
-    float xRotO, yRotO;
+    float prevXRotation, prevYRotation;
 
-    AABB  boundingBox;
+    AABB   boundingBox;
     float boundingBoxWidth;
     float boundingBoxHeight;
 
-    bool  onGround;
-    bool  horizontalCollision;
-    float heightOffset;
-    bool  removed;
-    float walkDist;
+    bool   onGround;
+    bool   horizontalCollision;
+    float  heightOffset;
+    bool   removed;
+
+    // walk distance spaces out the footsteps, particles make no step sound
+    float walkDist, walkDistO;
+    int nextStep;
     bool  makeStepSound;
-    // sounds still following it, the level hands it to the sound code instead of freeing it
-    int   soundRefs;
-    bool  soundReleased;
+
+    // Mob fields, only used when isMob is set
+    bool  isMob;
+    int   health;
+    int   lastHealth;
+    int   invulnerableTime;
+    int   hurtTime, hurtDuration;
+    // hurt wobble direction relative to yRotation, toward the attacker or a random 0 or 180
+    float hurtDir;
+    int   deathTime;
+    int   attackTime;
+    int   airSupply;
+    float yBodyRotation, prevYBodyRotation;
+    float fallDistance;
+    bool  dead;
+    // walk cycle for the mob models
+    int   tickCount;
+    float run, oRun;
+    bool collision;
+    float timeOffs, mobRot, rotA; // Mob fields only kept for the save
+    float animStep, animStepO;
+    // fired once, the tick health first reaches 0
+    void (*onDeath)(struct Entity* self, struct Entity* attacker);
+    // Mob.ai, NULL for the player and anything that isn't a mob
+    Ai* ai;
+    // who gets the kill score, arrows credit their shooter
+    Entity* killCredit;
+    // the same kind doesn't fight
+    // AI_CLASS_PLAYER for the player, the CreatureKind for creatures
+    int aiClassTag;
 } Entity;
+
+#define AI_CLASS_NONE   (-2) // default, not a Player or a Creature
+#define AI_CLASS_PLAYER (-1)
 
 void Entity_init(Entity* e, Level* level);
 void Entity_setPosition(Entity* e, float x, float y, float z);
 void Entity_resetPosition(Entity* e);
 void Entity_turn(Entity* e, float dx, float dy);
-void Entity_moveTo(Entity* e, float x, float y, float z, float yRot, float xRot);
-// a position update from the network
-typedef struct {
-    float x, y, z, yRot, xRot;
-    bool hasRot, hasPos;
-} PositionUpdate;
-void Entity_setPosUpdate(Entity* e, const PositionUpdate* u);
 void Entity_onTick(Entity* e);
 void Entity_move(Entity* e, float dx, float dy, float dz);
 void Entity_moveRelative(Entity* e, float x, float z, float speed);
 bool Entity_isLit(const Entity* e);
 float Entity_getBrightness(const Entity* e);
 void Entity_remove(Entity* e);
+// Entity.push(Entity): both get shoved apart, 0.05 divided by the squared distance
+void Entity_pushEntity(Entity* self, Entity* other);
 void Entity_setSize(Entity* e, float width, float height);
 bool Entity_isFree(const Entity* e, float dx, float dy, float dz);
 bool Entity_isInWater(const Entity* e);
+// only the tile at eye level, drowning uses it
+bool Entity_isUnderWater(const Entity* e);
 bool Entity_isInLava(const Entity* e);
-void Entity_playSound(Entity* e, const char* name, float volume, float pitch);
 
 #endif

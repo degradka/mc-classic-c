@@ -18,6 +18,7 @@ typedef struct Creature {
     Entity e; // must be first so Creature* can be used as Entity*
     Ai ai;
     CreatureKind kind;
+    bool helmet, armor;
 } Creature;
 
 void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float y, float z);

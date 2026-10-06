@@ -26,9 +26,9 @@ void Sign_init(Sign* s, Level* level, float x, float y, float z, float yaw) {
     s->rot = -yaw;
     e->heightOffset = 1.5f;
     // tossed toward where the player looks, it falls and settles like an item
-    e->motionX = -sinf(s->rot * (float)M_PI / 180.0f) * 0.05f;
+    e->motionX = -((float)sin((double)s->rot * M_PI / 180.0)) * 0.05f;
     e->motionY = 0.2f;
-    e->motionZ = -cosf(s->rot * (float)M_PI / 180.0f) * 0.05f;
+    e->motionZ = -((float)cos((double)s->rot * M_PI / 180.0)) * 0.05f;
     e->makeStepSound = false;
 }
 
@@ -39,7 +39,11 @@ void Sign_onTick(Sign* s) {
     e->prevZ = e->z;
 
     e->motionY -= 0.04f;
-    Entity_move(e, e->motionX, e->motionY, e->motionZ);
+    float xd = e->motionX, yd = e->motionY, zd = e->motionZ;
+    Entity_move(e, xd, yd, zd);
+    e->motionX = xd;
+    e->motionY = yd;
+    e->motionZ = zd;
     e->motionX *= 0.98f;
     e->motionY *= 0.98f;
     e->motionZ *= 0.98f;
@@ -83,10 +87,11 @@ void Sign_render(const Sign* s, float partialTicks, Font* font) {
     glTranslatef(0.0f, 0.5f, 0.09f);
     const float ts = 1.0f / 60.0f;
     glScalef(ts, -ts, ts);
+    glNormal3f(0.0f, 0.0f, -1.0f * ts);
     glEnable(GL_BLEND);
     for (int i = 0; i < 4; i++) {
         int tw = Font_width(font, SIGN_MESSAGES[i]);
-        Font_drawShadow(font, &sTess, SIGN_MESSAGES[i], -tw / 2, i * 10 - 4 * 5, 0x202020);
+        Font_draw(font, &sTess, SIGN_MESSAGES[i], -tw / 2, i * 10 - 4 * 5, 0x202020);
     }
     glDisable(GL_BLEND);
 

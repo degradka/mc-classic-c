@@ -3,7 +3,6 @@
 #include "net_socket.h"
 #include <string.h>
 #include <stdio.h>
-#include <stdbool.h>
 
 #if defined(_WIN32)
   #include <ws2tcpip.h>
@@ -20,14 +19,12 @@
   #include <errno.h>
 #endif
 
-// a blocking connect, then non blocking with TcpNoDelay and KeepAlive off
-// 1 connected, 0 the name doesn't resolve, -1 failed
 int NetSocket_connect(sock_t* out, const char* host, int port) {
 #if defined(_WIN32)
     static int wsaInited = 0;
     if (!wsaInited) {
         WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return -1;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return 0;
         wsaInited = 1;
     }
 #endif
@@ -45,16 +42,12 @@ int NetSocket_connect(sock_t* out, const char* host, int port) {
 
     sock_t sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 #if defined(_WIN32)
-    if (sock == INVALID_SOCKET) { freeaddrinfo(res); return -1; }
+    if (sock == INVALID_SOCKET) { freeaddrinfo(res); return 0; }
 #else
-    if (sock < 0) { freeaddrinfo(res); return -1; }
+    if (sock < 0) { freeaddrinfo(res); return 0; }
 #endif
-    int connectResult = connect(sock, res->ai_addr, (int)res->ai_addrlen);
-    freeaddrinfo(res);
-    if (connectResult != 0) {
-        NetSocket_close(sock);
-        return -1;
-    }
+
+    // non blocking connect so a dead host times out
 #if defined(_WIN32)
     u_long mode = 1;
     ioctlsocket(sock, FIONBIO, &mode);
@@ -63,13 +56,44 @@ int NetSocket_connect(sock_t* out, const char* host, int port) {
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 #endif
 
+    int connectResult = connect(sock, res->ai_addr, (int)res->ai_addrlen);
+    freeaddrinfo(res);
+
+    int connected = 0;
+    if (connectResult == 0) {
+        connected = 1; // completed immediately, e.g. localhost
+    } else {
+#if defined(_WIN32)
+        int inProgress = (WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+        int inProgress = (errno == EINPROGRESS);
+#endif
+        if (inProgress) {
+            fd_set writeSet;
+            FD_ZERO(&writeSet);
+            FD_SET(sock, &writeSet);
+            struct timeval tv;
+            tv.tv_sec = 8;
+            tv.tv_usec = 0;
+            if (select((int)sock + 1, NULL, &writeSet, NULL, &tv) > 0) {
+                int soErr = 0;
+                socklen_t errLen = sizeof soErr;
+                getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&soErr, &errLen);
+                connected = (soErr == 0);
+            }
+        }
+    }
+
+    if (!connected) {
+        NetSocket_close(sock);
+        return 0;
+    }
+
     int yes = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&yes, sizeof yes);
     int no = 0;
     setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, (const char*)&no, sizeof no);
-#if defined(__APPLE__)
-    setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&yes, sizeof yes);
-#endif
+
     *out = sock;
     return 1;
 }
@@ -92,16 +116,12 @@ int NetSocket_read(sock_t sock, void* buf, int len) {
 #endif
         return -1;
     }
-    // the -1 at the end of the stream is ignored, only a failing write notices
+    if (n == 0) return -1; // orderly remote close
     return n;
 }
 
 int NetSocket_write(sock_t sock, const void* buf, int len) {
-#if defined(MSG_NOSIGNAL)
-    int n = send(sock, (const char*)buf, len, MSG_NOSIGNAL);
-#else
     int n = send(sock, (const char*)buf, len, 0);
-#endif
     if (n < 0) {
 #if defined(_WIN32)
         if (WSAGetLastError() == WSAEWOULDBLOCK) return 0;

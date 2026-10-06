@@ -18,5 +18,6 @@ float AABB_clipYCollide(const AABB* a, const AABB* b, float y);
 float AABB_clipZCollide(const AABB* a, const AABB* b, float z);
 int   AABB_intersects(const AABB* a, const AABB* b);
 void  AABB_move(AABB* a, float x, float y, float z);
+AABB  AABB_offset(const AABB* a, float x, float y, float z);
 
 #endif // AABB_H

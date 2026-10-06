@@ -9,9 +9,9 @@
 typedef struct {
     Screen screen;
     Button buttons[2];
-    int score;
+    const int* score; // read live
 } GameOverScreen;
 
-void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, int score);
+void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, const int* score);
 
 #endif

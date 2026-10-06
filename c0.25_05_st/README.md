@@ -1,41 +1,43 @@
-# Classic 0.0.23a_01
+# Classic 0.25_05 SURVIVAL TEST
 
 [Back to all versions](../README.md)
 
-Released July 11, 2009. 0.0.21a to 0.0.23a are folded in here.
+Released September 3, 2009. 0.25 SURVIVAL TEST to 0.25 SURVIVAL TEST 4 are folded in here.
 
 ## What changed
 
-- Sound
-  - Footsteps and breaking sounds that depend on the tile, glass sounds like metal
-  - Music every 5 to 20 minutes
-- An Options menu: music, sound, invert mouse, show FPS and render distance
-- A Controls screen, every key can be changed
-- Reach is a 5 block raycast
-- Lava is brighter
-- Textured buttons
-- The block select screen is a smaller box in the middle, the slot under the mouse lights up
+- Mobs
+  - They see you from 16 blocks away instead of 8 and run straight at you, zombies at full speed, creepers a bit
+    slower, skeletons slowly. Pigs, creepers and skeletons also wander slower than before
+  - They keep chasing once they have you, and only give up far away
+  - They turn on whoever hurts them, so they fight each other, but never their own kind
+  - They respawn during play, at least 16 blocks from you, and idle ones far away despawn
+  - Their hits do 1-6 (zombies, creepers) or 1-8 (skeletons) instead of 1-7
+  - Skeletons shoot arrows and drop a few arrows you can pick up when they die
+  - A creeper hurts itself only when its hit lands, 6 instead of 4
+  - Pigs drop 1-2 brown mushrooms
+- Arrows
+  - You start with 20, up to 99, every shot uses one
+  - Yours do 7 damage, a mob's 3, and stuck ones can be picked back up
+  - You can hit yourself with your own arrows
+- Only the left mouse button hits mobs
+- A dead player doesn't pick up items any more
+- The score is in the top right corner, the arrow count above the hotbar
+- The Game over screen has a Load level.. button
+- Leaves drop a sapling 1 in 10 times instead of 1 in 6
 
 ## How it was ported
 
-- Obfuscated, ported on top of the previous version by diffing the decompiled jars
-- RetroMCP has names for this version
+- Ported with names: the RetroMCP names for 0.0.23a_01 carried to this jar with a matcher that pairs classes and methods by their structure, the rest named by hand
+- Afterwards the whole C code was checked against the whole jar, not just the diff, and the bugs it found were fixed
 
 ## Differences from the original
 
 - It's a normal window, not an applet
-- The applet got the server from the web page, here it's the command line: `minecraft.exe [host] [port] [username]`
-- Save level.. and Load level.. need you to be logged in on minecraft.net, which is gone, so they're always greyed out
-- After playing on a server the original saves that level in its network mode and never turns it off, so the next
-  single player start can't change anything. Here a loaded level always starts out of network mode
-
-## Multiplayer
-
-Pairs with [server 1.8.2](../server/server1.8.2/). Start the server, then from this version's folder:
-```bash
-./src/minecraft.exe 127.0.0.1 25565 yourname
-```
-No arguments means singleplayer. Without a name you're `guest`.
+- No multiplayer. The original jar still has its connection code (the applet could get a server), it's left out here
+- Fully offline: no skin downloads, always `char.png`, and Save level.. and Load level.. stay greyed out, they need a minecraft.net login that's gone
+- At most 64 arrows and 256 dropped items exist at once, java has no limit
+- Singleplayer only, like the original
 
 ## Building and running
 
@@ -55,7 +57,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.0.23a_01/src
+cd mc-classic-c/c0.25_05_st/src
 make
 ```
 
@@ -78,13 +80,8 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.0.23a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.21a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a)
-- [minecraft.wiki: Java Edition Classic 0.0.21a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.22a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_02)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_03)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_04)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_05)
-- [minecraft.wiki: Java Edition Classic 0.0.23a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a)
+- [minecraft.wiki: Java Edition Classic 0.25_05 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.25_05_SURVIVAL_TEST)
+- [minecraft.wiki: Java Edition Classic 0.25 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST)
+- [minecraft.wiki: Java Edition Classic 0.25 SURVIVAL TEST 2](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_2)
+- [minecraft.wiki: Java Edition Classic 0.25 SURVIVAL TEST 3](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_3)
+- [minecraft.wiki: Java Edition Classic 0.25 SURVIVAL TEST 4](https://minecraft.wiki/w/Java_Edition_Classic_0.25_SURVIVAL_TEST_4)

@@ -14,12 +14,11 @@
   typedef int sock_t;
 #endif
 
-// a blocking connect, then non blocking with TcpNoDelay and KeepAlive off
-// 1 connected, 0 the name doesn't resolve, -1 failed
+// TcpNoDelay, KeepAlive off, then non blocking, 1 on success
 int NetSocket_connect(sock_t* out, const char* host, int port);
 void NetSocket_close(sock_t sock);
 
-// bytes moved, 0 if it would block or the other end closed, -1 on an error
+// bytes moved, 0 if it would block, -1 on an error or a remote close
 int NetSocket_read(sock_t sock, void* buf, int len);
 int NetSocket_write(sock_t sock, const void* buf, int len);
 

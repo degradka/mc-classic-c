@@ -1,26 +1,26 @@
-// audio/sound.h: step sounds and music mixed in 4410 frame chunks
+// audio/sound.h: footstep/break sounds and music
 
 #ifndef SOUND_H
 #define SOUND_H
 
 #include <stdbool.h>
+#include "../entity.h"
 
-struct Entity;
-struct Options;
-
-// loads the sounds and music from resources, opens the audio device and starts its threads
-void Sound_init(const struct Options* options);
+void Sound_init(bool musicEnabled, bool soundEnabled);
 void Sound_shutdown(void);
+void Sound_setEnabled(bool music, bool sound);
 
-// Level.playSound, the sound follows the entity while it plays
-void Sound_playEntity(const char* name, struct Entity* source, const struct Entity* listener, float volume, float pitch);
-// Level.playSound at a fixed spot
-void Sound_playAt(const char* name, float x, float y, float z, const struct Entity* listener, float volume, float pitch);
+// once per frame, copies the listener and every moving source for the mixer thread
+void Sound_update(const Entity* listener);
+// a source entity moved to another slot, or was removed (to = NULL keeps its last spot)
+void Sound_retargetEntity(const Entity* from, const Entity* to);
+void Sound_detachAll(void);
 
-// the music check at the start of every tick
-void Sound_tick(void);
+// Level.playSound at a fixed spot and following an entity
+void Sound_playAt(const char* name, float x, float y, float z, float volume, float pitch);
+void Sound_playEntity(const char* name, const Entity* e, float volume, float pitch);
 
-// an entity stays alive while a sound holds it, the level frees its zombies through this
-void Sound_releaseEntity(struct Entity* e);
+// the music timer, once per tick
+void Sound_tickMusic(void);
 
 #endif

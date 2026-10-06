@@ -1,4 +1,4 @@
-// hitresult.c: picked block and face
+// hitresult.c: block raycast result
 
 #include "hitresult.h"
 #include "player.h"
@@ -16,7 +16,7 @@ void hitresult_createEntity(HitResult* h, Entity* entity) {
     h->entity = entity;
 }
 
-static float distanceTo(const HitResult* h, const Player* player, int editMode) {
+static double distanceTo(const HitResult* h, const Player* player, int editMode) {
     int xx = h->x, yy = h->y, zz = h->z;
     if (editMode == 1) {
         if (h->f == 0) yy--;
@@ -26,15 +26,15 @@ static float distanceTo(const HitResult* h, const Player* player, int editMode) 
         if (h->f == 4) xx--;
         if (h->f == 5) xx++;
     }
-    float xd = (float)xx - player->e.x;
-    float yd = (float)yy - player->e.y;
-    float zd = (float)zz - player->e.z;
+    double xd = xx - player->e.x;
+    double yd = yy - player->e.y;
+    double zd = zz - player->e.z;
     return xd * xd + yd * yd + zd * zd;
 }
 
 bool HitResult_isCloserThan(const HitResult* h, const Player* player, const HitResult* o, int editMode) {
-    float dist  = distanceTo(h, player, 0);
-    float dist2 = distanceTo(o, player, 0);
+    double dist  = distanceTo(h, player, 0);
+    double dist2 = distanceTo(o, player, 0);
     if (dist < dist2) return true;
 
     dist  = distanceTo(h, player, editMode);
