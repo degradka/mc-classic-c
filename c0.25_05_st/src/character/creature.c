@@ -82,9 +82,12 @@ static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
 static void Creature_onDeath(Entity* self, Entity* attacker) {
     Creature* c = (Creature*)self;
 
-    if (attacker) { // only a credited kill awards score
+    if (attacker) {
         // arrows credit whoever shot them and only the player keeps score
         if (attacker->killCredit) attacker = attacker->killCredit;
+        if (attacker->aiClassTag != AI_CLASS_PLAYER) attacker = NULL;
+    }
+    if (attacker) {
         Player* killer = (Player*)attacker;
         switch (c->kind) {
             case CREATURE_ZOMBIE:
