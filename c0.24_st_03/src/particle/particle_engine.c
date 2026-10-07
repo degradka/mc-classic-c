@@ -32,6 +32,7 @@ void ParticleEngine_onTick(ParticleEngine* pe) {
     for (int i = 0; i < pe->count; ) {
         Particle_onTick(&pe->items[i]);
         if (pe->items[i].base.removed) {
+            // ordered remove so the draw order stays the same
             memmove(&pe->items[i], &pe->items[i + 1], (size_t)(pe->count - i - 1) * sizeof(Particle));
             pe->count--;
         } else {
@@ -46,17 +47,20 @@ void ParticleEngine_render(ParticleEngine* pe, const Player* player, float parti
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, pe->texture);
 
-    float cameraX = -(float)cos(player->e.yRotation * M_PI / 180.0);
-    float cameraZ = -(float)sin(player->e.yRotation * M_PI / 180.0);
-    float cameraXWithY = -cameraZ * (float)sin(player->e.xRotation * M_PI / 180.0);
-    float cameraZWithY =  cameraX * (float)sin(player->e.xRotation * M_PI / 180.0);
-    float cameraY = (float)cos(player->e.xRotation * M_PI / 180.0);
+    glDisableClientState(GL_COLOR_ARRAY);
+
+    // camera facing vectors so each particle billboards toward the player
+    float cameraX = -((float)cos((double)player->e.yRotation * M_PI / 180.0));
+    float cameraZ = -((float)sin((double)player->e.yRotation * M_PI / 180.0));
+    float cameraXWithY = -cameraZ * (float)sin((double)player->e.xRotation * M_PI / 180.0);
+    float cameraZWithY = cameraX * (float)sin((double)player->e.xRotation * M_PI / 180.0);
+    float cameraY = (float)cos((double)player->e.xRotation * M_PI / 180.0);
 
     Tessellator_begin(&pe->tess);
     for (int i = 0; i < pe->count; ++i) {
         Particle* p = &pe->items[i];
-        float br = 0.8f * Entity_getBrightness(&p->base);
-        Tessellator_color(&pe->tess, br, br, br);
+        float b = 0.6f * Entity_getBrightness(&p->base);
+        Tessellator_color(&pe->tess, b, b, b);
         Particle_render(p, &pe->tess, partialTicks,
                         cameraX, cameraY, cameraZ,
                         cameraXWithY, cameraZWithY);

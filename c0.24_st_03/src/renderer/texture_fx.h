@@ -1,16 +1,41 @@
-// renderer/texture_fx.h: the animated lava and water tiles, 16x16 rgba written into terrain.png every tick
+// renderer/texture_fx.h: animated textures, redrawn every tick into terrain.png
 
-#ifndef TEXTURE_FX_H
-#define TEXTURE_FX_H
+#ifndef RENDERER_TEXTURE_FX_H
+#define RENDERER_TEXTURE_FX_H
+
+#include <stdbool.h>
+
+#define TEXTURE_FX_SIZE 16
 
 typedef struct TextureFX {
-    unsigned char pixels[16 * 16 * 4];
-    int tex;
-    float current[256], next[256], heat[256], heata[256];
-    void (*step)(struct TextureFX* fx);
+    unsigned char pixels[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE * 4]; // RGBA
+    int tileId; // which terrain.png atlas cell this patches
+    bool anaglyph;
+    void (*tick)(struct TextureFX* self);
 } TextureFX;
 
-void LavaFX_init(TextureFX* fx, int tex);
-void WaterFX_init(TextureFX* fx, int tex);
+typedef struct {
+    TextureFX base;
+    // current/next point at bufA/bufB, swapped each tick rather than copied
+    float bufA[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float bufB[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float* current;
+    float* next;
+    float heat[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float heatVelocity[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+} LavaTextureFX;
+
+typedef struct {
+    TextureFX base;
+    float bufA[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float bufB[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float* current;
+    float* next;
+    float accum[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+    float velocity[TEXTURE_FX_SIZE * TEXTURE_FX_SIZE];
+} WaterTextureFX;
+
+void LavaTextureFX_init(LavaTextureFX* fx, int tileId);
+void WaterTextureFX_init(WaterTextureFX* fx, int tileId);
 
 #endif

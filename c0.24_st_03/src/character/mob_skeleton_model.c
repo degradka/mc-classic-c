@@ -16,6 +16,7 @@ void MobSkeletonModel_init(MobSkeletonModel* m) {
     Cube_setPos(&m->rightArm, -5, 2, 0);
 
     Cube_init(&m->leftArm, 40, 16);
+    m->leftArm.mirror = 1;
     Cube_addBox(&m->leftArm, -1, -2, -1, 2, 12, 2);
     Cube_setPos(&m->leftArm, 5, 2, 0);
 
@@ -24,6 +25,7 @@ void MobSkeletonModel_init(MobSkeletonModel* m) {
     Cube_setPos(&m->rightLeg, -2, 12, 0);
 
     Cube_init(&m->leftLeg, 0, 16);
+    m->leftLeg.mirror = 1;
     Cube_addBox(&m->leftLeg, -1, 0, -1, 2, 12, 2);
     Cube_setPos(&m->leftLeg, 2, 12, 0);
 }

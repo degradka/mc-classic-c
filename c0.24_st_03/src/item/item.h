@@ -12,6 +12,7 @@ typedef struct {
     int tickCount;
     int age;        // despawns at 6000 (5 minutes)
 
+    // the item animates itself instead of a separate TakeItemAnim entity
     bool  pickedUp;
     int   pickupTime;
     float pickupOrgX, pickupOrgY, pickupOrgZ;

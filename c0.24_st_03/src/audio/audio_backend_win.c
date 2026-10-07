@@ -1,37 +1,30 @@
-﻿// audio/audio_backend_win.c: windows pcm output through waveOut, refilled from a thread of its own
+// audio/audio_backend_win.c: Windows PCM output via WinMM waveOut
 
 #include "audio_backend.h"
 #include <windows.h>
 #include <mmsystem.h>
 #include <string.h>
 
-// the mixer writes 4410 frames at a time into a line that holds a quarter of that
-#define NUM_BUFFERS   2
-#define BUFFER_FRAMES 4410
+#define NUM_BUFFERS   4
+#define BUFFER_FRAMES 1024
 
-static HWAVEOUT waveOut;
-static WAVEHDR headers[NUM_BUFFERS];
-static int16_t buffers[NUM_BUFFERS][BUFFER_FRAMES * AUDIO_CHANNELS];
-static AudioFillCallback fillBuffer;
-static HANDLE doneEvent;
-static HANDLE thread;
-static volatile LONG running;
+static HWAVEOUT gWaveOut;
+static WAVEHDR gHeaders[NUM_BUFFERS];
+static int16_t gBuffers[NUM_BUFFERS][BUFFER_FRAMES * AUDIO_CHANNELS];
+static AudioFillCallback gFill;
+static volatile LONG gRunning;
 
-static DWORD WINAPI audioThread(LPVOID arg) {
-    (void)arg;
-    while (running) {
-        WaitForSingleObject(doneEvent, INFINITE);
-        for (int i = 0; i < NUM_BUFFERS && running; ++i) {
-            if (!(headers[i].dwFlags & WHDR_DONE)) continue;
-            fillBuffer(buffers[i], BUFFER_FRAMES);
-            waveOutWrite(waveOut, &headers[i], sizeof(WAVEHDR));
-        }
-    }
-    return 0;
+static void CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2) {
+    (void)hwo; (void)dwInstance; (void)dwParam2;
+    if (uMsg != WOM_DONE || !gRunning) return;
+    WAVEHDR* hdr = (WAVEHDR*)dwParam1;
+    gFill((int16_t*)hdr->lpData, BUFFER_FRAMES);
+    waveOutWrite(gWaveOut, hdr, sizeof(WAVEHDR));
 }
 
 int AudioBackend_init(AudioFillCallback fill) {
-    fillBuffer = fill;
+    gFill = fill;
+
     WAVEFORMATEX fmt;
     memset(&fmt, 0, sizeof fmt);
     fmt.wFormatTag      = WAVE_FORMAT_PCM;
@@ -41,46 +34,29 @@ int AudioBackend_init(AudioFillCallback fill) {
     fmt.nBlockAlign     = (WORD)(fmt.nChannels * fmt.wBitsPerSample / 8);
     fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
 
-    doneEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!doneEvent) return -1;
-    if (waveOutOpen(&waveOut, WAVE_MAPPER, &fmt, (DWORD_PTR)doneEvent, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
-        CloseHandle(doneEvent);
-        waveOut = NULL;
+    if (waveOutOpen(&gWaveOut, WAVE_MAPPER, &fmt, (DWORD_PTR)waveOutProc, 0, CALLBACK_FUNCTION) != MMSYSERR_NOERROR) {
+        gWaveOut = NULL;
         return -1;
     }
-    running = 1;
+
+    gRunning = 1;
     for (int i = 0; i < NUM_BUFFERS; ++i) {
-        memset(&headers[i], 0, sizeof(WAVEHDR));
-        headers[i].lpData = (LPSTR)buffers[i];
-        headers[i].dwBufferLength = BUFFER_FRAMES * AUDIO_CHANNELS * sizeof(int16_t);
-        waveOutPrepareHeader(waveOut, &headers[i], sizeof(WAVEHDR));
-        fillBuffer(buffers[i], BUFFER_FRAMES);
-        waveOutWrite(waveOut, &headers[i], sizeof(WAVEHDR));
-    }
-    thread = CreateThread(NULL, 0, audioThread, NULL, 0, NULL);
-    if (!thread) {
-        AudioBackend_shutdown();
-        return -1;
+        memset(&gHeaders[i], 0, sizeof(WAVEHDR));
+        gFill(gBuffers[i], BUFFER_FRAMES);
+        gHeaders[i].lpData         = (LPSTR)gBuffers[i];
+        gHeaders[i].dwBufferLength = BUFFER_FRAMES * AUDIO_CHANNELS * sizeof(int16_t);
+        waveOutPrepareHeader(gWaveOut, &gHeaders[i], sizeof(WAVEHDR));
+        waveOutWrite(gWaveOut, &gHeaders[i], sizeof(WAVEHDR));
     }
     return 0;
 }
 
 void AudioBackend_shutdown(void) {
-    running = 0;
-    if (thread) {
-        SetEvent(doneEvent);
-        WaitForSingleObject(thread, INFINITE);
-        CloseHandle(thread);
-        thread = NULL;
-    }
-    if (waveOut) {
-        waveOutReset(waveOut);
-        for (int i = 0; i < NUM_BUFFERS; ++i) waveOutUnprepareHeader(waveOut, &headers[i], sizeof(WAVEHDR));
-        waveOutClose(waveOut);
-        waveOut = NULL;
-    }
-    if (doneEvent) {
-        CloseHandle(doneEvent);
-        doneEvent = NULL;
+    gRunning = 0;
+    if (gWaveOut) {
+        waveOutReset(gWaveOut);
+        for (int i = 0; i < NUM_BUFFERS; ++i) waveOutUnprepareHeader(gWaveOut, &gHeaders[i], sizeof(WAVEHDR));
+        waveOutClose(gWaveOut);
+        gWaveOut = NULL;
     }
 }

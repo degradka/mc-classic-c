@@ -1,4 +1,4 @@
-// mob_ai.c
+// mob_ai.c: BasicAI.tick and update, plus the attacking subclass, see mob_ai.h
 
 #include "mob_ai.h"
 #include "mob.h"
@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
+extern void Minecraft_pushNearby(Entity* mob);
 
 void Ai_init(Ai* ai, bool chase, int wanderPitch) {
     ai->chase = chase;
@@ -15,53 +15,54 @@ void Ai_init(Ai* ai, bool chase, int wanderPitch) {
     ai->turnSpeed = 0.0f;
     ai->wantsJump = false;
     ai->attackCooldown = 0;
+    JRandom_initRandom(&ai->random);
     ai->onDeathTimeout = NULL;
+    ai->onAfterAttack = NULL;
 }
 
-// no hit through a solid block, damage 1 to 7, then a 10 to 30 tick wait
-static void Ai_tryAttack(Ai* ai, Entity* mob, Entity* target) {
-    if (Level_clip(mob->level, mob->x, mob->y, mob->z, target->x, target->y, target->z)) return;
-    mob->attackTime = MOB_ATTACK_DURATION;
-    ai->attackCooldown = (int)(frand01() * 20.0f) + 10;
-    Mob_hurt(target, mob, (int)(frand01() * 4.0f) + (int)(frand01() * 4.0f) + 1);
+// no hit through anything in the line of sight
+static void attack(Ai* ai, Entity* mob, Entity* target) {
+    if (!Level_clip(mob->level, mob->x, mob->y, mob->z, target->x, target->y, target->z)) {
+        mob->attackTime = MOB_ATTACK_DURATION;
+        ai->attackCooldown = JRandom_nextIntN(&ai->random, 20) + 10;
+        int a = JRandom_nextIntN(&ai->random, 4);
+        int b = JRandom_nextIntN(&ai->random, 4);
+        Mob_hurt(target, mob, a + b + 1);
+    }
+    if (ai->onAfterAttack) ai->onAfterAttack(ai, mob, target);
 }
 
-// within 8 blocks it turns to the target and the wander speed walks it there
-// within 2 blocks and off cooldown it attacks
-static void Ai_seekAndAttack(Ai* ai, Entity* mob, Entity* target) {
+// the pitch uses the flat distance
+static void lookAndAttack(Ai* ai, Entity* mob, Entity* target) {
     if (!target) return;
-
     float dx = target->x - mob->x;
     float dz = target->z - mob->z;
-    float distXZ = sqrtf(dx * dx + dz * dz);
-    if (distXZ >= 8.0f) return;
-
-    float dy = target->y - mob->y;
-    mob->yRotation = (float)(atan2(dz, dx) * 180.0 / M_PI) - 90.0f;
-    mob->xRotation = -(float)(atan2(dy, distXZ) * 180.0 / M_PI);
-
-    float dist3d = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (dist3d < 2.0f && ai->attackCooldown == 0) {
-        Ai_tryAttack(ai, mob, target);
+    float flat = (float)sqrt(dx * dx + dz * dz);
+    if (flat < 8.0f) {
+        float dy = target->y - mob->y;
+        mob->yRotation = (float)(atan2(dz, dx) * 180.0 / M_PI) - 90.0f;
+        mob->xRotation = -((float)(atan2(dy, flat) * 180.0 / M_PI));
+        float dist = (float)sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < 2.0f && ai->attackCooldown == 0) attack(ai, mob, target);
     }
 }
 
-// the random wander: new speeds 7% a tick, a new turn 4% a tick, a jump 1% a tick, 80% in water or lava
-static void Ai_wanderStep(Ai* ai, Entity* mob) {
-    if (frand01() < 0.07f) {
-        ai->speedX = frand01() - 0.5f;
-        ai->speedZ = frand01();
+// BasicAI.update
+static void update(Ai* ai, Entity* mob) {
+    if (JRandom_nextFloat(&ai->random) < 0.07f) {
+        ai->speedX = JRandom_nextFloat(&ai->random) - 0.5f;
+        ai->speedZ = JRandom_nextFloat(&ai->random);
     }
-    if (frand01() < 0.04f) {
-        ai->turnSpeed = (frand01() - 0.5f) * 60.0f;
+    if (JRandom_nextFloat(&ai->random) < 0.04f) {
+        ai->turnSpeed = (JRandom_nextFloat(&ai->random) - 0.5f) * 60.0f;
     }
     mob->yRotation += ai->turnSpeed;
     mob->xRotation = (float)ai->wanderPitch;
-
-    ai->wantsJump = frand01() < 0.01f;
+    ai->wantsJump = JRandom_nextFloat(&ai->random) < 0.01f;
     if (Entity_isInWater(mob) || Entity_isInLava(mob)) {
-        ai->wantsJump = frand01() < 0.8f;
+        ai->wantsJump = JRandom_nextFloat(&ai->random) < 0.8f;
     }
+    if (ai->chase) lookAndAttack(ai, mob, Level_getPlayer(mob->level));
 }
 
 void Ai_tick(Ai* ai, Entity* mob) {
@@ -72,10 +73,7 @@ void Ai_tick(Ai* ai, Entity* mob) {
         ai->speedX = ai->speedZ = 0.0f;
         ai->turnSpeed = 0.0f;
     } else {
-        Ai_wanderStep(ai, mob);
-        if (ai->chase) {
-            Ai_seekAndAttack(ai, mob, Level_getPlayer(mob->level));
-        }
+        update(ai, mob);
     }
 
     bool inWater = Entity_isInWater(mob);
@@ -92,4 +90,5 @@ void Ai_tick(Ai* ai, Entity* mob) {
 
     Mob_travel(mob, ai->speedX, ai->speedZ);
 
+    Minecraft_pushNearby(mob);
 }

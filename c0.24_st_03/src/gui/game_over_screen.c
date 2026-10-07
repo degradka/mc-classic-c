@@ -18,7 +18,7 @@ static void GameOverScreen_render(Screen* self, int xm, int ym) {
     glPopMatrix();
 
     char scoreMsg[48];
-    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", s->score);
+    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", *s->score);
     Screen_drawCenteredString(self, scoreMsg, self->width / 2, 100, 0xFFFFFFu);
 
     Screen_renderButtons(self, s->buttons, 1, xm, ym);
@@ -35,7 +35,7 @@ static void GameOverScreen_mouseClicked(Screen* self, int x, int y, int button) 
     }
 }
 
-void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, int score) {
+void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, const int* score) {
     s->screen.width  = width;
     s->screen.height = height;
     s->screen.font   = font;

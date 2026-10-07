@@ -1,9 +1,8 @@
-// audio/sound.c
+// audio/sound.c: the mixer (SoundPlayer, Sound, SoundInfo, Music) on
+// top of the platform specific audio_backend, OGG decoding via stb_vorbis
 
 #include "sound.h"
 #include "audio_backend.h"
-#include "../entity.h"
-#include "../options.h"
 #include "../jrandom.h"
 #include "../timer.h"
 
@@ -12,8 +11,14 @@
 #include <string.h>
 #include <math.h>
 
-// stb_vorbis.c defines L, C, R and the PLAYBACK_ macros and never undefines them,
-// they clash with the mingw windows headers
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+// stb_vorbis.c defines L/C/R and PLAYBACK_MONO/LEFT/RIGHT
+// macros for its channel table and never undefs them
+// after (nothings/stb/issues/282) those names clash with
+// MinGW Windows headers so clear them before + after the include
 #undef L
 #undef C
 #undef R
@@ -30,483 +35,415 @@
 
 #ifdef _WIN32
   #include <windows.h>
-  typedef CRITICAL_SECTION Lock;
-  #define LOCK_INIT(l) InitializeCriticalSection(l)
-  #define LOCK(l)      EnterCriticalSection(l)
-  #define UNLOCK(l)    LeaveCriticalSection(l)
+  #define SOUND_LOCK_T       CRITICAL_SECTION
+  #define SOUND_LOCK_INIT(l) InitializeCriticalSection(l)
+  #define SOUND_LOCK(l)      EnterCriticalSection(l)
+  #define SOUND_UNLOCK(l)    LeaveCriticalSection(l)
 #else
   #include <pthread.h>
-  typedef pthread_mutex_t Lock;
-  #define LOCK_INIT(l) pthread_mutex_init(l, NULL)
-  #define LOCK(l)      pthread_mutex_lock(l)
-  #define UNLOCK(l)    pthread_mutex_unlock(l)
+  #define SOUND_LOCK_T       pthread_mutex_t
+  #define SOUND_LOCK_INIT(l) pthread_mutex_init(l, NULL)
+  #define SOUND_LOCK(l)      pthread_mutex_lock(l)
+  #define SOUND_UNLOCK(l)    pthread_mutex_unlock(l)
 #endif
 
-#define CHUNK 4410
+static SOUND_LOCK_T gLock;
 
-// SoundData, one channel at its own rate
+#define STEP_VARIANT_COUNT  4
+#define MUSIC_VARIANT_COUNT 3
+
+#define MAX_VOICES     32
+#define MAX_MUSIC      4
+#define MAX_SFX_CACHE  16 // grass/gravel/stone/wood x4 variants each
+#define CHUNK          4410
+
+// SoundData, mono
 typedef struct {
-    short* data;
+    char path[64];
+    int16_t* data;
     int length;
     float rate;
-} SoundData;
+} SfxClip;
 
-// a name like "step.grass" and its variants in the order they were registered
-typedef struct {
-    char name[32];
-    SoundData* list;
-    int count;
-} SoundList;
+static SfxClip gSfxCache[MAX_SFX_CACHE];
+static int gSfxCacheCount = 0;
 
+// Sound + SoundInfo + its SoundPos
 typedef struct {
-    char name[32];
-    char paths[8][96];
-    int count;
-} MusicList;
-
-// SoundPos, an entity or a fixed spot, heard by the listener
-typedef struct {
-    struct Entity* source;
+    bool active;
+    const SfxClip* clip;
+    float seek, step, volume;
+    const Entity* source; // null for a fixed position
     float x, y, z;
-    const struct Entity* listener;
-} SoundPos;
+    float pan, gain;      // what the last chunk ended on
+} Voice;
 
-// a Sound with its SoundInfo, or a Music
+static Voice gVoices[MAX_VOICES];
+
 typedef struct {
-    bool music;
-    // Sound
-    const SoundData* data;
-    float seek;
-    float step;
-    float infoVolume;
-    SoundPos pos;
-    float pan;
-    float volume;
-    // Music
-    short* pcm;
-    volatile int decoded;
-    volatile bool finished;
-    volatile bool stopped;
-    int played;
-    // the queue and the decode thread each hold a music
-    int refs;
-    char path[96];
-} Audio;
+    bool active;
+    int16_t* samples; // interleaved stereo
+    int frames, pos;
+} MusicStream;
 
-#define MAX_LISTS 16
-static SoundList sounds[MAX_LISTS];
-static int soundCount = 0;
-static MusicList musics[MAX_LISTS];
-static int musicCount = 0;
+static MusicStream gMusic[MAX_MUSIC];
+static volatile int gMusicLoadInFlight = 0;
 
-static JRandom random;
-static long long lastMusic;
+static bool gMusicEnabled = true;
+static bool gSoundEnabled = true;
+static bool gBackendOk = false;
 
-static const Options* options;
-static bool running = false;
-static Lock lock;
+static const Entity* gListener = NULL;
+static float gListenerX, gListenerY, gListenerZ, gListenerYaw;
 
-static Audio** queue = NULL;
-static int queueCount = 0, queueCapacity = 0;
+static JRandom gRandom;          // SoundManager.random
+static long long gLastMusic = 0;
 
-static int mixLeft[CHUNK], mixRight[CHUNK];
-static short chunk[CHUNK * 2];
-static int chunkPos = CHUNK;
-static short soundBuffer[CHUNK];
+static int gMixL[CHUNK], gMixR[CHUNK];
+static int16_t gOut[CHUNK * 2];
+static int gOutPos = CHUNK;
 
-// BaseSoundPos.getRotationDiff, NaN when the sound is right on the listener
-static float rotationDiff(const SoundPos* p, float x, float z) {
-    x -= p->listener->x;
-    z -= p->listener->z;
+static const SfxClip* loadSfx(const char* path) {
+    for (int i = 0; i < gSfxCacheCount; ++i) {
+        if (strcmp(gSfxCache[i].path, path) == 0) return &gSfxCache[i];
+    }
+    if (gSfxCacheCount >= MAX_SFX_CACHE) return NULL;
+
+    int channels = 0, sampleRate = 0;
+    short* output = NULL;
+    int frames = stb_vorbis_decode_filename(path, &channels, &sampleRate, &output);
+    if (frames <= 0 || !output || channels <= 0) return NULL;
+
+    // downmix to mono
+    for (int i = 0; i < frames; ++i) {
+        int sum = 0;
+        for (int c = 0; c < channels; ++c) sum += output[i * channels + c];
+        output[i] = (int16_t)(sum / channels);
+    }
+
+    SfxClip* clip = &gSfxCache[gSfxCacheCount++];
+    snprintf(clip->path, sizeof clip->path, "%s", path);
+    clip->data = output;
+    clip->length = frames;
+    clip->rate = (float)sampleRate;
+    return clip;
+}
+
+// BaseSoundPos.getRotationDiff, NaN when the source is the listener itself
+static float rotationDiff(float x, float z) {
+    x -= gListenerX;
+    z -= gListenerZ;
     float d = (float)sqrt(x * x + z * z);
     x /= d;
     z /= d;
-    if ((d /= 2.0f) > 1.0f) d = 1.0f;
-    float c = (float)cos((double)(-p->listener->yRotation) * M_PI / 180.0 + M_PI);
-    float s = (float)sin((double)(-p->listener->yRotation) * M_PI / 180.0 + M_PI);
+    d /= 2.0f;
+    if (d > 1.0f) d = 1.0f;
+    float c = (float)cos((double)(-gListenerYaw) * M_PI / 180.0 + M_PI);
+    float s = (float)sin((double)(-gListenerYaw) * M_PI / 180.0 + M_PI);
     return (s * z - c * x) * d;
 }
 
-// BaseSoundPos.getDistanceSq, really a volume that fades out over 32 blocks
-static float distanceVolume(const SoundPos* p, float x, float y, float z) {
-    x -= p->listener->x;
-    y -= p->listener->y;
-    float zd = z - p->listener->z;
-    float d = (float)sqrt(x * x + y * y + zd * zd);
-    if ((d = 1.0f - d / 32.0f) < 0.0f) d = 0.0f;
+// BaseSoundPos.getDistanceSq
+static float distanceGain(float x, float y, float z) {
+    float dz = z - gListenerZ;
+    x -= gListenerX;
+    y -= gListenerY;
+    float d = (float)sqrt(x * x + y * y + dz * dz);
+    d = 1.0f - d / 32.0f;
+    if (d < 0.0f) d = 0.0f;
     return d;
 }
 
-static float posRotationDiff(const SoundPos* p) {
-    if (p->source) return rotationDiff(p, p->source->x, p->source->z);
-    return rotationDiff(p, p->x, p->z);
-}
-
-static float posVolume(const SoundPos* p) {
-    if (p->source) return distanceVolume(p, p->source->x, p->source->y, p->source->z);
-    return distanceVolume(p, p->x, p->y, p->z);
-}
-
-// SoundInfo.update, how many samples it gave before it ran out
-static int infoUpdate(Audio* a, short* out, int n) {
-    if (a->seek >= (float)a->data->length) return 0;
+// SoundInfo.update
+static int readVoice(Voice* v, int16_t* out, int n) {
+    const int16_t* data = v->clip->data;
+    int len = v->clip->length;
+    if (v->seek >= (float)len) return 0;
     for (int i = 0; i < n; ++i) {
-        int s0i = (int)a->seek;
-        short s0 = a->data->data[s0i];
-        short s1 = s0i < a->data->length - 1 ? a->data->data[s0i + 1] : 0;
-        out[i] = (short)((float)s0 + (float)(s1 - s0) * (a->seek - (float)s0i));
-        a->seek += a->step;
-        if (a->seek >= (float)a->data->length) return i;
+        int k = (int)v->seek;
+        int16_t s = data[k];
+        int16_t s2 = k < len - 1 ? data[k + 1] : 0;
+        out[i] = (int16_t)((float)s + (float)(s2 - s) * (v->seek - (float)k));
+        v->seek += v->step;
+        if (v->seek >= (float)len) return i;
     }
     return n;
 }
 
-// Sound.play, the pan and volume slide from the last chunk's to this one's
-static bool soundPlay(Audio* a, int* left, int* right, int n) {
-    int count = infoUpdate(a, soundBuffer, n);
-    bool more = count > 0;
-    float pan = posRotationDiff(&a->pos);
-    float volume = posVolume(&a->pos) * a->infoVolume;
-    int l0 = (int)((a->pan > 0.0f ? 1.0f - a->pan : 1.0f) * a->volume * 65536.0f);
-    int r0 = (int)((a->pan < 0.0f ? 1.0f + a->pan : 1.0f) * a->volume * 65536.0f);
-    int l1 = (int)((pan > 0.0f ? 1.0f - pan : 1.0f) * volume * 65536.0f);
-    int r1 = (int)((pan < 0.0f ? pan + 1.0f : 1.0f) * volume * 65536.0f);
-    l1 -= l0;
-    r1 -= r0;
-    if (l1 != 0 || r1 != 0) {
-        for (int i = 0; i < count; ++i) {
-            int l = l0 + l1 * i / n;
-            int r = r0 + r1 * i / n;
-            left[i] += soundBuffer[i] * l >> 16;
-            right[i] += soundBuffer[i] * r >> 16;
+// Sound.play
+static bool mixVoice(Voice* v) {
+    static int16_t data[CHUNK];
+    int n = readVoice(v, data, CHUNK);
+    bool alive = n > 0;
+    float pan = rotationDiff(v->x, v->z);
+    float gain = distanceGain(v->x, v->y, v->z) * v->volume;
+    int l0 = (int)((v->pan > 0.0f ? 1.0f - v->pan : 1.0f) * v->gain * 65536.0f);
+    int r0 = (int)((v->pan < 0.0f ? 1.0f + v->pan : 1.0f) * v->gain * 65536.0f);
+    int dl = (int)((pan > 0.0f ? 1.0f - pan : 1.0f) * gain * 65536.0f) - l0;
+    int dr = (int)((pan < 0.0f ? pan + 1.0f : 1.0f) * gain * 65536.0f) - r0;
+    if (dl != 0 || dr != 0) {
+        for (int i = 0; i < n; ++i) {
+            int l = l0 + dl * i / CHUNK;
+            int r = r0 + dr * i / CHUNK;
+            gMixL[i] += data[i] * l >> 16;
+            gMixR[i] += data[i] * r >> 16;
         }
     } else if (l0 >= 0 || r0 != 0) {
-        for (int i = 0; i < count; ++i) {
-            left[i] += soundBuffer[i] * l0 >> 16;
-            right[i] += soundBuffer[i] * r0 >> 16;
+        for (int i = 0; i < n; ++i) {
+            gMixL[i] += data[i] * l0 >> 16;
+            gMixR[i] += data[i] * r0 >> 16;
         }
     }
-    a->pan = pan;
-    a->volume = volume;
-    return more;
+    v->pan = pan;
+    v->gain = gain;
+    return alive;
 }
 
-// Music.play, the decode thread may still be behind
-static bool musicPlay(Audio* a, int* left, int* right, int n) {
-    if (!options->music) {
-        a->stopped = true;
-        return false;
+// Music.play, raw stereo, disabling music discards active streams
+static bool mixMusic(MusicStream* m) {
+    if (!gMusicEnabled) return false;
+    int n = m->frames - m->pos;
+    if (n > CHUNK) n = CHUNK;
+    for (int i = 0; i < n; ++i) {
+        gMixL[i] += m->samples[(m->pos + i) * 2];
+        gMixR[i] += m->samples[(m->pos + i) * 2 + 1];
     }
-    int avail = a->decoded - a->played;
-    if (avail > n) avail = n;
-    for (int i = 0; i < avail; ++i) {
-        left[i] += a->pcm[(a->played + i) * 2];
-        right[i] += a->pcm[(a->played + i) * 2 + 1];
-    }
-    a->played += avail;
-    return a->played < a->decoded || !a->finished;
+    m->pos += n;
+    return m->pos < m->frames;
 }
 
-static void freeAudio(Audio* a) {
-    if (a->music) {
-        a->stopped = true;
-        if (--a->refs == 0) {
-            free(a->pcm);
-            free(a);
+// SoundPlayer.run
+static void renderChunk(void) {
+    memset(gMixL, 0, sizeof gMixL);
+    memset(gMixR, 0, sizeof gMixR);
+    for (int i = 0; i < MAX_MUSIC; ++i) {
+        MusicStream* m = &gMusic[i];
+        if (m->active && !mixMusic(m)) {
+            free(m->samples);
+            m->samples = NULL;
+            m->active = false;
         }
-        return;
     }
-    struct Entity* e = a->pos.source;
-    if (e && --e->soundRefs == 0 && e->soundReleased) free(e);
-    free(a);
-}
-
-// one pass of SoundPlayer.run
-static void mixChunk(void) {
-    memset(mixLeft, 0, sizeof mixLeft);
-    memset(mixRight, 0, sizeof mixRight);
-    LOCK(&lock);
-    for (int i = 0; i < queueCount; ++i) {
-        Audio* a = queue[i];
-        bool more = a->music ? musicPlay(a, mixLeft, mixRight, CHUNK) : soundPlay(a, mixLeft, mixRight, CHUNK);
-        if (more) continue;
-        freeAudio(a);
-        memmove(&queue[i], &queue[i + 1], (size_t)(queueCount - i - 1) * sizeof(Audio*));
-        queueCount--;
-        i--;
+    for (int i = 0; i < MAX_VOICES; ++i) {
+        Voice* v = &gVoices[i];
+        if (v->active && !mixVoice(v)) v->active = false;
     }
-    UNLOCK(&lock);
-    if (!options->music && !options->sound) {
-        memset(chunk, 0, sizeof chunk);
-        return;
-    }
+    bool silent = !gMusicEnabled && !gSoundEnabled;
     for (int i = 0; i < CHUNK; ++i) {
-        int l = mixLeft[i];
-        int r = mixRight[i];
+        int l = gMixL[i], r = gMixR[i];
         if (l < -32000) l = -32000;
         if (r < -32000) r = -32000;
         if (l >= 32000) l = 32000;
         if (r >= 32000) r = 32000;
-        chunk[i * 2] = (short)l;
-        chunk[i * 2 + 1] = (short)r;
+        gOut[i * 2] = silent ? 0 : (int16_t)l;
+        gOut[i * 2 + 1] = silent ? 0 : (int16_t)r;
     }
+    gOutPos = 0;
 }
 
-// the device asks for any amount, the mixer always mixes whole chunks
-static void fill(int16_t* buffer, int frames) {
+static void fillCallback(int16_t* buffer, int frames) {
+    SOUND_LOCK(&gLock);
     while (frames > 0) {
-        if (chunkPos == CHUNK) {
-            mixChunk();
-            chunkPos = 0;
-        }
-        int n = CHUNK - chunkPos;
+        if (gOutPos >= CHUNK) renderChunk();
+        int n = CHUNK - gOutPos;
         if (n > frames) n = frames;
-        memcpy(buffer, chunk + chunkPos * 2, (size_t)n * 2 * sizeof(short));
+        memcpy(buffer, gOut + gOutPos * 2, (size_t)n * 2 * sizeof(int16_t));
         buffer += n * 2;
+        gOutPos += n;
         frames -= n;
-        chunkPos += n;
+    }
+    SOUND_UNLOCK(&gLock);
+}
+
+static void startMusicThread(void);
+
+void Sound_init(bool musicEnabled, bool soundEnabled) {
+    SOUND_LOCK_INIT(&gLock);
+    gMusicEnabled = musicEnabled;
+    gSoundEnabled = soundEnabled;
+    JRandom_initRandom(&gRandom);
+    gLastMusic = currentTimeMillis() + 60000LL;
+    gBackendOk = (AudioBackend_init(fillCallback) == 0);
+    if (gBackendOk) startMusicThread();
+}
+
+void Sound_shutdown(void) {
+    if (gBackendOk) AudioBackend_shutdown();
+    for (int i = 0; i < gSfxCacheCount; ++i) free(gSfxCache[i].data);
+    gSfxCacheCount = 0;
+    for (int i = 0; i < MAX_MUSIC; ++i) {
+        free(gMusic[i].samples);
+        gMusic[i].samples = NULL;
+        gMusic[i].active = false;
     }
 }
 
-// SoundPlayer.play, nothing is queued when the device didn't open
-static void play(Audio* a) {
-    if (!running) {
-        freeAudio(a);
+void Sound_setEnabled(bool music, bool sound) {
+    gMusicEnabled = music;
+    gSoundEnabled = sound;
+}
+
+static void copyListener(void) {
+    if (!gListener) return;
+    gListenerX = gListener->x;
+    gListenerY = gListener->y;
+    gListenerZ = gListener->z;
+    gListenerYaw = gListener->yRotation;
+}
+
+void Sound_update(const Entity* listener) {
+    SOUND_LOCK(&gLock);
+    gListener = listener;
+    copyListener();
+    for (int i = 0; i < MAX_VOICES; ++i) {
+        Voice* v = &gVoices[i];
+        if (!v->active || !v->source) continue;
+        v->x = v->source->x;
+        v->y = v->source->y;
+        v->z = v->source->z;
+    }
+    SOUND_UNLOCK(&gLock);
+}
+
+void Sound_retargetEntity(const Entity* from, const Entity* to) {
+    SOUND_LOCK(&gLock);
+    for (int i = 0; i < MAX_VOICES; ++i) {
+        if (gVoices[i].active && gVoices[i].source == from) gVoices[i].source = to;
+    }
+    SOUND_UNLOCK(&gLock);
+}
+
+void Sound_detachAll(void) {
+    SOUND_LOCK(&gLock);
+    for (int i = 0; i < MAX_VOICES; ++i) gVoices[i].source = NULL;
+    SOUND_UNLOCK(&gLock);
+}
+
+// SoundManager.getAudioInfo then SoundPlayer.play
+static void play(const char* name, float volume, float pitch, const Entity* source, float x, float y, float z) {
+    if (!gBackendOk || !gSoundEnabled) return;
+    if (strncmp(name, "step.", 5) != 0) return;
+
+    char path[64];
+    int variant = 1 + JRandom_nextIntN(&gRandom, STEP_VARIANT_COUNT);
+    snprintf(path, sizeof path, "resources/sound/step/%s%d.ogg", name + 5, variant);
+    const SfxClip* clip = loadSfx(path);
+    if (!clip) return;
+
+    SOUND_LOCK(&gLock);
+    // the live player is read here, so your own steps start centred
+    copyListener();
+    for (int i = 0; i < MAX_VOICES; ++i) {
+        Voice* v = &gVoices[i];
+        if (v->active) continue;
+        v->clip = clip;
+        v->seek = 0.0f;
+        v->step = pitch * 44100.0f / clip->rate;
+        v->volume = volume;
+        v->source = source;
+        v->x = x;
+        v->y = y;
+        v->z = z;
+        v->pan = rotationDiff(x, z);
+        v->gain = distanceGain(x, y, z) * volume;
+        v->active = true;
+        break;
+    }
+    SOUND_UNLOCK(&gLock);
+}
+
+void Sound_playAt(const char* name, float x, float y, float z, float volume, float pitch) {
+    play(name, volume, pitch, NULL, x, y, z);
+}
+
+void Sound_playEntity(const char* name, const Entity* e, float volume, float pitch) {
+    if (!gListener) return;
+    float dx = e->x - gListener->x, dy = e->y - gListener->y, dz = e->z - gListener->z;
+    if (dx * dx + dy * dy + dz * dz >= 1024.0f) return;
+    play(name, volume, pitch, e, e->x, e->y, e->z);
+}
+
+// path is picked on the main thread, the decode runs on its own thread so a
+// multi minute track doesn't freeze the game
+static char gPendingMusicPath[64];
+
+static void runMusicLoad(void) {
+    char path[64];
+    snprintf(path, sizeof path, "%s", gPendingMusicPath);
+
+    int channels = 0, sampleRate = 0;
+    short* output = NULL;
+    int frames = stb_vorbis_decode_filename(path, &channels, &sampleRate, &output);
+    if (frames <= 0 || !output) {
+        gMusicLoadInFlight = 0;
         return;
     }
-    LOCK(&lock);
-    if (queueCount == queueCapacity) {
-        queueCapacity = queueCapacity ? queueCapacity * 2 : 32;
-        queue = (Audio**)realloc(queue, (size_t)queueCapacity * sizeof(Audio*));
+    if (channels == 1) {
+        short* stereo = (short*)malloc((size_t)frames * 2 * sizeof(short));
+        if (!stereo) { free(output); gMusicLoadInFlight = 0; return; }
+        for (int i = 0; i < frames; ++i) stereo[i * 2] = stereo[i * 2 + 1] = output[i];
+        free(output);
+        output = stereo;
     }
-    queue[queueCount++] = a;
-    UNLOCK(&lock);
+
+    SOUND_LOCK(&gLock);
+    int slot = -1;
+    for (int i = 0; i < MAX_MUSIC; ++i) if (!gMusic[i].active) { slot = i; break; }
+    if (slot >= 0) {
+        gMusic[slot].samples = output;
+        gMusic[slot].frames = frames;
+        gMusic[slot].pos = 0;
+        gMusic[slot].active = true;
+    } else {
+        free(output);
+    }
+    SOUND_UNLOCK(&gLock);
+    gMusicLoadInFlight = 0;
 }
 
-// "step/grass1.ogg" is "step.grass", the digits before the extension go
-static void soundName(const char* file, char* out, size_t size) {
-    snprintf(out, size, "%s", file);
-    size_t len = strlen(out);
-    if (len >= 4) out[len - 4] = '\0';
-    for (char* p = out; *p; p++) {
-        if (*p == '/') *p = '.';
-    }
-    len = strlen(out);
-    while (len > 0 && out[len - 1] >= '0' && out[len - 1] <= '9') out[--len] = '\0';
-}
-
-// SoundReader, the channels are averaged into one
-static void registerSound(const char* path, const char* file) {
-    char name[32];
-    soundName(file, name, sizeof name);
-    int channels = 0, rate = 0;
-    short* pcm = NULL;
-    int frames = stb_vorbis_decode_filename(path, &channels, &rate, &pcm);
-    if (frames <= 0 || !pcm) return;
-    short* mono = (short*)malloc((size_t)frames * sizeof(short));
-    for (int i = 0; i < frames; ++i) {
-        int sum = 0;
-        for (int c = 0; c < channels; ++c) sum += pcm[i * channels + c];
-        mono[i] = (short)(sum / channels);
-    }
-    free(pcm);
-
-    SoundList* list = NULL;
-    for (int i = 0; i < soundCount; ++i) {
-        if (strcmp(sounds[i].name, name) == 0) list = &sounds[i];
-    }
-    if (!list) {
-        if (soundCount == MAX_LISTS) { free(mono); return; }
-        list = &sounds[soundCount++];
-        snprintf(list->name, sizeof list->name, "%s", name);
-        list->list = NULL;
-        list->count = 0;
-    }
-    list->list = (SoundData*)realloc(list->list, (size_t)(list->count + 1) * sizeof(SoundData));
-    list->list[list->count++] = (SoundData){ mono, frames, (float)rate };
-}
-
-static void registerMusic(const char* file, const char* path) {
-    char name[32];
-    soundName(file, name, sizeof name);
-    MusicList* list = NULL;
-    for (int i = 0; i < musicCount; ++i) {
-        if (strcmp(musics[i].name, name) == 0) list = &musics[i];
-    }
-    if (!list) {
-        if (musicCount == MAX_LISTS) return;
-        list = &musics[musicCount++];
-        snprintf(list->name, sizeof list->name, "%s", name);
-        list->count = 0;
-    }
-    if (list->count < 8) snprintf(list->paths[list->count++], sizeof list->paths[0], "%s", path);
-}
-
-// registered in the server's list order
-static const char* SOUND_FILES[] = {
-    "step/grass1.ogg", "step/grass2.ogg", "step/grass3.ogg", "step/grass4.ogg",
-    "step/gravel1.ogg", "step/gravel2.ogg", "step/gravel3.ogg", "step/gravel4.ogg",
-    "step/stone1.ogg", "step/stone2.ogg", "step/stone3.ogg", "step/stone4.ogg",
-    "step/wood1.ogg", "step/wood2.ogg", "step/wood3.ogg", "step/wood4.ogg",
-};
-static const char* MUSIC_FILES[] = { "calm1.ogg", "calm2.ogg", "calm3.ogg" };
-
-// one music thread from startup
-#define MAX_PENDING 8
-static Audio* pending[MAX_PENDING];
-static int pendingCount = 0;
-
-static void decodeMusic(Audio* a);
+// one music thread from startup, it gets handed the path
+static volatile int gMusicPending = 0;
 
 static void musicLoop(void) {
     for (;;) {
-        Audio* a = NULL;
-        LOCK(&lock);
-        if (pendingCount > 0) {
-            a = pending[0];
-            memmove(pending, pending + 1, (size_t)(pendingCount - 1) * sizeof(Audio*));
-            pendingCount--;
+        if (gMusicPending) {
+            gMusicPending = 0;
+            runMusicLoad();
         }
-        UNLOCK(&lock);
-        if (a) decodeMusic(a);
-        else Timer_sleepMillis(10);
+        sleepMillis(10);
     }
 }
 
 #ifdef _WIN32
-static DWORD WINAPI musicThread(LPVOID arg) { (void)arg; musicLoop(); return 0; }
+static DWORD WINAPI musicLoadThreadMain(LPVOID arg) { (void)arg; musicLoop(); return 0; }
 #else
-static void* musicThread(void* arg) { (void)arg; musicLoop(); return NULL; }
+static void* musicLoadThreadMain(void* arg) { (void)arg; musicLoop(); return NULL; }
 #endif
 
 static void startMusicThread(void) {
 #ifdef _WIN32
-    HANDLE h = CreateThread(NULL, 0, musicThread, NULL, 0, NULL);
+    HANDLE h = CreateThread(NULL, 0, musicLoadThreadMain, NULL, 0, NULL);
     if (h) CloseHandle(h);
 #else
     pthread_t t;
-    if (pthread_create(&t, NULL, musicThread, NULL) == 0) pthread_detach(t);
+    if (pthread_create(&t, NULL, musicLoadThreadMain, NULL) == 0) pthread_detach(t);
 #endif
 }
 
-void Sound_init(const Options* o) {
-    options = o;
-    LOCK_INIT(&lock);
-    JRandom_initRandom(&random);
-    lastMusic = currentTimeMillis() + 60000LL;
-    for (size_t i = 0; i < sizeof SOUND_FILES / sizeof SOUND_FILES[0]; ++i) {
-        char path[96];
-        snprintf(path, sizeof path, "resources/sound/%s", SOUND_FILES[i]);
-        registerSound(path, SOUND_FILES[i]);
-    }
-    for (size_t i = 0; i < sizeof MUSIC_FILES / sizeof MUSIC_FILES[0]; ++i) {
-        char path[96];
-        snprintf(path, sizeof path, "resources/music/%s", MUSIC_FILES[i]);
-        registerMusic(MUSIC_FILES[i], path);
-    }
-    running = AudioBackend_init(fill) == 0;
-    if (running) startMusicThread();
+static void startRandomMusicTrack(void) {
+    int variant = 1 + JRandom_nextIntN(&gRandom, MUSIC_VARIANT_COUNT);
+    if (gMusicLoadInFlight) return;
+    gMusicLoadInFlight = 1;
+    snprintf(gPendingMusicPath, sizeof gPendingMusicPath, "resources/music/calm%d.ogg", variant);
+    gMusicPending = 1;
 }
 
-void Sound_shutdown(void) {
-    if (running) AudioBackend_shutdown();
-    running = false;
-}
-
-// SoundManager.getAudioInfo, the volume and pitch swap places on the way in
-static Audio* getAudioInfo(const char* name, float volume, float pitch) {
-    const SoundList* list = NULL;
-    for (int i = 0; i < soundCount; ++i) {
-        if (strcmp(sounds[i].name, name) == 0) list = &sounds[i];
-    }
-    if (!list) return NULL;
-    const SoundData* data = &list->list[JRandom_nextIntN(&random, list->count)];
-    Audio* a = (Audio*)calloc(1, sizeof(Audio));
-    a->data = data;
-    a->seek = 0.0f;
-    // multiplies by 44100 where it should divide, every ogg is 44100 Hz anyway
-    a->step = pitch * 44100.0f / data->rate;
-    a->infoVolume = volume;
-    return a;
-}
-
-static void startSound(Audio* a, SoundPos pos) {
-    a->pos = pos;
-    a->pan = posRotationDiff(&a->pos);
-    a->volume = posVolume(&a->pos) * a->infoVolume;
-    if (pos.source) {
-        LOCK(&lock);
-        pos.source->soundRefs++;
-        UNLOCK(&lock);
-    }
-    play(a);
-}
-
-void Sound_playEntity(const char* name, struct Entity* source, const struct Entity* listener, float volume, float pitch) {
-    if (!options->sound) return;
-    Audio* a = getAudioInfo(name, volume, pitch);
-    if (!a) return;
-    startSound(a, (SoundPos){ source, 0.0f, 0.0f, 0.0f, listener });
-}
-
-void Sound_playAt(const char* name, float x, float y, float z, const struct Entity* listener, float volume, float pitch) {
-    if (!options->sound) return;
-    Audio* a = getAudioInfo(name, volume, pitch);
-    if (!a) return;
-    startSound(a, (SoundPos){ NULL, x, y, z, listener });
-}
-
-void Sound_releaseEntity(struct Entity* e) {
-    LOCK(&lock);
-    bool held = e->soundRefs > 0;
-    if (held) e->soundReleased = true;
-    UNLOCK(&lock);
-    if (!held) free(e);
-}
-
-// the music thread, decodes the whole track in one go
-static void decodeMusic(Audio* a) {
-    int channels = 0, rate = 0;
-    short* pcm = NULL;
-    int frames = a->stopped ? 0 : stb_vorbis_decode_filename(a->path, &channels, &rate, &pcm);
-    LOCK(&lock);
-    if (frames > 0 && pcm && channels == 2) {
-        a->pcm = pcm;
-        a->decoded = frames;
-    } else {
-        free(pcm);
-    }
-    a->finished = true;
-    if (--a->refs == 0) {
-        free(a->pcm);
-        free(a);
-    }
-    UNLOCK(&lock);
-}
-
-
-// SoundManager.playMusic, false only when nothing is registered under the name
-static bool playMusic(const char* name) {
-    const MusicList* list = NULL;
-    for (int i = 0; i < musicCount; ++i) {
-        if (strcmp(musics[i].name, name) == 0) list = &musics[i];
-    }
-    if (!list) return false;
-    const char* path = list->paths[JRandom_nextIntN(&random, list->count)];
-    if (!running) return true;
-    Audio* a = (Audio*)calloc(1, sizeof(Audio));
-    a->music = true;
-    a->refs = 2;
-    snprintf(a->path, sizeof a->path, "%s", path);
-    play(a);
-    LOCK(&lock);
-    if (pendingCount < MAX_PENDING) pending[pendingCount++] = a;
-    UNLOCK(&lock);
-    return true;
-}
-
-void Sound_tick(void) {
-    if (currentTimeMillis() > lastMusic && playMusic("calm")) {
-        lastMusic = currentTimeMillis() + (long long)JRandom_nextIntN(&random, 900000) + 300000LL;
+// runs whatever the music option says, a track started with music off is dropped by the mixer
+void Sound_tickMusic(void) {
+    if (!gBackendOk) return;
+    long long now = currentTimeMillis();
+    if (now > gLastMusic) {
+        startRandomMusicTrack();
+        gLastMusic = now + JRandom_nextIntN(&gRandom, 900000) + 300000LL;
     }
 }

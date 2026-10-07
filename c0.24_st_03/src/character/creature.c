@@ -8,22 +8,56 @@
 #include "../renderer/textures.h"
 #include "../mob.h"
 #include "../player.h"
+#include "../level/level.h"
+#include "../level/tile/tile.h"
 #include <GL/glew.h>
 #include <math.h>
 #include <stdlib.h>
+#include "../jrandom.h"
+#include "humanoid_armor_model.h"
+
+// spawns a leaf-textured particle used only by Creeper's death effect
+extern void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz);
+
+// after every attack attempt the creeper takes 4 from its target
+static void Creeper_onAfterAttack(Ai* ai, Entity* mob, Entity* target) {
+    (void)ai;
+    Mob_hurt(mob, target, 4);
+}
+
+// Creeper$1.beforeRemove, closer particles fly out faster
+static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
+    const float radius = 4.0f;
+    Level_explode(mob->level, mob, mob->x, mob->y, mob->z, radius);
+    for (int i = 0; i < 500; ++i) {
+        float dx = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
+        float dy = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
+        float dz = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
+        float mag = sqrtf(dx * dx + dy * dy + dz * dz);
+        float mx = dx / mag / mag;
+        float my = dy / mag / mag;
+        float mz = dz / mag / mag;
+        Minecraft_spawnExplosionParticle(mob->level, mob->x + dx, mob->y + dy, mob->z + dz, mx, my, mz);
+    }
+}
 
 // the skeleton has no die of its own and scores like a zombie
 static void Creature_onDeath(Entity* self, Entity* attacker) {
-    if (!attacker) return; // only a credited kill awards score
     Creature* c = (Creature*)self;
-    // arrows credit whoever shot them and only the player keeps score
-    if (attacker->killCredit) attacker = attacker->killCredit;
-    Player* killer = (Player*)attacker;
-    switch (c->kind) {
-        case CREATURE_ZOMBIE:
-        case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
-        case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
-        case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+
+    if (attacker) {
+        // arrows credit whoever shot them and only the player keeps score
+        if (attacker->killCredit) attacker = attacker->killCredit;
+        if (attacker->aiClassTag != AI_CLASS_PLAYER) attacker = NULL;
+    }
+    if (attacker) {
+        Player* killer = (Player*)attacker;
+        switch (c->kind) {
+            case CREATURE_ZOMBIE:
+            case CREATURE_SKELETON: Player_awardKillScore(killer, 100); break;
+            case CREATURE_CREEPER:  Player_awardKillScore(killer, 250); break;
+            case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
+        }
     }
 }
 
@@ -32,10 +66,20 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     Mob_init(&c->e);
     c->e.ai = &c->ai;
     c->e.onDeath = Creature_onDeath;
+    // different creature kinds fight, creatures of the same kind do not
+    c->e.aiClassTag = (int)kind;
     c->kind = kind;
+    c->helmet = c->armor = false;
+    if (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) {
+        c->helmet = JRandom_mathRandom() < (double)0.2f;
+        c->armor = JRandom_mathRandom() < (double)0.2f;
+    }
 
     switch (kind) {
         case CREATURE_ZOMBIE:
+            c->e.heightOffset = 1.62f;
+            Ai_init(&c->ai, true, 30);
+            break;
         case CREATURE_SKELETON:
             c->e.heightOffset = 1.62f;
             Ai_init(&c->ai, true, 30);
@@ -43,6 +87,8 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
         case CREATURE_CREEPER:
             c->e.heightOffset = 1.62f;
             Ai_init(&c->ai, true, 45);
+            c->ai.onAfterAttack = Creeper_onAfterAttack;
+            c->ai.onDeathTimeout = Creeper_onDeathTimeout;
             break;
         case CREATURE_PIG:
             c->e.heightOffset = 1.72f;
@@ -57,9 +103,6 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
 void Creature_onTick(Creature* c) {
     Entity_onTick(&c->e);
     Mob_onTick(&c->e);
-
-    // removed far below the level like the old zombie
-    if (c->e.y < -100.0f) Entity_remove(&c->e);
 }
 
 static const char* textureForKind(CreatureKind kind) {
@@ -72,8 +115,27 @@ static const char* textureForKind(CreatureKind kind) {
     return "resources/mob/zombie.png";
 }
 
-// binds the texture and draws the model, the hurt flash draws it a second time
-static void renderModelForKind(CreatureKind kind, float animStep, float run, float age,
+// renders armor using the same pose as the underlying model
+static void renderArmor(const Creature* c, const Cube* head, const Cube* rightArm, const Cube* leftArm) {
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_CULL_FACE);
+    if (!c->helmet && !c->armor) {
+        glDisable(GL_ALPHA_TEST);
+        return;
+    }
+    static int texArmor = 0;
+    if (!texArmor) texArmor = loadTexture("resources/armor/plate.png", GL_NEAREST);
+    static HumanoidArmorModel sArmor;
+    static bool init = false;
+    if (!init) { HumanoidArmorModel_init(&sArmor); init = true; }
+    glBindTexture(GL_TEXTURE_2D, texArmor);
+    glDisable(GL_CULL_FACE);
+    HumanoidArmorModel_render(&sArmor, c->helmet, c->armor, head, rightArm, leftArm);
+    glEnable(GL_CULL_FACE);
+    glDisable(GL_ALPHA_TEST);
+}
+
+static void renderModelForKind(const Creature* c, CreatureKind kind, float animStep, float run, float age,
                                 float headYaw, float headPitch, float attackSwing) {
     static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0;
     switch (kind) {
@@ -84,6 +146,7 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobZombieModel sModel; static bool init = false;
                 if (!init) { MobZombieModel_init(&sModel); init = true; }
                 MobZombieModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmor(c, &sModel.head, &sModel.rightArm, &sModel.leftArm);
             }
             break;
         case CREATURE_SKELETON:
@@ -93,6 +156,7 @@ static void renderModelForKind(CreatureKind kind, float animStep, float run, flo
                 static MobSkeletonModel sModel; static bool init = false;
                 if (!init) { MobSkeletonModel_init(&sModel); init = true; }
                 MobSkeletonModel_render(&sModel, animStep, run, age, headYaw, headPitch, attackSwing);
+                renderArmor(c, &sModel.head, &sModel.rightArm, &sModel.leftArm);
             }
             break;
         case CREATURE_CREEPER:
@@ -148,10 +212,15 @@ void Creature_render(const Creature* c, float partialTicks) {
     float iz = e->prevZ + (e->z - e->prevZ) * partialTicks;
 
     float brightness = Entity_getBrightness(e);
+    if (c->kind == CREATURE_CREEPER) {
+        // Creeper.getBrightness, creepers pulse brighter as they get hurt
+        float hurt = (float)(20 - e->health) / 20.0f;
+        brightness *= (float)(sin((double)((float)e->tickCount + partialTicks)) * 0.5 + 0.5) * hurt * 0.5f + 0.25f + hurt * 0.25f;
+    }
     glColor3f(brightness, brightness, brightness);
 
     glPushMatrix();
-    glTranslatef(ix, iy - 1.62f, iz);
+    glTranslatef(ix, iy - 1.62f, iz); // a fixed offset, not the entity's heightOffset
 
     // turned by 180 - bodyYaw
     float renderYaw = 180.0f - bodyYaw;
@@ -183,10 +252,12 @@ void Creature_render(const Creature* c, float partialTicks) {
     float bobY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
     glTranslatef(0.0f, bobY, 0.0f);
     glRotatef(renderYaw, 0.0f, 1.0f, 0.0f);
+    // allowAlpha is true for every mob here, so culling is off for the model
+    glDisable(GL_CULL_FACE);
     glScalef(-1.0f, 1.0f, 1.0f);
 
     glEnable(GL_TEXTURE_2D);
-    renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+    renderModelForKind(c, c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
     glDisable(GL_TEXTURE_2D);
 
     // for the last 10 invulnerable ticks after a hit it draws the pose again additively, a white flash
@@ -195,11 +266,13 @@ void Creature_render(const Creature* c, float partialTicks) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         glEnable(GL_TEXTURE_2D);
-        renderModelForKind(c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
+        renderModelForKind(c, c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_BLEND);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     }
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_CULL_FACE);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
     glPopMatrix();
 }

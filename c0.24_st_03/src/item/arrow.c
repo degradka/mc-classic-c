@@ -10,7 +10,9 @@
 
 static Tessellator sTess;
 
-extern bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, Entity** outHit);
+
+// every shootable entity in the box but the arrow
+extern int Minecraft_findShootable(const AABB* box, Entity** out, int max);
 
 void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z, float yaw, float pitch) {
     Entity* e = &a->e;
@@ -25,10 +27,10 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
     e->heightOffset = 0.25f;
     e->makeStepSound = false;
 
-    float f7 = cosf((-yaw) * (float)M_PI / 180.0f - (float)M_PI);
-    float f8 = sinf((-yaw) * (float)M_PI / 180.0f - (float)M_PI);
-    float cp = cosf((-pitch) * (float)M_PI / 180.0f);
-    float sp = sinf((-pitch) * (float)M_PI / 180.0f);
+    float f7 = (float)cos((double)(-yaw) * M_PI / 180.0 - M_PI);
+    float f8 = (float)sin((double)(-yaw) * M_PI / 180.0 - M_PI);
+    float cp = (float)cos((double)(-pitch) * M_PI / 180.0);
+    float sp = (float)sin((double)(-pitch) * M_PI / 180.0);
     const float speed = 0.8f;
 
     // xo and zo start near the origin, the first frame streaks in
@@ -41,7 +43,7 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
 
     Entity_setPosition(e, x - f7 * 0.2f, y, z + f8 * 0.2f);
 
-    float horiz = sqrtf(e->motionX * e->motionX + e->motionZ * e->motionZ);
+    float horiz = (float)sqrt(e->motionX * e->motionX + e->motionZ * e->motionZ);
     e->yRotation = e->prevYRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / M_PI);
     e->xRotation = e->prevXRotation = (float)(atan2(e->motionY, horiz) * 180.0 / M_PI);
 }
@@ -66,44 +68,44 @@ void Arrow_onTick(Arrow* a) {
     e->motionZ *= 0.992f;
     e->motionY -= 0.02f;
 
-    float speed = sqrtf(e->motionX * e->motionX + e->motionY * e->motionY + e->motionZ * e->motionZ);
+    float speed = (float)sqrt(e->motionX * e->motionX + e->motionY * e->motionY + e->motionZ * e->motionZ);
     int steps = (int)(speed / 0.2f + 1.0f);
     float stepX = e->motionX / (float)steps;
     float stepY = e->motionY / (float)steps;
     float stepZ = e->motionZ / (float)steps;
 
-    bool collision = false;
-    for (int i = 0; i < steps && !collision; i++) {
+    // an arrow never moves through Entity.move
+    for (int i = 0; i < steps && !e->collision; i++) {
         AABB expanded = AABB_expand(&e->boundingBox, stepX, stepY, stepZ);
 
         ArrayList_AABB hits = Level_getCubes(e->level, &expanded);
-        if (hits.size > 0) collision = true;
+        if (hits.size > 0) e->collision = true;
         if (hits.aabbs) free(hits.aabbs);
 
-        // an arrow only hits entities in its first 20 ticks
-        if (!collision && a->time <= 20) {
-            Entity* target = NULL;
-            if (Minecraft_findArrowTarget(&expanded, e, &target)) {
-                Mob_hurt(target, e, 3);
-                collision = true;
-                a->stickTime = 20;
-            }
+        // only hurts in its first 20 ticks
+        Entity* targets[64];
+        int n = Minecraft_findShootable(&expanded, targets, 64);
+        for (int k = 0; k < n; ++k) {
+            if (targets[k] == e || targets[k] == a->owner || a->time > 20) continue;
+            Mob_hurt(targets[k], e, 3);
+            e->collision = true;
+            a->stickTime = 20;
         }
 
-        if (collision) continue;
+        if (e->collision) continue;
         AABB_move(&e->boundingBox, stepX, stepY, stepZ);
         e->x += stepX;
         e->y += stepY;
         e->z += stepZ;
     }
 
-    if (collision) {
+    if (e->collision) {
         a->hasHit = true;
         e->motionX = e->motionY = e->motionZ = 0.0f;
     }
 
     if (!a->hasHit) {
-        float horiz = sqrtf(e->motionX * e->motionX + e->motionZ * e->motionZ);
+        float horiz = (float)sqrt(e->motionX * e->motionX + e->motionZ * e->motionZ);
         e->yRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / M_PI);
         e->xRotation = (float)(atan2(e->motionY, horiz) * 180.0 / M_PI);
         while (e->xRotation - e->prevXRotation < -180.0f) e->prevXRotation -= 360.0f;
@@ -118,7 +120,7 @@ void Arrow_render(const Arrow* a, float partialTicks) {
     static int tex = 0;
     if (!tex) tex = loadTexture("resources/item/arrows.png", GL_NEAREST);
 
-    float brightness = Entity_getBrightness(e);
+    float brightness = Level_getBrightness(e->level, (int)e->x, (int)e->y, (int)e->z);
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -136,11 +138,12 @@ void Arrow_render(const Arrow* a, float partialTicks) {
     glRotatef(pitch, 0.0f, 0.0f, 1.0f);
     glRotatef(45.0f, 1.0f, 0.0f, 0.0f);
 
-    const float u1 = 0.5f, v1 = 0.15625f, s = 0.05625f;
-    glScalef(s, s, s);
+    const float sc = 0.05625f;
+    const float u1 = 0.5f, v1 = 0.15625f;
+    glScalef(sc, sc, sc);
     for (int i = 0; i < 4; i++) {
         glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-        glNormal3f(0.0f, -s, 0.0f);
+        glNormal3f(0.0f, -sc, 0.0f);
         Tessellator_begin(&sTess);
         Tessellator_vertexUV(&sTess, -8.0f, -2.0f, 0.0f, 0.0f, 0.0f);
         Tessellator_vertexUV(&sTess,  8.0f, -2.0f, 0.0f, u1,   0.0f);
@@ -151,5 +154,4 @@ void Arrow_render(const Arrow* a, float partialTicks) {
 
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glPopMatrix();
-    glDisable(GL_TEXTURE_2D);
 }

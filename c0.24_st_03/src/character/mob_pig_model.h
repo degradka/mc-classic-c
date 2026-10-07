@@ -1,4 +1,4 @@
-// mob_pig_model.h: the pig, its body box is built upright then turned flat
+// character/mob_pig_model.h: the pig, its body box is built upright then turned flat
 
 #ifndef MOB_PIG_MODEL_H
 #define MOB_PIG_MODEL_H
