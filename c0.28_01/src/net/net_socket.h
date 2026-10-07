@@ -1,0 +1,25 @@
+// net/net_socket.h: tcp socket, non blocking after the connect
+
+#ifndef NET_SOCKET_H
+#define NET_SOCKET_H
+
+#if defined(_WIN32)
+  // must come before anything that pulls in windows.h, glew does
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  typedef SOCKET sock_t;
+#else
+  typedef int sock_t;
+#endif
+
+// TcpNoDelay, KeepAlive off, then non blocking, 1 on success
+int NetSocket_connect(sock_t* out, const char* host, int port);
+void NetSocket_close(sock_t sock);
+
+// bytes moved, 0 if it would block, -1 on an error or a remote close
+int NetSocket_read(sock_t sock, void* buf, int len);
+int NetSocket_write(sock_t sock, const void* buf, int len);
+
+#endif
