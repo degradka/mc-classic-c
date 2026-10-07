@@ -15,16 +15,22 @@
   #include <time.h>
 #endif
 
+#define NS_PER_SECOND        1000000000LL
+#define MAX_NS_PER_UPDATE    1000000000LL
+#define MAX_TICKS_PER_UPDATE 100
+
 void Timer_init(Timer* timer, float ticksPerSecond) {
-    timer->ticksPerSecond     = ticksPerSecond;
-    timer->lastHRTime         = 0.0;
-    timer->ticks              = 0;
-    timer->partialTicks       = 0.0f;
-    timer->timeScale          = 1.0f;
-    timer->passedTime         = 0.0f;
-    timer->lastSyncSysClock   = currentTimeMillis();
-    timer->lastSyncHRClock    = getCurrentTimeInNanoseconds() / 1000000LL;
-    timer->timeSyncAdjustment = 1.0;
+#if defined(_WIN32)
+    // Sleep rounds up to the ~15.6ms scheduler tick without this
+    timeBeginPeriod(1);
+#endif
+    timer->ticksPerSecond = ticksPerSecond;
+    timer->timeScale      = 1.0f;
+    timer->fps            = 0.0f;
+    timer->passedTime     = 0.0f;
+    timer->ticks          = 0;
+    timer->partialTicks   = 0.0f;
+    timer->lastTime       = getCurrentTimeInNanoseconds();
 }
 
 long long getCurrentTimeInNanoseconds(void) {
@@ -73,47 +79,31 @@ long long currentTimeMillis(void) {
 #endif
 }
 
-// System.nanoTime in milliseconds, the sync factor eases a fifth of the way each second
-void Timer_advanceTime(Timer* timer) {
-    long long now = currentTimeMillis();
-    long long passed = now - timer->lastSyncSysClock;
-    long long hr = getCurrentTimeInNanoseconds() / 1000000LL;
-    if (passed > 1000LL) {
-        long long hrPassed = hr - timer->lastSyncHRClock;
-        double ratio = (double)passed / (double)hrPassed;
-        timer->timeSyncAdjustment += (ratio - timer->timeSyncAdjustment) * (double)0.2f;
-        timer->lastSyncSysClock = now;
-        timer->lastSyncHRClock = hr;
-    }
-    if (passed < 0LL) {
-        timer->lastSyncSysClock = now;
-        timer->lastSyncHRClock = hr;
-    }
-
-    double hrTime = (double)hr / 1000.0;
-    double delta = (hrTime - timer->lastHRTime) * timer->timeSyncAdjustment;
-    timer->lastHRTime = hrTime;
-    if (delta < 0.0) delta = 0.0;
-    if (delta > 1.0) delta = 1.0;
-
-    timer->passedTime = (float)((double)timer->passedTime + delta * (double)timer->timeScale * (double)timer->ticksPerSecond);
-    timer->ticks = (int)timer->passedTime;
-    if (timer->ticks > 100) timer->ticks = 100;
-    timer->passedTime -= (float)timer->ticks;
-    timer->partialTicks = timer->passedTime;
-}
-
-void Timer_highResolution(void) {
-#if defined(_WIN32)
-    timeBeginPeriod(1);
-#endif
-}
-
-void Timer_sleepMillis(int ms) {
+void sleepMillis(int ms) {
 #if defined(_WIN32)
     Sleep((DWORD)ms);
 #else
-    struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L };
-    nanosleep(&t, NULL);
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
 #endif
+}
+
+void Timer_advanceTime(Timer* timer) {
+    long long now      = getCurrentTimeInNanoseconds();
+    long long passedNs = now - timer->lastTime;
+    timer->lastTime    = now;
+
+    if (passedNs <= 0)                 passedNs = 1;
+    if (passedNs > MAX_NS_PER_UPDATE)  passedNs = MAX_NS_PER_UPDATE;
+
+    timer->fps = (float)((double)NS_PER_SECOND / (double)passedNs);
+
+    timer->passedTime += (float)((double)passedNs * timer->timeScale * timer->ticksPerSecond / (double)NS_PER_SECOND);
+    timer->ticks = (int)timer->passedTime;
+    if (timer->ticks > MAX_TICKS_PER_UPDATE) timer->ticks = MAX_TICKS_PER_UPDATE;
+
+    timer->passedTime -= timer->ticks;
+    timer->partialTicks = timer->passedTime;
 }

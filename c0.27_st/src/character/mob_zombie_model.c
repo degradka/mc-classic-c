@@ -16,6 +16,7 @@ void MobZombieModel_init(MobZombieModel* m) {
     Cube_setPos(&m->rightArm, -5, 2, 0);
 
     Cube_init(&m->leftArm, 40, 16);
+    m->leftArm.mirror = 1;
     Cube_addBox(&m->leftArm, -1, -2, -2, 4, 12, 4);
     Cube_setPos(&m->leftArm, 5, 2, 0);
 
@@ -24,11 +25,9 @@ void MobZombieModel_init(MobZombieModel* m) {
     Cube_setPos(&m->rightLeg, -2, 12, 0);
 
     Cube_init(&m->leftLeg, 0, 16);
+    m->leftLeg.mirror = 1;
     Cube_addBox(&m->leftLeg, -2, 0, -2, 4, 12, 4);
     Cube_setPos(&m->leftLeg, 2, 12, 0);
-
-    Cube_init(&m->hair, 32, 0);
-    Cube_addBoxExpanded(&m->hair, -4, -8, -4, 8, 8, 8, 0.5f);
 }
 
 void MobZombieModel_render(MobZombieModel* m, float animStep, float run, float age,
@@ -54,15 +53,10 @@ void MobZombieModel_render(MobZombieModel* m, float animStep, float run, float a
     m->rightLeg.xRot = (float)cos(animStep * 0.6662) * 1.4f * run;
     m->leftLeg.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
 
-    // the hair turns with the head
-    m->hair.xRot = m->head.xRot;
-    m->hair.yRot = m->head.yRot;
-
     Cube_render(&m->head);
     Cube_render(&m->body);
     Cube_render(&m->rightArm);
     Cube_render(&m->leftArm);
     Cube_render(&m->rightLeg);
     Cube_render(&m->leftLeg);
-    Cube_render(&m->hair);
 }

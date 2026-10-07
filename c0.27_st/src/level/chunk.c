@@ -2,69 +2,107 @@
 
 #include "chunk.h"
 #include "tile/tile.h"
+#include "../timer.h"
 #include "../player.h"
 #include <math.h>
 
 static Tessellator TESSELLATOR;
 
-int Chunk_updates = 0;
+extern Tessellator TESSELLATOR;
 
-static void reset(Chunk* c) {
-    for (int i = 0; i < 2; i++) {
-        glNewList(c->lists + i, GL_COMPILE);
-        glEndList();
-    }
-}
+static long long CHUNK_TotalTimeNS  = 0;
+static int       CHUNK_TotalUpdates = 0;
 
-// the renderer hands out two lists from its block, they get emptied instead of deleted
-void Chunk_init(Chunk* c, Level* level, int x, int y, int z, int lists) {
-    c->level = level;
-    c->x = x;
-    c->y = y;
-    c->z = z;
-    c->empty[0] = c->empty[1] = false;
+void Chunk_init(Chunk* c, Level* level, GLuint texture, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+    c->level   = level;
+    c->texture = texture;
+
+    c->minX = minX; c->minY = minY; c->minZ = minZ;
+    c->maxX = maxX; c->maxY = maxY; c->maxZ = maxZ;
+    c->dirty = true;
+    c->empty[0] = c->empty[1] = c->empty[2] = true;
+    c->dirtiedTime = currentTimeMillis();
     c->visible = false;
-    c->dirty = false;
-    c->lists = lists;
-    reset(c);
+
+    // distance checks use the chunk's min corner
+    c->x = minX;
+    c->y = minY;
+    c->z = minZ;
+
+    c->boundingBox = AABB_create(minX, minY, minZ, maxX, maxY, maxZ);
+    // 0 solid, 1 liquid, 2 plants
+    // plants have their own list so the liquid depth pass doesn't cut their crossed quads
+    c->lists = glGenLists(3);
 }
 
 void Chunk_destroy(Chunk* c) {
-    reset(c);
-    c->level = NULL;
+    glDeleteLists(c->lists, 3);
 }
 
-float Chunk_distanceToSqr(const Chunk* c, const Player* p) {
-    float xd = p->e.x - (float)c->x;
-    float yd = p->e.y - (float)c->y;
-    float zd = p->e.z - (float)c->z;
-    return xd * xd + yd * yd + zd * zd;
-}
+void Chunk_rebuild(Chunk* c, int layer) {
+    c->dirty = false;
 
-void Chunk_rebuild(Chunk* c) {
-    Chunk_updates++;
-    for (int layer = 0; layer < 2; layer++) {
-        glNewList(c->lists + layer, GL_COMPILE);
-        Tessellator_begin(&TESSELLATOR);
-        bool drawn = false;
-        for (int x = c->x; x < c->x + 16; x++)
-        for (int y = c->y; y < c->y + 16; y++)
-        for (int z = c->z; z < c->z + 16; z++) {
-            int id = Level_getTile(c->level, x, y, z);
-            if (id > 0) drawn |= gTiles[id]->render(gTiles[id], &TESSELLATOR, c->level, layer, x, y, z);
+    glNewList(c->lists + layer, GL_COMPILE);
+    Tessellator_begin(&TESSELLATOR);
+
+    int tiles = 0;
+    // (coarse timing)
+    long long nsStart = getCurrentTimeInNanoseconds();
+
+    static const int dir[6][3] = { { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 }, { -1, 0, 0 }, { 1, 0, 0 } };
+    static const float shade[6] = { 0.5f, 1.0f, 0.6f, 0.6f, 0.8f, 0.8f };
+    if (layer == 0) {
+        for (int face = 0; face < 6; ++face) {
+            for (int y = c->minY; y < c->maxY; ++y)
+            for (int z = c->minZ; z < c->maxZ; ++z)
+            for (int x = c->minX; x < c->maxX; ++x) {
+                int id = Level_getTile(c->level, x, y, z);
+                if (id <= 0 || !gTiles[id] || !gTiles[id]->isCube) continue;
+                int nx = x + dir[face][0], ny = y + dir[face][1], nz = z + dir[face][2];
+                int nid = Level_getTile(c->level, nx, ny, nz);
+                if (nid > 0 && gTiles[nid] && gTiles[nid]->isSolid(gTiles[nid])) continue;
+                float b = shade[face] * Level_getBrightness(c->level, nx, ny, nz);
+                Tessellator_color(&TESSELLATOR, b, b, b);
+                Tile_renderCubeFace(gTiles[id], &TESSELLATOR, x, y, z, face);
+                tiles++;
+            }
         }
-        Tessellator_end(&TESSELLATOR);
-        glEndList();
-        c->empty[layer] = !drawn;
+    } else {
+        for (int y = c->minY; y < c->maxY; ++y)
+        for (int z = c->minZ; z < c->maxZ; ++z)
+        for (int x = c->minX; x < c->maxX; ++x) {
+            int id = Level_getTile(c->level, x, y, z);
+            if (id <= 0 || !gTiles[id] || gTiles[id]->isCube) continue;
+            const Tile* t = gTiles[id];
+            bool liquid = t->liquidType != LIQUID_NONE;
+            if (layer == 1 && liquid) t->render(t, &TESSELLATOR, c->level, 1, x, y, z);
+            if (layer == 2 && !liquid) t->render(t, &TESSELLATOR, c->level, 0, x, y, z);
+            tiles++;
+        }
+    }
+
+    c->empty[layer] = TESSELLATOR.vertices == 0;
+    Tessellator_end(&TESSELLATOR);
+    glEndList();
+
+    if (tiles > 0) {
+        CHUNK_TotalTimeNS += (getCurrentTimeInNanoseconds() - nsStart);
+        CHUNK_TotalUpdates++;
     }
 }
 
-void Chunk_addList(const Chunk* c, unsigned int* lists, int* count, int layer) {
-    if (!c->visible || c->empty[layer]) return;
-    lists[(*count)++] = (unsigned int)(c->lists + layer);
+void Chunk_render(Chunk* c, int layer) {
+    glCallList(c->lists + layer);
 }
 
-void Chunk_cull(Chunk* c, const Frustum* frustum) {
-    AABB box = AABB_create((float)c->x, (float)c->y, (float)c->z, (float)(c->x + 16), (float)(c->y + 16), (float)(c->z + 16));
-    c->visible = frustum_isVisible(frustum, &box) ? true : false;
+void Chunk_setDirty(Chunk* c) {
+    if (!c->dirty) c->dirtiedTime = currentTimeMillis();
+    c->dirty = true;
+}
+
+double Chunk_distanceToSqr(const Chunk* c, const Player* p) {
+    double dx = p->e.x - c->x;
+    double dy = p->e.y - c->y;
+    double dz = p->e.z - c->z;
+    return dx*dx + dy*dy + dz*dz;
 }

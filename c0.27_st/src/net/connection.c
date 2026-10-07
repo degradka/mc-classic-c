@@ -2,102 +2,131 @@
 
 #include "connection.h"
 #include "packet.h"
-#include "net_socket.h"
 #include <zlib.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
+#if defined(_WIN32)
+  #include <windows.h>
+#else
+  #include <pthread.h>
+#endif
+
 extern void Minecraft_beginLevelLoading(const char* title);
 extern void Minecraft_levelLoadUpdate(const char* status);
 extern void Minecraft_levelLoadProgress(int percent);
-extern void Minecraft_clearLevel(void);
-extern void Minecraft_installNetworkLevel(int w, int d, int h, unsigned char* blocks);
+extern void Minecraft_installNetworkLevel(int w, int h, int d, const unsigned char* blocks);
 extern void Minecraft_addChatLine(const char* text);
 extern void Minecraft_networkSetBlock(int x, int y, int z, int type);
-extern void Minecraft_showErrorScreen(const char* title, const char* message);
-extern void Minecraft_setUserType(int type);
-extern bool Minecraft_networkSelfSpawn(int x, int y, int z, int yaw, int pitch);
-extern void Minecraft_networkSelfTeleport(int x, int y, int z, int yaw, int pitch);
-extern bool Minecraft_spawnNetworkPlayer(int id, const char* name, int x, int y, int z, float yRot, float xRot);
-extern void Minecraft_teleportNetworkPlayer(int id, int x, int y, int z, float yRot, float xRot);
-extern void Minecraft_queueNetworkPlayerMoveLook(int id, int dx, int dy, int dz, float yRot, float xRot);
+extern void Minecraft_networkTeleportSelf(float x, float y, float z, float yaw, float pitch);
+extern void Minecraft_setLevelSpawnPos(int x, int y, int z, float rot);
+extern void Minecraft_openMessageScreen(const char* title, const char* message);
+extern void Minecraft_spawnNetworkPlayer(int id, const char* name, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+extern void Minecraft_teleportNetworkPlayer(int id, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+extern void Minecraft_queueNetworkPlayerMoveLook(int id, int dx, int dy, int dz, float yaw, float pitch);
 extern void Minecraft_queueNetworkPlayerMove(int id, int dx, int dy, int dz);
-extern void Minecraft_queueNetworkPlayerLook(int id, float yRot, float xRot);
-extern bool Minecraft_despawnNetworkPlayer(int id);
+extern void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch);
+extern void Minecraft_despawnNetworkPlayer(int id);
+extern void Minecraft_setUserType(int userType);
+
+/* wire format helpers */
 
 static void writeByte(NetConnection* c, unsigned char v) {
-    if (c->writeLen < NET_BUFFER_SIZE) c->writeBuf[c->writeLen++] = v;
+    if (c->writeLen < NET_WRITE_BUFFER_SIZE) c->writeBuf[c->writeLen++] = v;
 }
 
-static void writeShort(NetConnection* c, int v) {
-    writeByte(c, (unsigned char)((unsigned short)v >> 8));
+static void writeU16(NetConnection* c, unsigned short v) {
+    writeByte(c, (unsigned char)(v >> 8));
     writeByte(c, (unsigned char)v);
 }
 
-// utf-8 bytes, cut at 64 and padded with spaces
 static void writeString(NetConnection* c, const char* s) {
     size_t len = strlen(s);
+    if (len > PACKET_STRING_LEN) len = PACKET_STRING_LEN;
     for (size_t i = 0; i < (size_t)PACKET_STRING_LEN; i++) {
         writeByte(c, i < len ? (unsigned char)s[i] : (unsigned char)' ');
     }
 }
 
-static int readShort(const unsigned char* p) {
-    return (short)((p[0] << 8) | p[1]);
+static unsigned short readU16(const unsigned char* p) {
+    return (unsigned short)((p[0] << 8) | p[1]);
 }
 
-// String.trim, it cuts everything up to the space on both ends
-static void readString(const unsigned char* p, char* out) {
-    int start = 0, end = PACKET_STRING_LEN;
-    while (start < end && p[start] <= ' ') start++;
-    while (end > start && p[end - 1] <= ' ') end--;
-    memcpy(out, p + start, (size_t)(end - start));
-    out[end - start] = '\0';
+// fixed 64 byte field, space padded on the wire, then trimmed
+static void readString(const unsigned char* p, char* out, size_t outCapacity) {
+    int len = PACKET_STRING_LEN;
+    while (len > 0 && p[len - 1] == ' ') len--;
+    if ((size_t)len >= outCapacity) len = (int)outCapacity - 1;
+    memcpy(out, p, (size_t)len);
+    out[len] = '\0';
 }
 
-static float angle(signed char b) {
-    return (float)(b * 360) / 256.0f;
-}
+// byte angle to degrees, yaw negated
+static float angleYaw(signed char b)   { return (-(float)b * 360.0f) / 256.0f; }
+static float anglePitch(signed char b) { return ((float)b * 360.0f) / 256.0f; }
 
-void NetConnection_open(NetConnection* c, const char* host, int port, const char* username, const char* mppass) {
-    memset(c, 0, sizeof *c);
-    snprintf(c->username, sizeof c->username, "%s", username);
-    snprintf(c->mppass, sizeof c->mppass, "%s", mppass);
-    snprintf(c->host, sizeof c->host, "%s", host);
-    c->port = port;
-    c->pending = true;
-}
+/* connect / disconnect */
 
-int NetConnection_finishConnect(NetConnection* c) {
-    if (!c->pending) return 0;
-    c->pending = false;
+// runs on its own thread, connectResult is set last
+static void runConnect(NetConnection* c) {
     sock_t sock;
-    int r = NetSocket_connect(&sock, c->host, c->port);
-    if (r <= 0) return r;
-    c->sock = (uintptr_t)sock;
-    c->hasSocket = true;
+    int ok = NetSocket_connect(&sock, c->connectHost, c->connectPort);
+    if (ok) c->connectingSock = sock;
+    c->connectResult = ok ? 1 : 2; // publish last
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI connectThreadMain(LPVOID arg) { runConnect((NetConnection*)arg); return 0; }
+#else
+static void* connectThreadMain(void* arg) { runConnect((NetConnection*)arg); return NULL; }
+#endif
+
+void NetConnection_beginConnect(NetConnection* c, const char* host, int port, const char* username) {
+    memset(c, 0, sizeof *c);
+    snprintf(c->connectHost, sizeof c->connectHost, "%s", host);
+    c->connectPort = port;
+    snprintf(c->connectUsername, sizeof c->connectUsername, "%s", username);
+    c->connectResult = 0;
+
+#if defined(_WIN32)
+    HANDLE h = CreateThread(NULL, 0, connectThreadMain, c, 0, NULL);
+    if (h) CloseHandle(h); // detached: nothing needs to join it
+#else
+    pthread_t t;
+    if (pthread_create(&t, NULL, connectThreadMain, c) == 0) pthread_detach(t);
+#endif
+
+    Minecraft_beginLevelLoading("Connecting..");
+}
+
+bool NetConnection_pollConnecting(NetConnection* c) {
+    if (c->connectResult == 0) return false; // still in flight
+
+    if (c->connectResult == 2) {
+        Minecraft_openMessageScreen("Failed to connect",
+            "You failed to connect to the server. It's probably down!");
+        return true;
+    }
+
+    c->sock = c->connectingSock;
     c->connected = true;
     c->levelBufCapacity = 256 * 1024;
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
     writeByte(c, 6);
-    writeString(c, c->username);
-    writeString(c, c->mppass);
-    writeByte(c, 0);
-    c->loggedIn = true;
-    return 1;
-}
-
-bool NetConnection_isOpen(const NetConnection* c) {
-    return c->hasSocket && c->connected;
+    writeString(c, c->connectUsername);
+    writeString(c, "--"); // session id, the server ignores it
+    writeByte(c, 0); // userType, always 0
+    return true;
 }
 
 void NetConnection_close(NetConnection* c) {
     if (!c->connected) return;
-    if (c->writeLen > 0) NetSocket_write((sock_t)c->sock, c->writeBuf, c->writeLen);
-    NetSocket_close((sock_t)c->sock);
+    // flush what's left before closing
+    if (c->writeLen > 0) NetSocket_write(c->sock, c->writeBuf, c->writeLen);
+    NetSocket_close(c->sock);
     c->connected = false;
     free(c->levelBuf);
     c->levelBuf = NULL;
@@ -112,128 +141,144 @@ static void appendLevelBytes(NetConnection* c, const unsigned char* data, int le
     c->levelBufLen += len;
 }
 
-// LevelIO.c: a gzipped int length and then the blocks
-static unsigned char* gunzipLevel(const unsigned char* src, int srcLen, int* outLen) {
+static bool gunzipBuffer(const unsigned char* src, int srcLen, unsigned char* dst, int dstLen) {
     z_stream strm;
     memset(&strm, 0, sizeof strm);
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) return NULL;
-    unsigned char header[4];
-    strm.next_in = (Bytef*)src;
-    strm.avail_in = (uInt)srcLen;
-    strm.next_out = header;
-    strm.avail_out = 4;
-    int ret = inflate(&strm, Z_SYNC_FLUSH);
-    if (strm.avail_out != 0 || (ret != Z_OK && ret != Z_STREAM_END)) { inflateEnd(&strm); return NULL; }
-    int len = (int)(((unsigned)header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3]);
-    if (len < 0) { inflateEnd(&strm); return NULL; }
-    unsigned char* blocks = (unsigned char*)malloc((size_t)(len > 0 ? len : 1));
-    strm.next_out = blocks;
-    strm.avail_out = (uInt)len;
-    while (strm.avail_out > 0) {
-        ret = inflate(&strm, Z_NO_FLUSH);
-        if (ret == Z_STREAM_END) break;
-        if (ret != Z_OK) { free(blocks); inflateEnd(&strm); return NULL; }
-    }
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) return false; // 15+16 = auto-detect gzip header
+
+    strm.next_in   = (Bytef*)src;
+    strm.avail_in  = (uInt)srcLen;
+    strm.next_out  = (Bytef*)dst;
+    strm.avail_out = (uInt)dstLen;
+
+    int ret = inflate(&strm, Z_FINISH);
     inflateEnd(&strm);
-    if (strm.avail_out != 0) { free(blocks); return NULL; }
-    *outLen = len;
-    return blocks;
+    return ret == Z_STREAM_END;
 }
 
-// false when it throws
-static bool handle(NetConnection* c, int id, const unsigned char* f) {
+/* dispatch */
+
+// returns bytes consumed, or -1 on a malformed/unknown packet id
+static int dispatchOne(NetConnection* c, const unsigned char* p, int available) {
+    if (available < 1) return 0;
+    int id = p[0];
+    if (id < 0 || id >= PACKET_COUNT) return -1;
+
+    int need = PacketPayloadLen[id] + 1;
+    if (available < need) return 0; // wait for more data
+
+    const unsigned char* f = p + 1; // fields start after the id byte
+
     switch (id) {
-        case PACKET_LOGIN: {
-            char name[65], motd[65];
-            readString(f + 1, name);
-            readString(f + 1 + PACKET_STRING_LEN, motd);
-            Minecraft_beginLevelLoading(name);
+        case PACKET_LOGIN: { // server's login reply: serverName, motd, userType
+            char serverName[65], motd[65];
+            readString(f + 1, serverName, sizeof serverName);
+            readString(f + 1 + PACKET_STRING_LEN, motd, sizeof motd);
+            Minecraft_beginLevelLoading(serverName);
             Minecraft_levelLoadUpdate(motd);
-            Minecraft_setUserType((signed char)f[1 + 2 * PACKET_STRING_LEN]);
+            Minecraft_setUserType(f[1 + PACKET_STRING_LEN + PACKET_STRING_LEN]);
             break;
         }
         case PACKET_PING:
-            break;
+            break; // sent periodically by the server, nothing to do with it
         case PACKET_LEVEL_INIT:
-            Minecraft_clearLevel();
             c->levelBufLen = 0;
             break;
         case PACKET_LEVEL_CHUNK: {
-            int len = readShort(f);
-            Minecraft_levelLoadProgress((signed char)f[2 + PACKET_ARRAY_LEN]);
-            if (len < 0 || len > PACKET_ARRAY_LEN) return false;
-            appendLevelBytes(c, f + 2, len);
+            unsigned short len = readU16(f);
+            const unsigned char* chunk = f + 2;
+            unsigned char percent = f[2 + PACKET_ARRAY_LEN];
+            appendLevelBytes(c, chunk, len);
+            Minecraft_levelLoadProgress(percent);
             break;
         }
         case PACKET_LEVEL_FINALIZE: {
-            int len = 0;
-            unsigned char* blocks = gunzipLevel(c->levelBuf, c->levelBufLen, &len);
+            // width, depth, height, depth is the vertical one
+            int width = readU16(f), depth = readU16(f + 2), height = readU16(f + 4);
+            int rawSize = width * height * depth;
+            // the gzipped data has a 4 byte length before the blocks
+            unsigned char* raw = (unsigned char*)malloc((size_t)rawSize + 4);
+            if (raw && gunzipBuffer(c->levelBuf, c->levelBufLen, raw, rawSize + 4)) {
+                Minecraft_installNetworkLevel(width, height, depth, raw + 4);
+                c->levelLoaded = true; // the self Teleport is only sent after this
+            }
+            free(raw);
             c->levelBufLen = 0;
-            if (!blocks) return false;
-            int w = readShort(f), d = readShort(f + 2), h = readShort(f + 4);
-            if (w <= 0 || d <= 0 || h <= 0 || len < w * d * h) { free(blocks); return false; }
-            Minecraft_installNetworkLevel(w, d, h, blocks);
             break;
         }
-        case PACKET_SET_BLOCK_SC:
-            Minecraft_networkSetBlock(readShort(f), readShort(f + 2), readShort(f + 4), (signed char)f[6]);
+        case PACKET_SET_BLOCK_SC: {
+            int x = readU16(f), y = readU16(f + 2), z = readU16(f + 4);
+            int type = f[6];
+            Minecraft_networkSetBlock(x, y, z, type);
             break;
+        }
         case PACKET_SPAWN_PLAYER: {
-            signed char pid = (signed char)f[0];
+            signed char sid = (signed char)f[0];
             char name[65];
-            readString(f + 1, name);
-            const unsigned char* g = f + 1 + PACKET_STRING_LEN;
-            int x = readShort(g), y = readShort(g + 2), z = readShort(g + 4);
-            float yRot = -angle((signed char)g[6]);
-            float xRot = angle((signed char)g[7]);
-            if (pid >= 0) {
-                if (!Minecraft_spawnNetworkPlayer(pid, name, x, y, z, yRot, xRot)) return false;
+            readString(f + 1, name, sizeof name);
+            int sx = (short)readU16(f + 1 + PACKET_STRING_LEN);
+            int sy = (short)readU16(f + 1 + PACKET_STRING_LEN + 2);
+            int sz = (short)readU16(f + 1 + PACKET_STRING_LEN + 4);
+            signed char syaw   = (signed char)f[1 + PACKET_STRING_LEN + 6];
+            signed char spitch = (signed char)f[1 + PACKET_STRING_LEN + 7];
+            float yaw = angleYaw(syaw), pitch = anglePitch(spitch);
+            if (sid >= 0) {
+                Minecraft_spawnNetworkPlayer(sid, name, sx, sy, sz, yaw, pitch);
             } else {
-                if (!Minecraft_networkSelfSpawn(x, y, z, (signed char)g[6], (signed char)g[7])) return false;
+                // our own spawn, the stored yaw and the applied one use different math
+                // and neither is negated like angleYaw
+                float appliedYaw = ((float)syaw * 360.0f) / 256.0f;
+                int spawnYaw = ((int)syaw * 320) / 256;
+                Minecraft_setLevelSpawnPos(sx / 32, sy / 32, sz / 32, (float)spawnYaw);
+                Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, appliedYaw, pitch);
             }
             break;
         }
         case PACKET_TELEPORT: {
-            signed char pid = (signed char)f[0];
-            if (pid < 0) {
-                Minecraft_networkSelfTeleport(readShort(f + 1), readShort(f + 3), readShort(f + 5), (signed char)f[7], (signed char)f[8]);
+            signed char sid = (signed char)f[0];
+            int sx = (short)readU16(f + 1), sy = (short)readU16(f + 3), sz = (short)readU16(f + 5);
+            signed char syaw = (signed char)f[7], spitch = (signed char)f[8];
+            if (sid >= 0) {
+                Minecraft_teleportNetworkPlayer(sid, sx, sy, sz, angleYaw(syaw), anglePitch(spitch));
             } else {
-                Minecraft_teleportNetworkPlayer(pid, readShort(f + 1), readShort(f + 3), readShort(f + 5),
-                                                -angle((signed char)f[7]), angle((signed char)f[8]));
+                // moves the local player, the yaw is not negated like angleYaw
+                float yaw = ((float)syaw * 360.0f) / 256.0f;
+                Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, yaw, anglePitch(spitch));
             }
             break;
         }
         case PACKET_MOVE_LOOK: {
-            signed char pid = (signed char)f[0];
-            if (pid >= 0) {
-                Minecraft_queueNetworkPlayerMoveLook(pid, (signed char)f[1], (signed char)f[2], (signed char)f[3],
-                                                     -angle((signed char)f[4]), angle((signed char)f[5]));
-            }
+            signed char sid = (signed char)f[0];
+            signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
+            signed char syaw = (signed char)f[4], spitch = (signed char)f[5];
+            Minecraft_queueNetworkPlayerMoveLook(sid, dx, dy, dz, angleYaw(syaw), anglePitch(spitch));
             break;
         }
         case PACKET_MOVE: {
-            signed char pid = (signed char)f[0];
-            if (pid >= 0) Minecraft_queueNetworkPlayerMove(pid, (signed char)f[1], (signed char)f[2], (signed char)f[3]);
+            signed char sid = (signed char)f[0];
+            signed char dx = (signed char)f[1], dy = (signed char)f[2], dz = (signed char)f[3];
+            Minecraft_queueNetworkPlayerMove(sid, dx, dy, dz);
             break;
         }
         case PACKET_LOOK: {
-            signed char pid = (signed char)f[0];
-            if (pid >= 0) Minecraft_queueNetworkPlayerLook(pid, -angle((signed char)f[1]), angle((signed char)f[2]));
+            signed char sid = (signed char)f[0];
+            signed char syaw = (signed char)f[1], spitch = (signed char)f[2];
+            Minecraft_queueNetworkPlayerLook(sid, angleYaw(syaw), anglePitch(spitch));
             break;
         }
         case PACKET_DESPAWN_PLAYER: {
-            signed char pid = (signed char)f[0];
-            if (pid >= 0 && !Minecraft_despawnNetworkPlayer(pid)) return false;
+            signed char sid = (signed char)f[0];
+            Minecraft_despawnNetworkPlayer(sid);
             break;
         }
         case PACKET_MESSAGE: {
-            signed char pid = (signed char)f[0];
+            signed char sid = (signed char)f[0];
             char text[65];
-            readString(f + 1, text);
-            if (pid < 0) {
-                char line[72];
-                snprintf(line, sizeof line, "&e%s", text);
-                Minecraft_addChatLine(line);
+            readString(f + 1, text, sizeof text);
+            if (sid < 0) {
+                char withPrefix[72];
+                snprintf(withPrefix, sizeof withPrefix, "&e%s", text);
+                Minecraft_addChatLine(withPrefix);
             } else {
                 Minecraft_addChatLine(text);
             }
@@ -241,59 +286,65 @@ static bool handle(NetConnection* c, int id, const unsigned char* f) {
         }
         case PACKET_DISCONNECT: {
             char reason[65];
-            readString(f, reason);
-            Minecraft_showErrorScreen("Connection lost", reason);
-            NetConnection_close(c);
+            readString(f, reason, sizeof reason);
+            Minecraft_openMessageScreen("Connection lost", reason);
             break;
         }
     }
-    return true;
+
+    return need;
 }
 
-NetResult NetConnection_tick(NetConnection* c) {
-    if (!c->connected) return NET_OK;
+void NetConnection_tick(NetConnection* c) {
+    if (!c->connected) return;
 
-    int space = NET_BUFFER_SIZE - c->readLen;
-    if (space > 0) {
-        int n = NetSocket_read((sock_t)c->sock, c->readBuf + c->readLen, space);
+    int spaceLeft = NET_READ_BUFFER_SIZE - c->readLen;
+    if (spaceLeft > 0) {
+        int n = NetSocket_read(c->sock, c->readBuf + c->readLen, spaceLeft);
         if (n > 0) c->readLen += n;
-        else if (n < 0) return NET_THROW;
+        else if (n < 0) {
+            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
+            NetConnection_close(c);
+            return;
+        }
     }
 
-    int pos = 0;
-    int handled = 0;
-    while (pos < c->readLen && handled++ != 100) {
-        int id = c->readBuf[pos];
-        // the packet table is indexed with a signed byte, anything unknown throws
-        if (id >= PACKET_COUNT) return NET_THROW;
-        int available = c->readLen - pos;
-        if (available < PacketFullLen[id] + 1) break;
-        if (!handle(c, id, c->readBuf + pos + 1)) return NET_THROW;
-        pos += PacketFullLen[id] + 1;
-        if (!c->connected) break;
+    int consumedTotal = 0;
+    for (int packets = 0; packets < 100 && consumedTotal < c->readLen; packets++) {
+        int consumed = dispatchOne(c, c->readBuf + consumedTotal, c->readLen - consumedTotal);
+        if (consumed < 0) {
+            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
+            NetConnection_close(c);
+            return;
+        }
+        if (consumed == 0) break; // incomplete packet, wait for more data
+        consumedTotal += consumed;
     }
-    if (pos > 0) {
-        memmove(c->readBuf, c->readBuf + pos, (size_t)(c->readLen - pos));
-        c->readLen -= pos;
+    if (consumedTotal > 0) {
+        memmove(c->readBuf, c->readBuf + consumedTotal, (size_t)(c->readLen - consumedTotal));
+        c->readLen -= consumedTotal;
     }
 
-    if (c->connected && c->writeLen > 0) {
-        int n = NetSocket_write((sock_t)c->sock, c->writeBuf, c->writeLen);
-        if (n < 0) return NET_THROW;
+    if (c->writeLen > 0) {
+        int n = NetSocket_write(c->sock, c->writeBuf, c->writeLen);
         if (n > 0) {
             memmove(c->writeBuf, c->writeBuf + n, (size_t)(c->writeLen - n));
             c->writeLen -= n;
+        } else if (n < 0) {
+            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
+            NetConnection_close(c);
         }
     }
-    return NET_OK;
 }
+
+/* outgoing */
 
 void NetConnection_sendSetBlock(NetConnection* c, int x, int y, int z, int mode, int type) {
     if (!c->connected) return;
     writeByte(c, (unsigned char)PACKET_SET_BLOCK_CS);
-    writeShort(c, x);
-    writeShort(c, y);
-    writeShort(c, z);
+    writeU16(c, (unsigned short)x);
+    writeU16(c, (unsigned short)y);
+    writeU16(c, (unsigned short)z);
     writeByte(c, (unsigned char)mode);
     writeByte(c, (unsigned char)type);
 }
@@ -301,17 +352,18 @@ void NetConnection_sendSetBlock(NetConnection* c, int x, int y, int z, int mode,
 void NetConnection_sendMessage(NetConnection* c, const char* text) {
     if (!c->connected) return;
     writeByte(c, (unsigned char)PACKET_MESSAGE);
-    writeByte(c, (unsigned char)0xFF);
+    writeByte(c, (unsigned char)0xFF); // -1 as an unsigned byte: outgoing chat is always the local player
     writeString(c, text);
 }
 
-void NetConnection_sendPosition(NetConnection* c, float x, float y, float z, float yRot, float xRot) {
+void NetConnection_sendTeleportSelf(NetConnection* c, float x, float y, float z, float yaw, float pitch) {
     if (!c->connected) return;
     writeByte(c, (unsigned char)PACKET_TELEPORT);
-    writeByte(c, (unsigned char)0xFF);
-    writeShort(c, (int)(x * 32.0f));
-    writeShort(c, (int)(y * 32.0f));
-    writeShort(c, (int)(z * 32.0f));
-    writeByte(c, (unsigned char)((int)(yRot * 256.0f / 360.0f) & 0xFF));
-    writeByte(c, (unsigned char)((int)(xRot * 256.0f / 360.0f) & 0xFF));
+    writeByte(c, (unsigned char)0xFF); // -1
+    writeU16(c, (unsigned short)(short)(x * 32.0f));
+    writeU16(c, (unsigned short)(short)(y * 32.0f));
+    writeU16(c, (unsigned short)(short)(z * 32.0f));
+    // outgoing angles aren't negated
+    writeByte(c, (unsigned char)((int)(yaw * 256.0f / 360.0f) & 0xFF));
+    writeByte(c, (unsigned char)((int)(pitch * 256.0f / 360.0f) & 0xFF));
 }

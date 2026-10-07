@@ -11,8 +11,6 @@ typedef struct {
     Cube body;
     Cube rightArm, leftArm;
     Cube rightLeg, leftLeg;
-    // the hair layer, the head box grown by 0.5 at (32,0), follows the head
-    Cube hair;
 } MobZombieModel;
 
 void MobZombieModel_init(MobZombieModel* m);

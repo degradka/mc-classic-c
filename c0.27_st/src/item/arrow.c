@@ -2,6 +2,7 @@
 
 #include "arrow.h"
 #include "../mob.h"
+#include "../jrandom.h"
 #include "../renderer/textures.h"
 #include "../renderer/tessellator.h"
 #include <GL/glew.h>
@@ -10,7 +11,6 @@
 
 static Tessellator sTess;
 
-static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
 
 extern bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, int flightTime, Entity** outHit);
 
@@ -27,6 +27,7 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
     a->pickupTime = 0;
     a->pickupTarget = NULL;
 
+    // player arrows do 7 and are type 0, anything else does 3 and is type 1
     a->damage = 3;
     a->type = 0;
     if (owner && owner->aiClassTag == AI_CLASS_PLAYER) {
@@ -39,13 +40,14 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
     e->heightOffset = 0.25f;
     e->makeStepSound = false;
 
-    float f7 = cosf((-yaw) * (float)M_PI / 180.0f - (float)M_PI);
-    float f8 = sinf((-yaw) * (float)M_PI / 180.0f - (float)M_PI);
-    float cp = cosf((-pitch) * (float)M_PI / 180.0f);
-    float sp = sinf((-pitch) * (float)M_PI / 180.0f);
+    float f7 = (float)cos((double)(-yaw) * M_PI / 180.0 - M_PI);
+    float f8 = (float)sin((double)(-yaw) * M_PI / 180.0 - M_PI);
+    float cp = (float)cos((double)(-pitch) * M_PI / 180.0);
+    float sp = (float)sin((double)(-pitch) * M_PI / 180.0);
     a->gravity = 1.0f / speed;
 
-    // xo and zo start near the origin, the first frame streaks in
+    // prevX and prevZ are offset from 0,0,0, not from the spawn,
+    // so the first frame streaks in from the origin
     e->prevX -= f7 * 0.2f;
     e->prevZ += f8 * 0.2f;
 
@@ -72,6 +74,7 @@ void Arrow_startPickup(Arrow* a, Entity* target) {
 void Arrow_onTick(Arrow* a) {
     Entity* e = &a->e;
 
+    // the arrow animates itself like Item does instead of a TakeEntityAnim
     if (a->pickedUp) {
         a->pickupTime++;
         if (a->pickupTime >= 3) {
@@ -101,7 +104,7 @@ void Arrow_onTick(Arrow* a) {
         // type 0 has a 1 in 100 chance a tick to vanish after 300 stuck ticks
         // type 1 goes after 20
         if (a->type == 0) {
-            if (a->stickTime >= 300 && frand01() < 0.01f) Entity_remove(e);
+            if (a->stickTime >= 300 && JRandom_mathRandom() < (double)0.01f) Entity_remove(e);
         } else if (a->stickTime >= 20) {
             Entity_remove(e);
         }
@@ -119,12 +122,11 @@ void Arrow_onTick(Arrow* a) {
     float stepY = e->motionY / (float)steps;
     float stepZ = e->motionZ / (float)steps;
 
-    bool collision = false;
-    for (int i = 0; i < steps && !collision; i++) {
+    for (int i = 0; i < steps && !e->collision; i++) {
         AABB expanded = AABB_expand(&e->boundingBox, stepX, stepY, stepZ);
 
         ArrayList_AABB hits = Level_getCubes(e->level, &expanded);
-        if (hits.size > 0) collision = true;
+        if (hits.size > 0) e->collision = true;
         if (hits.aabbs) free(hits.aabbs);
 
         // hitting an entity removes the arrow right away
@@ -135,14 +137,14 @@ void Arrow_onTick(Arrow* a) {
             return;
         }
 
-        if (collision) continue;
+        if (e->collision) continue;
         AABB_move(&e->boundingBox, stepX, stepY, stepZ);
         e->x += stepX;
         e->y += stepY;
         e->z += stepZ;
     }
 
-    if (collision) {
+    if (e->collision) {
         a->hasHit = true;
         e->motionX = e->motionY = e->motionZ = 0.0f;
     }
@@ -163,9 +165,8 @@ void Arrow_render(const Arrow* a, float partialTicks) {
     static int tex = 0;
     if (!tex) tex = loadTexture("resources/item/arrows.png", GL_NEAREST);
 
-    float brightness = Entity_getBrightness(e);
+    float brightness = Level_getBrightness(e->level, (int)e->x, (int)e->y, (int)e->z);
 
-    glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex);
     glPushMatrix();
     glColor4f(brightness, brightness, brightness, 1.0f);
@@ -219,5 +220,4 @@ void Arrow_render(const Arrow* a, float partialTicks) {
 
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glPopMatrix();
-    glDisable(GL_TEXTURE_2D);
 }

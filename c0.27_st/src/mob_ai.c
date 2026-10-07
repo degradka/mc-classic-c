@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-static inline float frand01(void) { return (float)rand() / (float)RAND_MAX; }
+extern void Minecraft_pushNearby(Entity* mob);
 
 void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage) {
     ai->chase = chase;
@@ -19,23 +19,26 @@ void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage) {
     ai->attackCooldown = 0;
     ai->noActionTime = 0;
     ai->attackTarget = NULL;
+    ai->jumpAttack = false;
+    JRandom_initRandom(&ai->random);
     ai->onDeathTimeout = NULL;
     ai->onAfterUpdate = NULL;
     ai->onAfterAttack = NULL;
-    ai->onJumpFromGround = NULL;
 }
 
 // no hit through a solid block, damage is (rand+rand)/2*damage+1
 static void Ai_tryAttack(Ai* ai, Entity* mob, Entity* target) {
     if (Level_clip(mob->level, mob->x, mob->y, mob->z, target->x, target->y, target->z)) return;
     mob->attackTime = MOB_ATTACK_DURATION;
-    ai->attackCooldown = (int)(frand01() * 20.0f) + 10;
-    int damage = (int)(((frand01() + frand01()) / 2.0f) * (float)ai->damage + 1.0f);
+    ai->attackCooldown = JRandom_nextIntN(&ai->random, 20) + 10;
+    int damage = (int)(((JRandom_nextFloat(&ai->random) + JRandom_nextFloat(&ai->random)) / 2.0f) * (float)ai->damage + 1.0f);
     Mob_hurt(target, mob, damage);
     ai->noActionTime = 0;
     if (ai->onAfterAttack) ai->onAfterAttack(ai, mob, target);
 }
 
+// drops the target past 32 blocks 1 in 100 a tick
+// the pitch uses the full 3d distance
 static void Ai_doAttack(Ai* ai, Entity* mob) {
     const float detectRange = 16.0f;
 
@@ -61,7 +64,7 @@ static void Ai_doAttack(Ai* ai, Entity* mob) {
     float dz = ai->attackTarget->z - mob->z;
     float distSq = dx * dx + dy * dy + dz * dz;
 
-    if (distSq > detectRange * detectRange * 2.0f * 2.0f && rand() % 100 == 0) {
+    if (distSq > detectRange * detectRange * 2.0f * 2.0f && JRandom_nextIntN(&ai->random, 100) == 0) {
         ai->attackTarget = NULL;
     }
 
@@ -76,31 +79,31 @@ static void Ai_doAttack(Ai* ai, Entity* mob) {
 }
 
 static void Ai_wanderStep(Ai* ai, Entity* mob) {
-    if (frand01() < 0.07f) {
-        ai->speedX = (frand01() - 0.5f) * ai->runSpeed;
-        ai->speedZ = frand01() * ai->runSpeed;
+    if (JRandom_nextFloat(&ai->random) < 0.07f) {
+        ai->speedX = (JRandom_nextFloat(&ai->random) - 0.5f) * ai->runSpeed;
+        ai->speedZ = JRandom_nextFloat(&ai->random) * ai->runSpeed;
     }
-    ai->wantsJump = frand01() < 0.01f;
-    if (frand01() < 0.04f) {
-        ai->turnSpeed = (frand01() - 0.5f) * 60.0f;
+    ai->wantsJump = JRandom_nextFloat(&ai->random) < 0.01f;
+    if (JRandom_nextFloat(&ai->random) < 0.04f) {
+        ai->turnSpeed = (JRandom_nextFloat(&ai->random) - 0.5f) * 60.0f;
     }
     mob->yRotation += ai->turnSpeed;
     mob->xRotation = (float)ai->wanderPitch;
 
     if (ai->attackTarget) {
         ai->speedZ = ai->runSpeed;
-        ai->wantsJump = frand01() < 0.04f;
+        ai->wantsJump = JRandom_nextFloat(&ai->random) < 0.04f;
     }
 
     if (Entity_isInWater(mob) || Entity_isInLava(mob)) {
-        ai->wantsJump = frand01() < 0.8f;
+        ai->wantsJump = JRandom_nextFloat(&ai->random) < 0.8f;
     }
 }
 
 void Ai_tick(Ai* ai, Entity* mob) {
     // idle 600 ticks, then 1 in 800 a tick it gets removed if over 32 blocks from the player
     ai->noActionTime++;
-    if (ai->noActionTime > 600 && rand() % 800 == 0) {
+    if (ai->noActionTime > 600 && JRandom_nextIntN(&ai->random, 800) == 0) {
         Entity* player = Level_getPlayer(mob->level);
         if (player) {
             float dx = player->x - mob->x;
@@ -134,8 +137,15 @@ void Ai_tick(Ai* ai, Entity* mob) {
         if (inWater)            mob->motionY += 0.04f;
         else if (inLava)        mob->motionY += 0.04f;
         else if (mob->onGround) {
-            if (ai->onJumpFromGround) ai->onJumpFromGround(ai, mob);
-            else mob->motionY = 0.42f;
+            // jumpFromGround
+            if (ai->jumpAttack && ai->attackTarget) {
+                mob->motionX = 0.0f;
+                mob->motionZ = 0.0f;
+                Entity_moveRelative(mob, 0.0f, 1.0f, 0.6f);
+                mob->motionY = 0.5f;
+            } else {
+                mob->motionY = 0.42f;
+            }
         }
     }
 
@@ -144,6 +154,8 @@ void Ai_tick(Ai* ai, Entity* mob) {
     ai->turnSpeed *= 0.9f;
 
     Mob_travel(mob, ai->speedX, ai->speedZ);
+
+    Minecraft_pushNearby(mob);
 
     if (ai->onAfterUpdate) ai->onAfterUpdate(ai, mob);
 }

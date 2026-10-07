@@ -8,11 +8,10 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+// cached by path, a second load returns the same id
 GLuint loadTexture(const char* path, int filterMode);
-
 // re-uploads every loaded texture when the value changes
 void Textures_setAnaglyph(bool enabled);
-// the font reads the anaglyph setting through this
-bool Textures_isAnaglyph(void);
+bool Textures_anaglyph(void);
 
 #endif  // TEXTURES_H

@@ -5,11 +5,11 @@
 
 #include "vertex.h"
 
-typedef struct { Vertex v[4]; } Polygon;
+// not Polygon, that clashes with the windows gdi function
+typedef struct { Vertex v[4]; } Quad;
 
-void Polygon_init_uv(Polygon* p, Vertex a, Vertex b, Vertex c, Vertex d,
+void Quad_init_uv(Quad* p, Vertex a, Vertex b, Vertex c, Vertex d,
                      int minU, int minV, int maxU, int maxV);
-// the corners get scaled, the normal comes from the unscaled ones
-void Polygon_render(const Polygon* p, float scale);
+void Quad_render(const Quad* p);
 
 #endif

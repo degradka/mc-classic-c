@@ -128,17 +128,7 @@ static void annotation(JStream* s, JNode* n) {
     while (!s->bad) {
         int tc = s->pos < s->len ? s->data[s->pos] : -1;
         if (tc == TC_ENDBLOCKDATA) { s->pos++; break; }
-        if (tc == TC_BLOCKDATA) {
-            s->pos++;
-            size_t len = (size_t)rd1(s);
-            if (len >= 4 && !n->hasBlockInt && s->pos + 4 <= s->len) {
-                n->blockInt = (int32_t)(((uint32_t)s->data[s->pos] << 24) | ((uint32_t)s->data[s->pos + 1] << 16) |
-                                        ((uint32_t)s->data[s->pos + 2] << 8) | s->data[s->pos + 3]);
-                n->hasBlockInt = true;
-            }
-            s->pos += len;
-            continue;
-        }
+        if (tc == TC_BLOCKDATA) { s->pos++; s->pos += (size_t)rd1(s); continue; }
         if (tc == TC_BLOCKDATALONG) { s->pos++; s->pos += (size_t)(uint32_t)rd4(s); continue; }
         JNode* c = (JNode*)content(s);
         if (count == cap) {
@@ -371,13 +361,6 @@ void JW_string(JWriter* w, const char* s) {
     JW_u1(w, TC_STRING);
     utf(w, s);
     newHandle(w, NULL, s);
-}
-
-void JW_newString(JWriter* w, const unsigned char* utf, int n) {
-    JW_u1(w, TC_STRING);
-    JW_i2(w, n);
-    put(w, utf, (size_t)n);
-    newHandle(w, NULL, NULL);
 }
 
 static void writeClassDesc(JWriter* w, const JDesc* d) {

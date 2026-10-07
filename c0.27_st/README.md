@@ -1,41 +1,33 @@
-# Classic 0.0.23a_01
+# Classic 0.27 SURVIVAL TEST
 
 [Back to all versions](../README.md)
 
-Released July 11, 2009. 0.0.21a to 0.0.23a are folded in here.
+Released October 24, 2009. 0.26 SURVIVAL TEST is folded in here.
 
 ## What changed
 
-- Sound
-  - Footsteps and breaking sounds that depend on the tile, glass sounds like metal
-  - Music every 5 to 20 minutes
-- An Options menu: music, sound, invert mouse, show FPS and render distance
-- A Controls screen, every key can be changed
-- Reach is a 5 block raycast
-- Lava is brighter
-- Textured buttons
-- The block select screen is a smaller box in the middle, the slot under the mouse lights up
+- TNT: you start a new level with 10, hitting it lights it, it explodes a bit later
+- Spiders, they leap at you
+- New tiles: slabs (two make a double slab), iron block, bricks, bookshelf, mossy cobblestone
+- Coal ore drops slabs, stone drops cobblestone
+- **F5** toggles rain, with splashes where it lands
+- Explosions leave smoke behind
+- A Limit framerate option
+- Signs are gone
+- Menus lost their background gradient
 
 ## How it was ported
 
-- Obfuscated, ported on top of the previous version by diffing the decompiled jars
-- RetroMCP has names for this version
+- Ported with names: the RetroMCP names for 0.0.23a_01 carried to this jar with a matcher that pairs classes and methods by their structure, the rest named by hand
+- Afterwards the whole C code was checked against the whole jar, not just the diff, and the bugs it found were fixed
 
 ## Differences from the original
 
 - It's a normal window, not an applet
-- The applet got the server from the web page, here it's the command line: `minecraft.exe [host] [port] [username]`
-- Save level.. and Load level.. need you to be logged in on minecraft.net, which is gone, so they're always greyed out
-- After playing on a server the original saves that level in its network mode and never turns it off, so the next
-  single player start can't change anything. Here a loaded level always starts out of network mode
-
-## Multiplayer
-
-Pairs with [server 1.8.2](../server/server1.8.2/). Start the server, then from this version's folder:
-```bash
-./src/minecraft.exe 127.0.0.1 25565 yourname
-```
-No arguments means singleplayer. Without a name you're `guest`.
+- No multiplayer. The original jar still has its connection code (the applet could get a server), it's left out here
+- Fully offline: no skin downloads, always `char.png`, and Save level.. and Load level.. stay greyed out, they need a minecraft.net login that's gone
+- At most 64 arrows and 256 dropped items exist at once, java has no limit
+- Singleplayer only, like the original
 
 ## Building and running
 
@@ -55,7 +47,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.0.23a_01/src
+cd mc-classic-c/c0.27_st/src
 make
 ```
 
@@ -78,13 +70,5 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.0.23a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.21a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a)
-- [minecraft.wiki: Java Edition Classic 0.0.21a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.21a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.22a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_01](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_01)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_02](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_02)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_03](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_03)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_04](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_04)
-- [minecraft.wiki: Java Edition Classic 0.0.22a_05](https://minecraft.wiki/w/Java_Edition_Classic_0.0.22a_05)
-- [minecraft.wiki: Java Edition Classic 0.0.23a](https://minecraft.wiki/w/Java_Edition_Classic_0.0.23a)
+- [minecraft.wiki: Java Edition Classic 0.27 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.27_SURVIVAL_TEST)
+- [minecraft.wiki: Java Edition Classic 0.26 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.26_SURVIVAL_TEST)

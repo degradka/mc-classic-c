@@ -18,24 +18,23 @@ static void GameOverScreen_render(Screen* self, int xm, int ym) {
     glPopMatrix();
 
     char scoreMsg[48];
-    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", s->score);
+    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", *s->score);
     Screen_drawCenteredString(self, scoreMsg, self->width / 2, 100, 0xFFFFFFu);
 
-    Screen_renderButtons(self, s->buttons, 1, xm, ym);
+    Screen_renderButtons(self, s->buttons, 2, xm, ym);
 }
 
 static void GameOverScreen_mouseClicked(Screen* self, int x, int y, int button) {
     GameOverScreen* s = (GameOverScreen*)self;
     if (button != 0) return;
 
-    // an id 0 gets checked too, no button has it
-    int id = Screen_buttonClickedAt(s->buttons, 1, x, y);
+    int id = Screen_buttonClickedAt(s->buttons, 2, x, y);
     if (id == 1) {
         GenerateNewLevelScreen_open(self);
     }
 }
 
-void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, int score) {
+void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, const int* score) {
     s->screen.width  = width;
     s->screen.height = height;
     s->screen.font   = font;
@@ -48,4 +47,8 @@ void GameOverScreen_init(GameOverScreen* s, Font* font, int width, int height, i
     s->score = score;
 
     Button_init(&s->buttons[0], 1, width / 2 - 100, height / 4 + 72, 200, 20, "Generate new level...");
+
+    // greyed out without a login session, there's never one here
+    Button_init(&s->buttons[1], 2, width / 2 - 100, height / 4 + 96, 200, 20, "Load level..");
+    s->buttons[1].enabled = false;
 }

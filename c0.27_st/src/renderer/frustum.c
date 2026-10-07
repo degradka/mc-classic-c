@@ -84,6 +84,26 @@ void frustum_calculate(Frustum* f) {
     frustum_normalizePlane(f->planes, 5);
 }
 
+static int cubeIn(const Frustum* f, float x1, float y1, float z1, float x2, float y2, float z2);
+
+int frustum_cubeFullyIn(const Frustum* f, float x1, float y1, float z1, float x2, float y2, float z2) {
+    for (int i = 0; i < 6; ++i) {
+        if (!(f->planes[i][0]*x1 + f->planes[i][1]*y1 + f->planes[i][2]*z1 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x2 + f->planes[i][1]*y1 + f->planes[i][2]*z1 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x1 + f->planes[i][1]*y2 + f->planes[i][2]*z1 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x2 + f->planes[i][1]*y2 + f->planes[i][2]*z1 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x1 + f->planes[i][1]*y1 + f->planes[i][2]*z2 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x2 + f->planes[i][1]*y1 + f->planes[i][2]*z2 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x1 + f->planes[i][1]*y2 + f->planes[i][2]*z2 + f->planes[i][3] > 0)) return 0;
+        if (!(f->planes[i][0]*x2 + f->planes[i][1]*y2 + f->planes[i][2]*z2 + f->planes[i][3] > 0)) return 0;
+    }
+    return 1;
+}
+
+int frustum_cubeIn(const Frustum* f, float x1, float y1, float z1, float x2, float y2, float z2) {
+    return cubeIn(f, x1, y1, z1, x2, y2, z2);
+}
+
 static int cubeIn(const Frustum* f, float x1, float y1, float z1, float x2, float y2, float z2) {
     for (int i = 0; i < 6; ++i) {
         if (f->planes[i][0]*x1 + f->planes[i][1]*y1 + f->planes[i][2]*z1 + f->planes[i][3] > 0) continue;

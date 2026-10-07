@@ -24,7 +24,6 @@ void Mob_causeFallDamage(Entity* e, float fallDistance);
 
 // attacker is NULL for falls, drowning and lava
 void Mob_hurt(Entity* e, Entity* attacker, int damage);
-
 void Mob_heal(Entity* e, int amount);
 
 // halves the velocity, then pushes 0.4 away from the attacker and 0.4 up

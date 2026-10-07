@@ -1,4 +1,4 @@
-// level/level.h: world storage, light columns, ticking, entities and box queries
+// level/level.h: world storage, light columns, ticking and ray queries
 
 #ifndef LEVEL_H
 #define LEVEL_H
@@ -9,21 +9,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "../phys/aabb.h"
-#include "../jrandom.h"
 #include <math.h>
+#include "../jrandom.h"
 
 typedef unsigned char byte;
 
 struct LevelRenderer; typedef struct LevelRenderer LevelRenderer;
-struct Zombie;
-struct NetworkPlayer;
-struct Entity;
-struct HitResult;
+struct Entity; typedef struct Entity Entity;
 
-// a scheduled tile tick, only run if the tile there still has this id
+// a scheduled tile tick
+// delay is how many more 5 tick rounds it waits, lava uses it
 typedef struct {
-    int x, y, z, id;
-    // rounds left before it runs
+    int x, y, z;
+    int tileId;
     int delay;
 } TickEntry;
 
@@ -32,33 +30,34 @@ typedef struct Level {
     byte* blocks;
     int*  lightDepths;
     LevelRenderer* renderer;
-    JRandom random;
-    int randValue;
     int unprocessed;
-    int tickCount;
 
-    TickEntry* tickList;
-    int tickListSize, tickListCapacity;
-
-    // zombies and network players never touch each other, so they're kept in two lists
-    // minecraft.c owns the network players, the id map can still hold them after they leave a level
-    // each zombie is malloced, a step sound can outlive its place in the list
-    struct Zombie** entities;
-    int entityCount, entityCapacity;
-    struct NetworkPlayer** players;
-    int playerCount, playerCapacity;
-    // the length of the array behind that one list, level.dat keeps it
-    int listCapacity;
-
-    // a server's level, the local tile updates are off
-    bool networkMode;
-
-    int xSpawn, ySpawn, zSpawn;
-    float rotSpawn;
-
+    // only saved and loaded with level.dat
     char name[64];
     char creator[64];
     long long createTime;
+
+    int   xSpawn, ySpawn, zSpawn;
+    float rotSpawn;
+
+    // picks the tile tick positions
+    unsigned int tickRandom;
+    // Level.random, used by tile ticks and mob spawning
+    JRandom random;
+    int tickCount;
+
+    TickEntry* tickList;
+    int tickListSize;
+    int tickListCapacity;
+
+    // set for a level from a server, only its SetBlock packets change tiles
+    bool networkMode;
+
+    // the local player, mobs chase it
+    Entity* player;
+
+    int skyColor, fogColor, cloudColor;
+    int waterLevel;
 } Level;
 
 typedef struct {
@@ -69,58 +68,70 @@ typedef struct {
 
 ArrayList_AABB Level_getCubes(const Level* level, const AABB* boundingBox);
 
-void  Level_init(Level* level);
-// takes ownership of blocks
-void  Level_setData(Level* level, int w, int d, int h, byte* blocks);
+void  Level_init(Level* level, int width, int height, int depth);
 void  Level_destroy(Level* level);
-void  Level_findSpawn(Level* level);
-void  Level_setSpawnPos(Level* level, int x, int y, int z, float rot);
+// frees the existing blocks and lightDepths, allocates at the new size, and
+// regenerates. Caller must rebuild the LevelRenderer afterward since its
+// chunk grid is sized for the old dimensions.
+void  Level_resize(Level* level, int width, int height, int depth);
+void  Level_setDataFromNetwork(Level* level, int width, int height, int depth, const byte* blocks);
 
+bool  Level_isTile(const Level* level, int x, int y, int z);
 bool  Level_isSolidTile(const Level* level, int x, int y, int z);
 bool  Level_isLightBlocker(const Level* level, int x, int y, int z);
 
-void  calcLightDepths(Level* level, int x0, int z0, int x1, int z1);
+void  calcLightDepths(Level* level, int minX, int minZ, int maxX, int maxZ);
 
-bool  Level_load(Level* level, const char* path);
-bool  Level_loadLegacy(Level* level, const char* path);
-void  Level_save(const Level* level, const char* path);
-// quitting before a level arrived from the server saves a null level
-void  Level_saveNull(const char* path);
+void  Level_generateMap(Level* level);
 
+void  Level_setBlocks(Level* level, int width, int height, int depth, byte* blocks);
+
+// does nothing while networkMode is set
 bool  level_setTile(Level* level, int x, int y, int z, int type);
-bool  Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type);
-// the same without the network mode check, for the server's changes and our own clicks
+// always sets the tile, the SetBlock packet uses it
 bool  Level_netSetTile(Level* level, int x, int y, int z, int type);
-bool  Level_netSetTileNoNeighborChange(Level* level, int x, int y, int z, int type);
-void  Level_updateNeighborsAt(Level* level, int x, int y, int z, int type);
-bool  Level_isWater(const Level* level, int x, int y, int z);
 bool  Level_setTileNoUpdate(Level* level, int x, int y, int z, int type);
-void  Level_swap(Level* level, int x0, int y0, int z0, int x1, int y1, int z1);
 int   Level_getTile(const Level* level, int x, int y, int z);
+
+AABB Level_getTilePickAABB(const Level* level, int x, int y, int z);
 
 bool  Level_isLit(const Level* level, int x, int y, int z);
 float Level_getBrightness(const Level* level, int x, int y, int z);
-float Level_getGroundLevel(const Level* level);
-float Level_getWaterLevel(const Level* level);
-int   Level_getHighestTile(const Level* level, int x, int z);
-bool  Level_isSolid(const Level* level, float x, float y, float z, float r);
-// no entity intersects the box
-bool  Level_isFree(const Level* level, const AABB* box);
 
 bool  Level_containsAnyLiquid(const Level* level, const AABB* box);
 bool  Level_containsLiquid(const Level* level, const AABB* box, int liquidId);
 
-void  Level_addToTickNextTick(Level* level, int x, int y, int z, int id);
-// takes a malloced zombie
-void  Level_addEntity(Level* level, struct Zombie* z);
-void  Level_addPlayer(Level* level, struct NetworkPlayer* p);
-void  Level_removePlayer(Level* level, struct NetworkPlayer* p);
-void  Level_tickEntities(Level* level);
 void  Level_onTick(Level* level);
 
-// the block the line from a to b runs into first, liquids don't count, false for none
-bool  Level_clip(const Level* level, float ax, float ay, float az, float bx, float by, float bz, struct HitResult* out);
-void  Level_playSoundEntity(Level* level, const char* name, struct Entity* e, float volume, float pitch);
-void  Level_playSound(Level* level, const char* name, float x, float y, float z, float volume, float pitch);
+int   Level_getHighestTile(const Level* level, int x, int z);
+float Level_getGroundLevel(const Level* level);
+float Level_getWaterLevel(const Level* level);
+void  Level_findSpawn(Level* level);
+void  Level_setSpawnPos(Level* level, int x, int y, int z, float rot);
+
+// no neighbor update at the source, used by sand and gravel
+void  Level_swap(Level* level, int x1, int y1, int z1, int x2, int y2, int z2);
+
+// the queue is drained every 5 ticks
+void  Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId);
+
+// calls the tile's neighborChanged with its own id, the sponge uses it
+void  Level_updateNeighborsAt(Level* level, int x, int y, int z, int type);
+bool  Level_netSetTileNoNeighborChange(Level* level, int x, int y, int z, int type);
+bool  Level_setTileNoNeighborChange(Level* level, int x, int y, int z, int type);
+
+static inline void   Level_setPlayer(Level* level, Entity* player) { level->player = player; }
+static inline Entity* Level_getPlayer(const Level* level) { return level->player; }
+
+// true when a solid tile blocks the line between the points
+bool Level_clip(const Level* level, float x1, float y1, float z1, float x2, float y2, float z2);
+bool Level_clipHit(const Level* level, float* sx, float* sy, float* sz, float ex, float ey, float ez,
+                   int* outX, int* outY, int* outZ, int* outFace, float* hitX, float* hitY, float* hitZ);
+
+// places nothing unless the whole tree fits and there is grass below
+bool Level_maybeGrowTree(Level* level, int x, int y, int z);
+
+// source gets the credit for anything hurt
+void Level_explode(Level* level, Entity* source, float x, float y, float z, float radius);
 
 #endif  // LEVEL_H

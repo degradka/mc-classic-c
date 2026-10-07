@@ -13,6 +13,7 @@ typedef struct {
 } ZombieModel;
 
 void ZombieModel_init  (ZombieModel* m);
-void ZombieModel_render(const ZombieModel* m, float time, float swing, float idle, float headYRot, float headXRot, float scale);
+// run scales the swing, age adds a small idle arm sway
+void ZombieModel_render(ZombieModel* m, float animStep, float run, float age, float headYaw, float headPitch);
 
 #endif

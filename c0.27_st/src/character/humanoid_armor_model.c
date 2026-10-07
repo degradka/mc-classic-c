@@ -3,38 +3,37 @@
 #include "humanoid_armor_model.h"
 
 void HumanoidArmorModel_init(HumanoidArmorModel* m) {
-    const float expand = 1.0f;
+    const float grow = 1.0f;
 
     Cube_init(&m->head, 0, 0);
-    Cube_addBoxExpanded(&m->head, -4, -8, -4, 8, 8, 8, expand);
+    Cube_addBoxGrown(&m->head, -4, -8, -4, 8, 8, 8, grow);
 
     Cube_init(&m->body, 16, 16);
-    Cube_addBoxExpanded(&m->body, -4, 0, -2, 8, 12, 4, expand);
+    Cube_addBoxGrown(&m->body, -4, 0, -2, 8, 12, 4, grow);
 
     Cube_init(&m->rightArm, 40, 16);
-    Cube_addBoxExpanded(&m->rightArm, -3, -2, -2, 4, 12, 4, expand);
+    Cube_addBoxGrown(&m->rightArm, -3, -2, -2, 4, 12, 4, grow);
     Cube_setPos(&m->rightArm, -5, 2, 0);
 
     Cube_init(&m->leftArm, 40, 16);
-    Cube_addBoxExpanded(&m->leftArm, -1, -2, -2, 4, 12, 4, expand);
+    m->leftArm.mirror = 1;
+    Cube_addBoxGrown(&m->leftArm, -1, -2, -2, 4, 12, 4, grow);
     Cube_setPos(&m->leftArm, 5, 2, 0);
 }
 
-void HumanoidArmorModel_render(HumanoidArmorModel* m, bool showHelmet, bool showArmor,
-                               float headXRot, float headYRot,
-                               float rightArmXRot, float rightArmZRot,
-                               float leftArmXRot, float leftArmZRot) {
-    m->head.visible     = showHelmet;
-    m->body.visible     = showArmor;
-    m->rightArm.visible = showArmor;
-    m->leftArm.visible  = showArmor;
+void HumanoidArmorModel_render(HumanoidArmorModel* m, bool helmet, bool armor,
+                               const Cube* head, const Cube* rightArm, const Cube* leftArm) {
+    m->head.visible = helmet;
+    m->body.visible = armor;
+    m->rightArm.visible = armor;
+    m->leftArm.visible = armor;
 
-    m->head.xRot = headXRot;
-    m->head.yRot = headYRot;
-    m->rightArm.xRot = rightArmXRot;
-    m->rightArm.zRot = rightArmZRot;
-    m->leftArm.xRot = leftArmXRot;
-    m->leftArm.zRot = leftArmZRot;
+    m->head.yRot = head->yRot;
+    m->head.xRot = head->xRot;
+    m->rightArm.xRot = rightArm->xRot;
+    m->rightArm.zRot = rightArm->zRot;
+    m->leftArm.xRot = leftArm->xRot;
+    m->leftArm.zRot = leftArm->zRot;
 
     Cube_render(&m->head);
     Cube_render(&m->body);

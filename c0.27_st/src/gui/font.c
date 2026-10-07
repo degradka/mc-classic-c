@@ -8,27 +8,30 @@
 
 #include "stb_image.h"
 
-bool Font_threw = false;
-
 static inline void rgb_from_int(int c, float* r, float* g, float* b) {
     *r = ((c >> 16) & 0xFF) / 255.0f;
     *g = ((c >>  8) & 0xFF) / 255.0f;
     *b = ( c        & 0xFF) / 255.0f;
 }
 
-// -1 for an unknown code, like indexOf
-static int code_index(unsigned char c) {
-    const char* hex = "0123456789abcdef";
-    const char* p = c ? strchr(hex, c) : NULL;
-    return p ? (int)(p - hex) : -1;
+static inline int color_from_code(int code) {
+    int br = (code & 8) << 3;
+    int b = (code & 1) * 191 + br;
+    int g = ((code & 2) >> 1) * 191 + br;
+    int r = ((code & 4) >> 2) * 191 + br;
+    if (Textures_anaglyph()) {
+        int gray = (r * 30 + g * 59 + b * 11) / 100;
+        g = (r * 30 + g * 70) / 100;
+        b = (r * 30 + b * 70) / 100;
+        r = gray;
+    }
+    return (r << 16) | (g << 8) | b;
 }
 
-static inline int color_from_code(int cc) {
-    int br = (cc & 0x8) * 8;
-    int b = (cc & 0x1) * 191 + br;
-    int g = ((cc & 0x2) >> 1) * 191 + br;
-    int r = ((cc & 0x4) >> 2) * 191 + br;
-    return r << 16 | g << 8 | b;
+// anything that isn't 0-9a-f falls back to white
+static int code_index(unsigned char c) {
+    const char* p = c ? strchr("0123456789abcdef", c) : NULL;
+    return p ? (int)(p - "0123456789abcdef") : 15;
 }
 
 void Font_init(Font* f, const char* path) {
@@ -42,6 +45,7 @@ void Font_init(Font* f, const char* path) {
         return;
     }
 
+    // only the first 128 are measured, the rest stay 0
     for (int i = 0; i < 128; ++i) {
         int xt = i % 16;
         int yt = i / 16;
@@ -69,12 +73,11 @@ void Font_init(Font* f, const char* path) {
 }
 
 static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, int y, int color, int darken) {
-    if (!s) return;
+    if (!s || !*s || f->texture == 0) return;
 
     if (darken) color = (color & 0xFCFCFC) >> 2;
     float r,g,b; rgb_from_int(color, &r,&g,&b);
 
-    glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, (int)f->texture);
 
     Tessellator_begin(t);
@@ -85,47 +88,35 @@ static void Font_draw_internal(Font* f, Tessellator* t, const char* s, int x, in
     size_t n = strlen(s);
 
     for (size_t i = 0; i < n; ++i) {
-        // a lone & at the end is drawn, an unknown code is white
-        if (str[i] == '&' && n > i + 1) {
-            // a code with nothing after it still reads past the end and the frame throws
-            if (i + 2 >= n) {
-                Font_threw = true;
-                return;
-            }
-            int cc = code_index(str[i + 1]);
-            if (cc < 0) cc = 15;
-            color = color_from_code(cc);
-            i += 2;
+        unsigned char c = str[i];
+
+        if (c == '&' && i + 1 < n) {
+            color = color_from_code(code_index(str[i + 1]));
             if (darken) color = (color & 0xFCFCFC) >> 2;
             rgb_from_int(color, &r,&g,&b);
-            // &x colors get the anaglyph remap too, the base color doesn't
-            if (Textures_isAnaglyph()) {
-                float nr = (r * 0.30f + g * 0.59f + b * 0.11f);
-                float ng = (r * 0.30f + g * 0.70f);
-                float nb = (r * 0.30f + b * 0.70f);
-                r = nr; g = ng; b = nb;
-            }
             Tessellator_color(t, r,g,b);
+            // the char right after the code is drawn in the same step and it throws when there is none
+            i += 2;
+            if (i >= n) break;
+            c = str[i];
         }
-        unsigned char c = str[i];
 
         int ix = (c % 16) * 8;
         int iy = (c / 16) * 8;
+        const float s = 7.99f;
 
-        float off = 7.99f;
-        float u0 = ix / 128.0f, u1 = ((float)ix + off) / 128.0f;
-        float v0 = iy / 128.0f, v1 = ((float)iy + off) / 128.0f;
+        float u0 = ix / 128.0f, u1 = (ix + s) / 128.0f;
+        float v0 = iy / 128.0f, v1 = (iy + s) / 128.0f;
 
-        Tessellator_vertexUV(t, (float)(x + xo),       (float)y + off, 0.0f, u0, v1);
-        Tessellator_vertexUV(t, (float)(x + xo) + off, (float)y + off, 0.0f, u1, v1);
-        Tessellator_vertexUV(t, (float)(x + xo) + off, (float)y,       0.0f, u1, v0);
-        Tessellator_vertexUV(t, (float)(x + xo),       (float)y,       0.0f, u0, v0);
+        Tessellator_vertexUV(t, (float)(x + xo),     (float)y + s, 0.0f, u0, v1);
+        Tessellator_vertexUV(t, (float)(x + xo) + s, (float)y + s, 0.0f, u1, v1);
+        Tessellator_vertexUV(t, (float)(x + xo) + s, (float)y,     0.0f, u1, v0);
+        Tessellator_vertexUV(t, (float)(x + xo),     (float)y,     0.0f, u0, v0);
 
         xo += f->charWidth[c];
     }
 
     Tessellator_end(t);
-    glDisable(GL_TEXTURE_2D);
 }
 
 void Font_draw(Font* f, Tessellator* t, const char* s, int x, int y, int color) {
@@ -145,19 +136,8 @@ int Font_width(Font* f, const char* s) {
 
     for (size_t i = 0; i < n; ++i) {
         unsigned char c = str[i];
-        if (c == '&') i++;
-        else len += f->charWidth[c];
+        if (c == '&') { i++; continue; }
+        len += f->charWidth[c];
     }
     return len;
-}
-void Font_removeColorCodes(const char* s, char* out, int size) {
-    int n = 0;
-    for (int i = 0; s[i] != '\0'; ++i) {
-        if (s[i] == '&') {
-            if (s[++i] == '\0') break;
-            continue;
-        }
-        if (n < size - 1) out[n++] = s[i];
-    }
-    out[n] = '\0';
 }

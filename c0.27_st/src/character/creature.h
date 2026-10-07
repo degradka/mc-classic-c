@@ -19,10 +19,8 @@ typedef struct Creature {
     Entity e; // must be first so Creature* can be used as Entity*
     Ai ai;
     CreatureKind kind;
-
-    // helmet and armor, only zombies and skeletons use them
-    bool hasHelmet;
-    bool hasArmor;
+    bool helmet, armor;
+    float bobStrength; // the spider has none
 } Creature;
 
 void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float y, float z);

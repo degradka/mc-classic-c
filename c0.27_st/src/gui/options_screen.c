@@ -2,47 +2,62 @@
 
 #include "options_screen.h"
 #include "controls_screen.h"
-#include "../options.h"
 
 extern void Minecraft_setScreen(Screen* screen);
-extern Options* Minecraft_getOptions(void);
 
-static Screen optionsScreen;
-static Screen* parent;
+static OptionsScreen instance;
 
-// the buttons are cleared, coming back from the controls would stack a second set that flips every toggle twice
-static void OptionsScreen_init(Screen* s) {
-    Screen_clearButtons(s);
-    char msg[64];
-    for (int i = 0; i < 5; ++i) {
-        Options_getOption(Minecraft_getOptions(), i, msg, sizeof msg);
-        Screen_addButton(s, i, s->width / 2 - 100, s->height / 6 + i * 24, 200, msg);
+static void refreshToggleLabels(OptionsScreen* s) {
+    for (int i = 0; i < OPTIONS_TOGGLE_COUNT; ++i) {
+        Options_toggleLabel(s->options, i, s->buttons[i].msg, sizeof s->buttons[i].msg);
     }
-    Screen_addButton(s, 10, s->width / 2 - 100, s->height / 6 + 120 + 12, 200, "Controls...");
-    Screen_addButton(s, 20, s->width / 2 - 100, s->height / 6 + 168, 200, "Done");
 }
 
-static void OptionsScreen_buttonClicked(Screen* s, Button* b) {
-    if (!b->enabled) return;
-    if (b->id < 5) {
-        Options_setOption(Minecraft_getOptions(), b->id, 1);
-        Options_getOption(Minecraft_getOptions(), b->id, b->msg, sizeof b->msg);
+static void OptionsScreen_render(Screen* self, int xm, int ym) {
+    OptionsScreen* s = (OptionsScreen*)self;
+    Screen_fillGradient(0, 0, self->width, self->height, 0x60050500u, 0xA0303060u);
+    Screen_drawCenteredString(self, "Options", self->width / 2, 20, 0xFFFFFFu);
+    Screen_renderButtons(self, s->buttons, OPTIONS_TOGGLE_COUNT + 2, xm, ym);
+}
+
+static void OptionsScreen_mouseClicked(Screen* self, int x, int y, int button) {
+    OptionsScreen* s = (OptionsScreen*)self;
+    if (button != 0) return;
+
+    int id = Screen_buttonClickedAt(s->buttons, OPTIONS_TOGGLE_COUNT + 2, x, y);
+    if (id < 0) return;
+
+    if (id < OPTIONS_TOGGLE_COUNT) {
+        Options_toggleValue(s->options, id, 1);
+        refreshToggleLabels(s);
+    } else if (id == 10) {
+        ControlsScreen_open(self, s->options);
+    } else if (id == 20) {
+        Minecraft_setScreen(s->previousScreen);
     }
-    if (b->id == 10) Minecraft_setScreen(ControlsScreen_new(s));
-    if (b->id == 20) Minecraft_setScreen(parent);
 }
 
-static void OptionsScreen_render(Screen* s, int xm, int ym) {
-    Screen_fillGradient(0, 0, s->width, s->height, 0x60050500u, 0xA0303060u);
-    Screen_drawCenteredString(s->font, "Options", s->width / 2, 20, 0xFFFFFF);
-    Screen_render(s, xm, ym);
-}
+void OptionsScreen_open(Screen* previousScreen, Options* options) {
+    OptionsScreen* s = &instance;
+    s->screen.width  = previousScreen->width;
+    s->screen.height = previousScreen->height;
+    s->screen.font   = previousScreen->font;
+    s->screen.render = OptionsScreen_render;
+    s->screen.init = NULL;
+    s->screen.tick = NULL;
+    s->screen.keyPressed = Screen_defaultKeyPressed;
+    s->screen.mouseClicked = OptionsScreen_mouseClicked;
+    s->screen.destroy = NULL;
+    s->previousScreen = previousScreen;
+    s->options = options;
 
-Screen* OptionsScreen_new(Screen* p) {
-    Screen_construct(&optionsScreen);
-    optionsScreen.init = OptionsScreen_init;
-    optionsScreen.buttonClicked = OptionsScreen_buttonClicked;
-    optionsScreen.render = OptionsScreen_render;
-    parent = p;
-    return &optionsScreen;
+    int w = s->screen.width, h = s->screen.height;
+    for (int i = 0; i < OPTIONS_TOGGLE_COUNT; ++i) {
+        Button_init(&s->buttons[i], i, w / 2 - 155 + (i % 2) * 160, h / 6 + 24 * (i / 2), 150, 20, "");
+    }
+    refreshToggleLabels(s);
+    Button_init(&s->buttons[OPTIONS_TOGGLE_COUNT],     10, w / 2 - 100, h / 6 + 132, 200, 20, "Controls...");
+    Button_init(&s->buttons[OPTIONS_TOGGLE_COUNT + 1], 20, w / 2 - 100, h / 6 + 168, 200, 20, "Done");
+
+    Minecraft_setScreen((Screen*)s);
 }

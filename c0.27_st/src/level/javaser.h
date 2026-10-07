@@ -56,8 +56,6 @@ struct JNode {
     unsigned char* bytes; // byte array
     JNode** elems;      // object array
     char* str;
-    int32_t blockInt;   // object: the first int of its custom block data
-    bool hasBlockInt;
 };
 
 typedef struct JStream JStream;
@@ -99,8 +97,6 @@ bool JW_ref(JWriter* w, const void* id);
 // starts an object, its field values follow in class order
 void JW_object(JWriter* w, const JDesc* d, const void* id);
 void JW_string(JWriter* w, const char* s);
-// a string object of its own, never a back reference
-void JW_newString(JWriter* w, const unsigned char* utf, int n);
 void JW_intArray(JWriter* w, const int* v, int n);
 void JW_byteArray(JWriter* w, const unsigned char* v, int n);
 // starts an object array, n elements follow

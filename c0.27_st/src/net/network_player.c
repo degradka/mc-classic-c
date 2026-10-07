@@ -4,16 +4,11 @@
 #include "../character/zombie_model.h"
 #include "../renderer/textures.h"
 #include "../renderer/tessellator.h"
-#include "../gui/font.h"
 #include <GL/glew.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <ctype.h>
-
-extern Font* Minecraft_getFont(void);
-extern float Minecraft_getPlayerYRot(void);
 
 static ZombieModel sModel;
 static int sModelInit = 0;
@@ -28,218 +23,198 @@ static bool equalsIgnoreCase(const char* a, const char* b) {
     return *a == *b;
 }
 
-static void push(NetworkPlayer* np, PositionUpdate u) {
-    if (np->queueCount == np->queueCapacity) {
-        np->queueCapacity = np->queueCapacity ? np->queueCapacity * 2 : 16;
-        np->moveQueue = (PositionUpdate*)realloc(np->moveQueue, (size_t)np->queueCapacity * sizeof(PositionUpdate));
-    }
-    np->moveQueue[np->queueCount++] = u;
+// the halfway rotation takes the short way round
+static float midpointAngle(float from, float to) {
+    float diff = to - from;
+    while (diff >= 180.0f) diff -= 360.0f;
+    while (diff < -180.0f) diff += 360.0f;
+    return from + diff * 0.5f;
 }
 
-static PositionUpdate posRot(float x, float y, float z, float yRot, float xRot) {
-    PositionUpdate u = { x, y, z, yRot, xRot, true, true };
-    return u;
-}
-
-static PositionUpdate posOnly(float x, float y, float z) {
-    PositionUpdate u = { x, y, z, 0.0f, 0.0f, false, true };
-    return u;
-}
-
-static PositionUpdate rotOnly(float yRot, float xRot) {
-    PositionUpdate u = { 0.0f, 0.0f, 0.0f, yRot, xRot, true, false };
-    return u;
+static void pushMoveEntry(NetworkPlayer* np, float x, float y, float z, float yaw, float pitch, bool hasPos, bool hasRot) {
+    if (np->queueCount >= NETPLAYER_QUEUE_CAP) return; // shouldn't happen, catch up drain keeps this bounded
+    int tail = (np->queueHead + np->queueCount) % NETPLAYER_QUEUE_CAP;
+    NetPlayerMoveEntry* e = &np->moveQueue[tail];
+    e->x = x; e->y = y; e->z = z;
+    e->yaw = yaw; e->pitch = pitch;
+    e->hasPos = hasPos; e->hasRot = hasRot;
+    np->queueCount++;
 }
 
 void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* name,
-                        int x, int y, int z, float yRot, float xRot) {
-    memset(np, 0, sizeof *np);
+                         int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
     Entity_init(&np->base, level);
+    Entity_setPosition(&np->base, xRaw / 32.0f, yRaw / 32.0f, zRaw / 32.0f);
+    np->base.yRotation = yaw;
+    np->base.xRotation = pitch;
+    np->base.heightOffset = 1.62f;
+
+    np->used = true;
     np->id = id;
-    snprintf(np->displayName, sizeof np->displayName, "%s", name);
-    Font_removeColorCodes(name, np->name, sizeof np->name);
-    np->xp = x;
-    np->yp = y;
-    np->zp = z;
-    Entity_setPosition(&np->base, (float)x / 32.0f, (float)y / 32.0f, (float)z / 32.0f);
-    np->base.xRotation = xRot;
-    np->base.yRotation = yRot;
+    snprintf(np->name, sizeof np->name, "%s", name);
+    np->animStep = np->animStepO = 0.0f;
+    np->yBodyRot = np->yBodyRotO = 0.0f;
+    np->run = np->runO = 0.0f;
+    np->tickCount = 0;
+    np->xp = xRaw; np->yp = yRaw; np->zp = zRaw;
+    np->queueHead = np->queueCount = 0;
 
     if (!sModelInit) { ZombieModel_init(&sModel); sModelInit = 1; }
     if (!texChar) texChar = loadTexture("resources/char.png", GL_NEAREST);
 }
 
-void NetworkPlayer_free(NetworkPlayer* np) {
-    free(np->moveQueue);
-    np->moveQueue = NULL;
-    np->queueCount = np->queueCapacity = 0;
-}
-
 void NetworkPlayer_onTick(NetworkPlayer* np) {
     Entity_onTick(&np->base);
     np->animStepO = np->animStep;
-    np->yBodyRotO = np->yBodyRot;
-    np->base.yRotO = np->base.yRotation;
-    np->base.xRotO = np->base.xRotation;
     np->tickCount++;
 
     // one move a tick, up to 5 more while more than 10 are waiting
-    int n = 5;
+    int budget = 5;
     do {
         if (np->queueCount > 0) {
-            PositionUpdate u = np->moveQueue[0];
-            memmove(np->moveQueue, np->moveQueue + 1, (size_t)(np->queueCount - 1) * sizeof(PositionUpdate));
+            NetPlayerMoveEntry e = np->moveQueue[np->queueHead];
+            np->queueHead = (np->queueHead + 1) % NETPLAYER_QUEUE_CAP;
             np->queueCount--;
-            Entity_setPosUpdate(&np->base, &u);
+            if (e.hasPos) Entity_setPosition(&np->base, e.x, e.y, e.z);
+            if (e.hasRot) { np->base.yRotation = e.yaw; np->base.xRotation = e.pitch; }
         }
-    } while (n-- > 0 && np->queueCount > 10);
+    } while (budget-- > 0 && np->queueCount > 10);
 
-    float xd = np->base.x - np->base.prevX;
-    float zd = np->base.z - np->base.prevZ;
-    float dist = (float)sqrt(xd * xd + zd * zd);
-    float target = np->yBodyRot;
-    float step = 0.0f;
-    np->oRun = np->run;
-    float moving = 0.0f;
+    // the body turns toward the movement, the head can look 75 degrees away before it follows
+    float dx = np->base.x - np->base.prevX;
+    float dz = np->base.z - np->base.prevZ;
+    np->yBodyRotO = np->yBodyRot;
+    float dist = sqrtf(dx * dx + dz * dz);
+    float targetBodyYaw = np->yBodyRot;
+    float animDelta = 0.0f;
+    np->runO = np->run;
+    float targetRun = 0.0f;
     if (dist != 0.0f) {
-        moving = 1.0f;
-        step = dist * 3.0f;
-        target = -((float)atan2(zd, xd) * 180.0f / (float)M_PI + 90.0f);
+        targetRun = 1.0f;
+        animDelta = dist * 3.0f;
+        targetBodyYaw = -(atan2f(dz, dx) * 180.0f / (float)M_PI + 90.0f);
     }
-    np->run += (moving - np->run) * 0.3f;
+    // run eases toward 0 or 1 instead of snapping
+    np->run += (targetRun - np->run) * 0.3f;
 
-    float d = target - np->yBodyRot;
-    while (d < -180.0f) d += 360.0f;
-    while (d >= 180.0f) d -= 360.0f;
-    np->yBodyRot += d * 0.1f;
+    float diff = targetBodyYaw - np->yBodyRot;
+    while (diff < -180.0f) diff += 360.0f;
+    while (diff >= 180.0f) diff -= 360.0f;
+    np->yBodyRot += diff * 0.1f;
 
-    d = np->base.yRotation - np->yBodyRot;
-    while (d < -180.0f) d += 360.0f;
-    while (d >= 180.0f) d -= 360.0f;
-    bool backwards = d < -90.0f || d >= 90.0f;
-    if (d < -75.0f) d = -75.0f;
-    if (d >= 75.0f) d = 75.0f;
-    np->yBodyRot = np->base.yRotation - d;
-    np->yBodyRot += d * 0.1f;
-    if (backwards) step = -step;
+    float headDiff = np->base.yRotation - np->yBodyRot;
+    while (headDiff < -180.0f) headDiff += 360.0f;
+    while (headDiff >= 180.0f) headDiff -= 360.0f;
+    bool facingBackward = (headDiff < -90.0f || headDiff >= 90.0f);
+    if (headDiff < -75.0f) headDiff = -75.0f;
+    if (headDiff >= 75.0f) headDiff = 75.0f;
+    np->yBodyRot = np->base.yRotation - headDiff;
+    np->yBodyRot += headDiff * 0.1f;
+    if (facingBackward) animDelta = -animDelta;
 
-    while (np->base.yRotation - np->base.yRotO < -180.0f) np->base.yRotO -= 360.0f;
-    while (np->base.yRotation - np->base.yRotO >= 180.0f) np->base.yRotO += 360.0f;
+    // keep the angle pairs within 180 degrees so the lerp takes the short way
+    while (np->base.yRotation - np->base.prevYRotation < -180.0f) np->base.prevYRotation -= 360.0f;
+    while (np->base.yRotation - np->base.prevYRotation >= 180.0f) np->base.prevYRotation += 360.0f;
     while (np->yBodyRot - np->yBodyRotO < -180.0f) np->yBodyRotO -= 360.0f;
     while (np->yBodyRot - np->yBodyRotO >= 180.0f) np->yBodyRotO += 360.0f;
-    while (np->base.xRotation - np->base.xRotO < -180.0f) np->base.xRotO -= 360.0f;
-    while (np->base.xRotation - np->base.xRotO >= 180.0f) np->base.xRotO += 360.0f;
+    while (np->base.xRotation - np->base.prevXRotation < -180.0f) np->base.prevXRotation -= 360.0f;
+    while (np->base.xRotation - np->base.prevXRotation >= 180.0f) np->base.prevXRotation += 360.0f;
 
-    np->animStep += step;
+    np->animStep += animDelta;
 }
 
-// the old rotations get wrapped here too, in render
-void NetworkPlayer_render(NetworkPlayer* np, float a) {
-    float run = np->oRun + (np->run - np->oRun) * a;
-    glEnable(GL_TEXTURE_2D);
+void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font) {
     glBindTexture(GL_TEXTURE_2D, texChar);
 
-    while (np->yBodyRotO - np->yBodyRot < -180.0f) np->yBodyRotO += 360.0f;
-    while (np->yBodyRotO - np->yBodyRot >= 180.0f) np->yBodyRotO -= 360.0f;
-    float bodyYRot = np->yBodyRotO + (np->yBodyRot - np->yBodyRotO) * a;
-    while (np->base.xRotO - np->base.xRotation < -180.0f) np->base.xRotO += 360.0f;
-    while (np->base.xRotO - np->base.xRotation >= 180.0f) np->base.xRotO -= 360.0f;
-    while (np->base.yRotO - np->base.yRotation < -180.0f) np->base.yRotO += 360.0f;
-    while (np->base.yRotO - np->base.yRotation >= 180.0f) np->base.yRotO -= 360.0f;
-    float headYRot = np->base.yRotO + (np->base.yRotation - np->base.yRotO) * a;
-    float headXRot = np->base.xRotO + (np->base.xRotation - np->base.xRotO) * a;
-    headYRot = -(headYRot - bodyYRot);
+    float run = np->runO + (np->run - np->runO) * partialTicks;
+
+    // wrap the angle pairs before the lerp
+    float bodyYawO = np->yBodyRotO;
+    while (bodyYawO - np->yBodyRot < -180.0f) bodyYawO += 360.0f;
+    while (bodyYawO - np->yBodyRot >= 180.0f) bodyYawO -= 360.0f;
+    float bodyYaw = bodyYawO + (np->yBodyRot - bodyYawO) * partialTicks;
+
+    float headPitchO = np->base.prevXRotation;
+    while (headPitchO - np->base.xRotation < -180.0f) headPitchO += 360.0f;
+    while (headPitchO - np->base.xRotation >= 180.0f) headPitchO -= 360.0f;
+
+    float headYawO = np->base.prevYRotation;
+    while (headYawO - np->base.yRotation < -180.0f) headYawO += 360.0f;
+    while (headYawO - np->base.yRotation >= 180.0f) headYawO -= 360.0f;
+
+    float headYaw   = headYawO + (np->base.yRotation - headYawO) * partialTicks;
+    float headPitch = headPitchO + (np->base.xRotation - headPitchO) * partialTicks;
+    // the head rotation is relative to the body
+    headYaw -= bodyYaw;
+    float animStep  = np->animStepO + (np->animStep - np->animStepO) * partialTicks;
+
+    float b = Entity_getBrightness(&np->base);
+    glColor3f(b, b, b);
+
+    float ix = np->base.prevX + (np->base.x - np->base.prevX) * partialTicks;
+    float iyRaw = np->base.prevY + (np->base.y - np->base.prevY) * partialTicks;
+    float iz = np->base.prevZ + (np->base.z - np->base.prevZ) * partialTicks;
 
     glPushMatrix();
-    float anim = np->animStepO + (np->animStep - np->animStepO) * a;
-    float br = Entity_getBrightness(&np->base);
-    glColor3f(br, br, br);
-    float size = 0.0625f;
-    float yy = (float)(-fabs(cos((double)anim * 0.6662)) * 5.0 * (double)run - 23.0);
-    float x = np->base.prevX + (np->base.x - np->base.prevX) * a;
-    float y = np->base.prevY + (np->base.y - np->base.prevY) * a;
-    float z = np->base.prevZ + (np->base.z - np->base.prevZ) * a;
-    glTranslatef(x, y - 1.62f, z);
+    glTranslatef(ix, iyRaw - np->base.heightOffset, iz);
     glScalef(1.0f, -1.0f, 1.0f);
-    glTranslatef(0.0f, yy * size, 0.0f);
-    glRotatef(bodyYRot, 0.0f, 1.0f, 0.0f);
+    const float size = 0.0625f;
+    glScalef(size, size, size);
+    // the leg swing is a cosine scaled by run
+    float offY = -(fabsf(cosf(animStep * 0.6662f)) * 5.0f * run) - 23.0f;
+    glTranslatef(0.0f, offY, 0.0f);
+    // turned by 180 - bodyYaw
+    glRotatef(180.0f - bodyYaw, 0.0f, 1.0f, 0.0f);
+    // allowAlpha is false for network players, so the alpha test goes off for the model
     glDisable(GL_ALPHA_TEST);
     glScalef(-1.0f, 1.0f, 1.0f);
-    ZombieModel_render(&sModel, anim, run, (float)np->tickCount + a, headYRot, headXRot, size);
+    ZombieModel_render(&sModel, animStep, run, (float)np->tickCount + partialTicks, headYaw, headPitch);
     glEnable(GL_ALPHA_TEST);
     glPopMatrix();
 
-    // the name faces the local player, with a dark copy behind it
-    Font* font = Minecraft_getFont();
+    // the name tag faces the local player's yaw, with a dark gray shadow behind it
     glPushMatrix();
-    glTranslatef(x, y + 0.8f, z);
-    glRotatef(-Minecraft_getPlayerYRot(), 0.0f, 1.0f, 0.0f);
-    float s = 0.05f;
-    glScalef(0.05f, -s, s);
-    glTranslatef((float)(-Font_width(font, np->displayName)) / 2.0f, 0.0f, 0.0f);
-    // the entity light is on here, the front name is drawn without it
+    glTranslatef(ix, iyRaw + 0.8f, iz);
+    glRotatef(-localPlayerYaw, 0.0f, 1.0f, 0.0f);
+    glScalef(0.05f, -0.05f, 0.05f);
+    float textWidth = (float)Font_width(font, np->name);
+    glTranslatef(-textWidth / 2.0f, 0.0f, 0.0f);
+
+    // the entity lighting would tint the text, off for it and back on for the shadow
     glNormal3f(1.0f, -1.0f, 1.0f);
     glDisable(GL_LIGHTING);
     glDisable(GL_LIGHT0);
-    if (equalsIgnoreCase(np->name, "Notch")) {
-        Font_draw(font, &sNameTess, np->displayName, 0, 0, 0xFFFF00);
-    } else {
-        Font_draw(font, &sNameTess, np->displayName, 0, 0, 0xFFFFFF);
-    }
+    bool isNotch = equalsIgnoreCase(np->name, "Notch");
+    Font_draw(font, &sNameTess, np->name, 0, 0, isNotch ? 0xFFFF00 : 0xFFFFFF);
     glEnable(GL_LIGHT0);
     glEnable(GL_LIGHTING);
     glTranslatef(1.0f, 1.0f, -0.05f);
     Font_draw(font, &sNameTess, np->name, 0, 0, 0x505050);
     glPopMatrix();
-
-    glDisable(GL_TEXTURE_2D);
 }
 
-// the halfway step turns the short way round
-static void halfway(const NetworkPlayer* np, float yRot, float xRot, float* yOut, float* xOut) {
-    float xd = xRot - np->base.xRotation;
-    float yd = yRot - np->base.yRotation;
-    while (yd >= 180.0f) yd -= 360.0f;
-    while (yd < -180.0f) yd += 360.0f;
-    while (xd >= 180.0f) xd -= 360.0f;
-    while (xd < -180.0f) xd += 360.0f;
-    *yOut = np->base.yRotation + yd * 0.5f;
-    *xOut = np->base.xRotation + xd * 0.5f;
+void NetworkPlayer_teleport(NetworkPlayer* np, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
+    pushMoveEntry(np, (np->xp + xRaw) / 64.0f, (np->yp + yRaw) / 64.0f, (np->zp + zRaw) / 64.0f,
+                  midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, true);
+    np->xp = xRaw; np->yp = yRaw; np->zp = zRaw;
+    pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, yaw, pitch, true, true);
 }
 
-void NetworkPlayer_teleport(NetworkPlayer* np, int x, int y, int z, float yRot, float xRot) {
-    float hy, hx;
-    halfway(np, yRot, xRot, &hy, &hx);
-    push(np, posRot((float)(np->xp + x) / 64.0f, (float)(np->yp + y) / 64.0f, (float)(np->zp + z) / 64.0f, hy, hx));
-    np->xp = x;
-    np->yp = y;
-    np->zp = z;
-    push(np, posRot((float)np->xp / 32.0f, (float)np->yp / 32.0f, (float)np->zp / 32.0f, yRot, xRot));
-}
-
-void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yRot, float xRot) {
-    float hy, hx;
-    halfway(np, yRot, xRot, &hy, &hx);
-    push(np, posRot(((float)np->xp + (float)dx / 2.0f) / 32.0f, ((float)np->yp + (float)dy / 2.0f) / 32.0f,
-                    ((float)np->zp + (float)dz / 2.0f) / 32.0f, hy, hx));
-    np->xp += dx;
-    np->yp += dy;
-    np->zp += dz;
-    push(np, posRot((float)np->xp / 32.0f, (float)np->yp / 32.0f, (float)np->zp / 32.0f, yRot, xRot));
+void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yaw, float pitch) {
+    pushMoveEntry(np, (np->xp + dx / 2.0f) / 32.0f, (np->yp + dy / 2.0f) / 32.0f, (np->zp + dz / 2.0f) / 32.0f,
+                  midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), true, true);
+    np->xp += dx; np->yp += dy; np->zp += dz;
+    pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, yaw, pitch, true, true);
 }
 
 void NetworkPlayer_queueMove(NetworkPlayer* np, int dx, int dy, int dz) {
-    push(np, posOnly(((float)np->xp + (float)dx / 2.0f) / 32.0f, ((float)np->yp + (float)dy / 2.0f) / 32.0f,
-                     ((float)np->zp + (float)dz / 2.0f) / 32.0f));
-    np->xp += dx;
-    np->yp += dy;
-    np->zp += dz;
-    push(np, posOnly((float)np->xp / 32.0f, (float)np->yp / 32.0f, (float)np->zp / 32.0f));
+    pushMoveEntry(np, (np->xp + dx / 2.0f) / 32.0f, (np->yp + dy / 2.0f) / 32.0f, (np->zp + dz / 2.0f) / 32.0f,
+                  0.0f, 0.0f, true, false);
+    np->xp += dx; np->yp += dy; np->zp += dz;
+    pushMoveEntry(np, np->xp / 32.0f, np->yp / 32.0f, np->zp / 32.0f, 0.0f, 0.0f, true, false);
 }
 
-void NetworkPlayer_queueLook(NetworkPlayer* np, float yRot, float xRot) {
-    float hy, hx;
-    halfway(np, yRot, xRot, &hy, &hx);
-    push(np, rotOnly(hy, hx));
-    push(np, rotOnly(yRot, xRot));
+void NetworkPlayer_queueLook(NetworkPlayer* np, float yaw, float pitch) {
+    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, midpointAngle(np->base.yRotation, yaw), midpointAngle(np->base.xRotation, pitch), false, true);
+    pushMoveEntry(np, 0.0f, 0.0f, 0.0f, yaw, pitch, false, true);
 }

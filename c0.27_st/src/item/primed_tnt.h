@@ -7,7 +7,8 @@
 
 typedef struct {
     Entity e;
-    int fuse; // ticks left, from 40
+    float xd, yd, zd; // its own, Entity.move never zeroes them
+    int life;
 } PrimedTnt;
 
 void PrimedTnt_init(PrimedTnt* t, Level* level, float x, float y, float z);

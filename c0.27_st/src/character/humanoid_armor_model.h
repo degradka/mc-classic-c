@@ -13,11 +13,8 @@ typedef struct {
 } HumanoidArmorModel;
 
 void HumanoidArmorModel_init(HumanoidArmorModel* m);
-
-// head copies yaw and pitch, arms copy pitch and roll, the body never turns
-void HumanoidArmorModel_render(HumanoidArmorModel* m, bool showHelmet, bool showArmor,
-                               float headXRot, float headYRot,
-                               float rightArmXRot, float rightArmZRot,
-                               float leftArmXRot, float leftArmZRot);
+// legs never show, head copies yaw and pitch, arms copy pitch and roll
+void HumanoidArmorModel_render(HumanoidArmorModel* m, bool helmet, bool armor,
+                               const Cube* head, const Cube* rightArm, const Cube* leftArm);
 
 #endif
