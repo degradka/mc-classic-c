@@ -1,5 +1,6 @@
 // character/mob_spider_model.c
 
+#include "../math_helper.h"
 #include "mob_spider_model.h"
 #include "../common.h"
 #include <math.h>
@@ -53,8 +54,8 @@ void MobSpiderModel_render(MobSpiderModel* m, float animStep, float run, float a
                            float headYaw, float headPitch) {
     (void)age; // no arms, no idle sway term
 
-    m->head.yRot = headYaw   / 57.29578f;
-    m->head.xRot = headPitch / 57.29578f;
+    m->head.yRot = headYaw   / 57.295776f;
+    m->head.xRot = headPitch / 57.295776f;
 
     float splay = 0.7853982f;
     m->legFrontLeft.zRot     = -splay;
@@ -77,16 +78,16 @@ void MobSpiderModel_render(MobSpiderModel* m, float animStep, float run, float a
     m->legBackRight.yRot     =  yaw * 2.0f;
 
     // every leg pair walks on its own phase
-    double t = animStep * 0.6662;
-    float yawFront    = -(float)cos(t * 2.0)                    * 0.4f * run;
-    float yawMidFront = -(float)cos(t * 2.0 + M_PI)              * 0.4f * run;
-    float yawMidBack  = -(float)cos(t * 2.0 + M_PI / 2.0)        * 0.4f * run;
-    float yawBack     = -(float)cos(t * 2.0 + 3.0 * M_PI / 2.0)  * 0.4f * run;
+    const float pi = 3.1415927f;
+    float yawFront    = -(MathHelper_cos(animStep * 0.6662f * 2.0f) * 0.4f) * run;
+    float yawMidFront = -(MathHelper_cos(animStep * 0.6662f * 2.0f + pi) * 0.4f) * run;
+    float yawMidBack  = -(MathHelper_cos(animStep * 0.6662f * 2.0f + 1.5707964f) * 0.4f) * run;
+    float yawBack     = -(MathHelper_cos(animStep * 0.6662f * 2.0f + 4.712389f) * 0.4f) * run;
 
-    float rollFront    = fabsf((float)sin(t)                    * 0.4f) * run;
-    float rollMidFront = fabsf((float)sin(t + M_PI)              * 0.4f) * run;
-    float rollMidBack  = fabsf((float)sin(t + M_PI / 2.0)        * 0.4f) * run;
-    float rollBack     = fabsf((float)sin(t + 3.0 * M_PI / 2.0)  * 0.4f) * run;
+    float rollFront    = fabsf(MathHelper_sin(animStep * 0.6662f) * 0.4f) * run;
+    float rollMidFront = fabsf(MathHelper_sin(animStep * 0.6662f + pi) * 0.4f) * run;
+    float rollMidBack  = fabsf(MathHelper_sin(animStep * 0.6662f + 1.5707964f) * 0.4f) * run;
+    float rollBack     = fabsf(MathHelper_sin(animStep * 0.6662f + 4.712389f) * 0.4f) * run;
 
     m->legFrontLeft.yRot     += yawFront;    m->legFrontRight.yRot    -= yawFront;
     m->legMidFrontLeft.yRot  += yawMidFront; m->legMidFrontRight.yRot -= yawMidFront;

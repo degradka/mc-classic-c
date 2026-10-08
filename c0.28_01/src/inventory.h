@@ -24,5 +24,11 @@ void Inventory_scroll(Inventory* inv, int dir);
 bool Inventory_consume(Inventory* inv, int tileId);
 // false when there's no room, the item stays on the ground
 bool Inventory_addResource(Inventory* inv, int tileId);
+// Inventory.replaceSlot(Tile), puts the tile in the selected slot and moves the old one to where the tile was
+void Inventory_replaceSlot(Inventory* inv, int tileId);
+// Inventory.replaceSlot(int), an index into the creative list, -1 does nothing
+void Inventory_replaceSlotIndex(Inventory* inv, int index);
+// Inventory.grabTexture, pick block; creative swaps the tile in when it isn't on the hotbar
+void Inventory_grabTexture(Inventory* inv, int tileId, bool creative);
 
 #endif

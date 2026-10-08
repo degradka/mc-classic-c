@@ -8,7 +8,7 @@
 #include "../level/tile/tile.h"
 #include "../renderer/tessellator.h"
 
-typedef enum { PARTICLE_TERRAIN, PARTICLE_SMOKE, PARTICLE_WATER_DROP } ParticleKind;
+typedef enum { PARTICLE_TERRAIN, PARTICLE_WATER_DROP } ParticleKind;
 
 typedef struct {
     Entity base;
@@ -26,7 +26,6 @@ typedef struct {
 void Particle_initTerrain(Particle* p, Level* level, float x, float y, float z,
                           float motionX, float motionY, float motionZ, const Tile* tile);
 // particles.png
-void Particle_initSmoke(Particle* p, Level* level, float x, float y, float z);
 void Particle_initWaterDrop(Particle* p, Level* level, float x, float y, float z);
 
 // 0 particles.png, 1 terrain.png

@@ -24,6 +24,7 @@ void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col) {
     float b = (col & 0xFF) / 255.0f;
 
     glEnable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glColor4f(r, g, b, a);
 
@@ -34,6 +35,7 @@ void Screen_fill(int x0, int y0, int x1, int y1, unsigned int col) {
     Tessellator_vertex(&TESSELLATOR, (float)x0, (float)y0, 0.0f);
     Tessellator_end(&TESSELLATOR);
 
+    glEnable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
 }
 
@@ -48,6 +50,7 @@ void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsi
     float g2 = ((col2 >> 8)  & 0xFF) / 255.0f;
     float b2 = (col2 & 0xFF) / 255.0f;
 
+    glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -61,6 +64,7 @@ void Screen_fillGradient(int x0, int y0, int x1, int y1, unsigned int col1, unsi
     glEnd();
 
     glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
 }
 
 void Screen_drawCenteredString(Screen* s, const char* str, int x, int y, unsigned int color) {

@@ -2,6 +2,7 @@
 
 #include "particle.h"
 #include "../jrandom.h"
+#include "../math_helper.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -23,8 +24,8 @@ static void initBase(Particle* p, Level* level, float x, float y, float z, float
     double r1 = JRandom_mathRandom();
     double r2 = JRandom_mathRandom();
     float speed = (float)(r1 + r2 + 1.0) * 0.15f;
-    float d = (float)sqrt(p->base.motionX * p->base.motionX + p->base.motionY * p->base.motionY +
-                          p->base.motionZ * p->base.motionZ);
+    float d = MathHelper_sqrt(p->base.motionX * p->base.motionX + p->base.motionY * p->base.motionY +
+                              p->base.motionZ * p->base.motionZ);
     p->base.motionX = p->base.motionX / d * speed * 0.4f;
     p->base.motionY = p->base.motionY / d * speed * 0.4f + 0.1f;
     p->base.motionZ = p->base.motionZ / d * speed * 0.4f;
@@ -44,17 +45,6 @@ void Particle_initTerrain(Particle* p, Level* level, float x, float y, float z,
     p->textureId = tile->textureId;
     p->gravity = tile->particleGravity;
     p->r = p->g = p->b = 0.6f;
-}
-
-void Particle_initSmoke(Particle* p, Level* level, float x, float y, float z) {
-    initBase(p, level, x, y, z, 0.0f, 0.0f, 0.0f);
-    p->kind = PARTICLE_SMOKE;
-    p->base.motionX *= 0.1f;
-    p->base.motionY *= 0.1f;
-    p->base.motionZ *= 0.1f;
-    p->g = p->b = (float)(JRandom_mathRandom() * (double)0.3f);
-    p->r = p->b;
-    p->lifetime = (int)(8.0 / (JRandom_mathRandom() * 0.8 + 0.2));
 }
 
 void Particle_initWaterDrop(Particle* p, Level* level, float x, float y, float z) {
@@ -116,18 +106,11 @@ void Particle_onTick(Particle* p) {
     // the removed particle still moves this tick
     if (p->age++ >= p->lifetime) Entity_remove(e);
 
-    float drag = 0.98f;
-    if (p->kind == PARTICLE_SMOKE) {
-        p->textureId = 7 - (p->age << 3) / p->lifetime;
-        e->motionY = (float)((double)e->motionY + 0.004);
-        drag = 0.96f;
-    } else {
-        e->motionY = (float)((double)e->motionY - 0.04 * (double)p->gravity);
-    }
+    e->motionY = (float)((double)e->motionY - 0.04 * (double)p->gravity);
     move(p);
-    e->motionX *= drag;
-    e->motionY *= drag;
-    e->motionZ *= drag;
+    e->motionX *= 0.98f;
+    e->motionY *= 0.98f;
+    e->motionZ *= 0.98f;
     if (e->onGround) {
         e->motionX *= 0.7f;
         e->motionZ *= 0.7f;

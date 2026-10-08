@@ -5,7 +5,7 @@
 #include "options_screen.h"
 
 extern void Minecraft_closeScreenAndGrabMouse(void);
-extern bool Minecraft_isConnected(void);
+extern bool Minecraft_isMultiplayer(void);
 
 static void PauseScreen_render(Screen* self, int xm, int ym) {
     PauseScreen* ps = (PauseScreen*)self;
@@ -51,5 +51,5 @@ void PauseScreen_init(PauseScreen* ps, Font* font, int width, int height, Option
     ps->buttons[2].enabled = false;
     ps->buttons[3].enabled = false;
 
-    if (Minecraft_isConnected()) ps->buttons[1].enabled = false;
+    if (Minecraft_isMultiplayer()) ps->buttons[1].enabled = false;
 }

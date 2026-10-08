@@ -1,8 +1,10 @@
 // mob.c: health, damage, knockback and death
 
 #include "mob.h"
+#include "math_helper.h"
 #include "mob_ai.h"
 #include "jrandom.h"
+#include <GL/glew.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -10,7 +12,7 @@ void Mob_init(Entity* e) {
     e->footSize = 0.5f;
     e->rotA = (float)(JRandom_mathRandom() + 1.0) * 0.01f;
     e->timeOffs = (float)JRandom_mathRandom() * 12398.0f;
-    e->mobRot = (float)(JRandom_mathRandom() * M_PI * 2.0);
+    e->mobRot = (float)(JRandom_mathRandom() * 3.1415927410125732 * 2.0);
     e->isMob = true;
     e->health = MOB_MAX_HEALTH;
     e->lastHealth = MOB_MAX_HEALTH;
@@ -26,7 +28,7 @@ void Mob_init(Entity* e) {
 void Mob_knockback(Entity* e, Entity* attacker) {
     float dx = e->x - attacker->x;
     float dz = e->z - attacker->z;
-    float dist = sqrtf(dx * dx + dz * dz);
+    float dist = MathHelper_sqrt(dx * dx + dz * dz);
 
     e->motionX *= 0.5f;
     e->motionY *= 0.5f;
@@ -48,7 +50,8 @@ void Mob_heal(Entity* e, int amount) {
 }
 
 void Mob_hurt(Entity* e, Entity* attacker, int damage) {
-    if (!e->isMob || e->health <= 0) return;
+    if (e->hurtOverride && e->hurtOverride(e, attacker)) return;
+    if (!e->isMob || e->level->creativeMode || e->health <= 0) return;
 
     // the ai hears about the hit first
     if (e->ai) Ai_onHurt(e->ai, e, attacker, damage);
@@ -69,7 +72,7 @@ void Mob_hurt(Entity* e, Entity* attacker, int damage) {
     if (attacker) {
         float dx = attacker->x - e->x;
         float dz = attacker->z - e->z;
-        e->hurtDir = (float)(atan2(dz, dx) * 180.0 / M_PI) - e->yRotation;
+        e->hurtDir = (float)(atan2(dz, dx) * 180.0 / 3.1415927410125732) - e->yRotation;
         Mob_knockback(e, attacker);
     } else {
         e->hurtDir = (float)((int)(JRandom_mathRandom() * 2.0) * 180);
@@ -82,7 +85,7 @@ void Mob_hurt(Entity* e, Entity* attacker, int damage) {
 }
 
 void Mob_causeFallDamage(Entity* e, float fallDistance) {
-    if (!e->isMob) return;
+    if (!e->isMob || e->level->creativeMode) return;
     int damage = (int)ceilf(fallDistance - 3.0f);
     if (damage > 0) Mob_hurt(e, NULL, damage);
 }
@@ -156,10 +159,11 @@ void Mob_onTick(Entity* e) {
     e->prevYBodyRotation = e->yBodyRotation;
     e->tickCount++;
     if (e->ai) Ai_tick(e->ai, e);
+    if (e->afterAiStep) e->afterAiStep(e);
 
     float dx = e->x - e->prevX;
     float dz = e->z - e->prevZ;
-    float moveDist = (float)sqrt(dx * dx + dz * dz);
+    float moveDist = MathHelper_sqrt(dx * dx + dz * dz);
     float facing = e->yBodyRotation;
     float animDelta = 0.0f;
     e->oRun = e->run;
@@ -196,4 +200,72 @@ void Mob_onTick(Entity* e) {
     while (e->xRotation - e->prevXRotation >= 180.0f) e->prevXRotation += 360.0f;
 
     e->animStep += animDelta;
+}
+
+void Mob_render(const Entity* e, float partialTicks, float brightness, float bobStrength, bool allowAlpha,
+                MobModelFn model, const void* self) {
+    const float t = partialTicks;
+    float attack = (float)e->attackTime - t;
+    if (attack < 0.0f) attack = 0.0f;
+    float bodyO = e->prevYBodyRotation;
+    while (bodyO - e->yBodyRotation < -180.0f) bodyO += 360.0f;
+    while (bodyO - e->yBodyRotation >= 180.0f) bodyO -= 360.0f;
+    float pitchO = e->prevXRotation;
+    while (pitchO - e->xRotation < -180.0f) pitchO += 360.0f;
+    while (pitchO - e->xRotation >= 180.0f) pitchO -= 360.0f;
+    float yawO = e->prevYRotation;
+    while (yawO - e->yRotation < -180.0f) yawO += 360.0f;
+    while (yawO - e->yRotation >= 180.0f) yawO -= 360.0f;
+    float body = bodyO + (e->yBodyRotation - bodyO) * t;
+    float run = e->oRun + (e->run - e->oRun) * t;
+    float headYaw = yawO + (e->yRotation - yawO) * t;
+    float headPitch = pitchO + (e->xRotation - pitchO) * t;
+    headYaw -= body;
+
+    glPushMatrix();
+    float animStep = e->animStepO + (e->animStep - e->animStepO) * t;
+    glColor3f(brightness, brightness, brightness);
+    float bob = -fabsf(MathHelper_cos(animStep * 0.6662f)) * 5.0f * run * bobStrength - 23.0f;
+    glTranslatef(e->prevX + (e->x - e->prevX) * t, e->prevY + (e->y - e->prevY) * t - 1.62f, e->prevZ + (e->z - e->prevZ) * t);
+    float hurt = (float)e->hurtTime - t;
+    if (hurt > 0.0f || e->health <= 0) {
+        if (hurt < 0.0f) {
+            hurt = 0.0f;
+        } else {
+            hurt /= (float)e->hurtDuration;
+            hurt = MathHelper_sin(hurt * hurt * hurt * hurt * 3.1415927f) * 14.0f;
+        }
+        if (e->health <= 0) {
+            float death = ((float)e->deathTime + t) / 20.0f;
+            hurt += death * death * 800.0f;
+            if (hurt > 90.0f) hurt = 90.0f;
+        }
+        glRotatef(180.0f - body, 0.0f, 1.0f, 0.0f);
+        glRotatef(-e->hurtDir, 0.0f, 1.0f, 0.0f);
+        glRotatef(-hurt, 0.0f, 0.0f, 1.0f);
+        glRotatef(e->hurtDir, 0.0f, 1.0f, 0.0f);
+        glRotatef(-(180.0f - body), 0.0f, 1.0f, 0.0f);
+    }
+    glTranslatef(0.0f, -bob * 0.0625f, 0.0f);
+    glScalef(1.0f, -1.0f, 1.0f);
+    glRotatef(180.0f - body, 0.0f, 1.0f, 0.0f);
+    if (!allowAlpha) glDisable(GL_ALPHA_TEST);
+    else glDisable(GL_CULL_FACE);
+    glScalef(-1.0f, 1.0f, 1.0f);
+    // the scale goes in here instead of into the cubes
+    glScalef(0.0625f, 0.0625f, 0.0625f);
+    float age = (float)e->tickCount + t;
+    model(self, animStep, run, age, headYaw, headPitch, attack / 5.0f, t);
+    if (e->invulnerableTime > MOB_INVULNERABLE_DURATION - 10) {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.75f);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        model(self, animStep, run, age, headYaw, headPitch, attack / 5.0f, t);
+        glDisable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+    glEnable(GL_ALPHA_TEST);
+    if (allowAlpha) glEnable(GL_CULL_FACE);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glPopMatrix();
 }

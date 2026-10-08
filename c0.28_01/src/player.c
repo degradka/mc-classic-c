@@ -1,6 +1,7 @@
 // player.c
 
 #include "player.h"
+#include "math_helper.h"
 #include <math.h>
 
 void Player_init(Player* p, Level* level) {
@@ -20,6 +21,15 @@ void Player_init(Player* p, Level* level) {
     Inventory_init(&p->inventory);
 }
 
+// Player.resetPos, back to the spawn point with full health
+void Player_resetPos(Player* p) {
+    p->e.heightOffset = 1.62f;
+    Entity_setSize(&p->e, 0.6f, 1.8f);
+    Entity_resetPosition(&p->e);
+    p->e.health = 20;
+    p->e.deathTime = 0;
+}
+
 void Player_awardKillScore(Player* p, int points) {
     p->score += points;
 }
@@ -32,9 +42,8 @@ void Player_die(Entity* self, Entity* attacker) {
     // Player.die doesn't use Mob.knockback, it tips over along hurtDir
     self->motionY = 0.1f;
     if (attacker) {
-        double rad = (self->hurtDir + self->yRotation) * M_PI / 180.0;
-        self->motionX = -(float)cos(rad) * 0.1f;
-        self->motionZ = -(float)sin(rad) * 0.1f;
+        self->motionX = -MathHelper_cos((self->hurtDir + self->yRotation) * 3.1415927f / 180.0f) * 0.1f;
+        self->motionZ = -MathHelper_sin((self->hurtDir + self->yRotation) * 3.1415927f / 180.0f) * 0.1f;
     } else {
         self->motionX = 0.0f;
         self->motionZ = 0.0f;
@@ -107,7 +116,7 @@ void Player_onTick(Player* p) {
     }
 
     // bob and tilt from the speed after this tick's move
-    float speed = sqrtf(p->e.motionX * p->e.motionX + p->e.motionZ * p->e.motionZ);
+    float speed = MathHelper_sqrt(p->e.motionX * p->e.motionX + p->e.motionZ * p->e.motionZ);
     float tiltTarget = atanf(-p->e.motionY * 0.2f) * 15.0f;
     if (speed > 0.1f) speed = 0.1f;
     if (!p->e.onGround || p->e.health <= 0) speed = 0.0f;

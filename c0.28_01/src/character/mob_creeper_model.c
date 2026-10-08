@@ -1,5 +1,6 @@
 // character/mob_creeper_model.c
 
+#include "../math_helper.h"
 #include "mob_creeper_model.h"
 #include "../common.h"
 #include <math.h>
@@ -31,18 +32,19 @@ void MobCreeperModel_init(MobCreeperModel* m) {
 void MobCreeperModel_render(MobCreeperModel* m, float animStep, float run, float age,
                             float headYaw, float headPitch) {
     (void)age; // no arms, no idle sway term
-    m->head.yRot = headYaw   / 57.29578f;
-    m->head.xRot = headPitch / 57.29578f;
+    const float pi = 3.1415927f;
+    m->head.yRot = headYaw   / 57.295776f;
+    m->head.xRot = headPitch / 57.295776f;
 
-    m->legFrontRight.xRot = (float)cos(animStep * 0.6662) * 1.4f * run;
-    m->legBackLeft.xRot   = (float)cos(animStep * 0.6662) * 1.4f * run;
-    m->legFrontLeft.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
-    m->legBackRight.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
+    m->legBackLeft.xRot   = MathHelper_cos(animStep * 0.6662f) * 1.4f * run;
+    m->legBackRight.xRot  = MathHelper_cos(animStep * 0.6662f + pi) * 1.4f * run;
+    m->legFrontLeft.xRot  = MathHelper_cos(animStep * 0.6662f + pi) * 1.4f * run;
+    m->legFrontRight.xRot = MathHelper_cos(animStep * 0.6662f) * 1.4f * run;
 
     Cube_render(&m->head);
     Cube_render(&m->body);
-    Cube_render(&m->legFrontLeft);
-    Cube_render(&m->legFrontRight);
     Cube_render(&m->legBackLeft);
     Cube_render(&m->legBackRight);
+    Cube_render(&m->legFrontLeft);
+    Cube_render(&m->legFrontRight);
 }

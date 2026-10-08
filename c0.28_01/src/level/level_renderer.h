@@ -20,14 +20,15 @@ struct Player;  typedef struct Player Player;
 typedef struct LevelRenderer {
     Chunk*      chunks;
     Chunk**     sortedChunks; // pointers into chunks[], kept sorted by distance
-    Chunk**     dirtyScratch; // reused each frame instead of malloc per frame
+    Chunk**     dirtyList;    // in the order chunks got dirty
+    int         dirtyCount;
     int         chunkAmountX, chunkAmountY, chunkAmountZ;
 
     Level*      level;
     int         terrainTex;
 
     int         drawDistance; // 0..3, 0 = unlimited
-    double      lastSortX, lastSortY, lastSortZ; // player pos at the last sort
+    float       lastSortX, lastSortY, lastSortZ; // player pos at the last sort
 
     unsigned int surroundLists; // glGenLists(2) base: +0 ground, +1 water
 
@@ -47,7 +48,7 @@ void LevelRenderer_tick(LevelRenderer* renderer);
 void LevelRenderer_renderClouds(LevelRenderer* renderer, float partialTicks, bool anaglyph);
 void LevelRenderer_renderInside(const LevelRenderer* r, int x, int y, int z);
 
-void LevelRenderer_setDirty(const LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
+void LevelRenderer_setDirty(LevelRenderer* renderer, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
 void levelRenderer_tileChanged(LevelRenderer* renderer, int x, int y, int z);
 void levelRenderer_lightColumnChanged(LevelRenderer* renderer, int x, int z, int minY, int maxY);
 void levelRenderer_allChanged(Level* level, LevelRenderer* renderer);

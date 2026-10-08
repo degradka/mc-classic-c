@@ -62,6 +62,10 @@ typedef struct JStream JStream;
 
 // parses a whole stream, returns the first object or null
 JStream* JStream_read(const unsigned char* data, size_t len, JNode** root);
+// the first declared class that isn't in known, NULL when there is none
+const char* JStream_unknownClass(const JStream* s, const char* const* known, int n);
+// the first class whose serialVersionUID differs from the one listed for its name
+const char* JStream_suidMismatch(const JStream* s, const char* const* names, const int64_t* suids, int n);
 void JStream_free(JStream* s);
 
 bool JNode_is(const JNode* n, const char* cls);

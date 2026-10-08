@@ -1,6 +1,6 @@
 // net/network_player.h: remote players
-// every update queues a halfway step plus the real one,
-// tick plays them back and render lerps between ticks
+// every update queues a halfway step plus the real one
+// and aiStep plays them back instead of running any ai
 
 #ifndef NET_NETWORK_PLAYER_H
 #define NET_NETWORK_PLAYER_H
@@ -9,48 +9,35 @@
 #include "../gui/font.h"
 #include <stdbool.h>
 
-#define NETPLAYER_QUEUE_CAP 64
-
-// a queued move, hasPos and hasRot say what the packet carried
 typedef struct {
     float x, y, z;
-    float yaw, pitch;
-    bool hasPos, hasRot;
-} NetPlayerMoveEntry;
+    float yRot, xRot;
+    bool rotating, moving;
+} PlayerMove;
 
 typedef struct {
-    Entity base;
-    bool used;
+    Entity e; // first member, the aiStep hook casts back from it
+    // ConnectionManager.players holds it, and the level's entity list holds it.
+    // a respawn under the same id leaves the old one in the level unmapped
+    bool mapped, inLevel;
     int id;
-    char name[65];
-
-    float animStep, animStepO;
-    float yBodyRot, yBodyRotO;
-    // 0 to 1, how much it's walking, scales the limb swing
-    float run, runO;
-    // the model's idle arm sway
-    int tickCount;
-
-    // raw 1/32 block position, kept separately so the deltas add up without float drift
-    int xp, yp, zp;
-
-    NetPlayerMoveEntry moveQueue[NETPLAYER_QUEUE_CAP];
-    int queueHead, queueCount;
+    char name[65];        // color codes stripped
+    char displayName[65];
+    int xp, yp, zp;       // 1/32 block network position
+    PlayerMove* moves;
+    int moveHead, moveCount, moveCap;
 } NetworkPlayer;
 
-void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* name,
-                         int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* displayName,
+                        int xRaw, int yRaw, int zRaw, float yaw, float pitch);
+void NetworkPlayer_free(NetworkPlayer* np);
 void NetworkPlayer_onTick(NetworkPlayer* np);
 // the name tag faces the local player's yRot
 void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font);
 
-// Teleport, raw 1/32 block shorts
 void NetworkPlayer_teleport(NetworkPlayer* np, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
-// MoveAndLook, dx dy dz are the raw byte deltas
 void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yaw, float pitch);
-// Move, position only
 void NetworkPlayer_queueMove(NetworkPlayer* np, int dx, int dy, int dz);
-// Look, rotation only
 void NetworkPlayer_queueLook(NetworkPlayer* np, float yaw, float pitch);
 
 #endif

@@ -22,6 +22,8 @@ struct JStream {
     int nhandles, capHandles;
     void** owned;       // everything allocated, freed together
     int nowned, capOwned;
+    JClass** classes;   // every class descriptor, in stream order
+    int nclasses, capClasses;
 };
 
 static void* own(JStream* s, void* p) {
@@ -88,6 +90,14 @@ static JClass* classDesc(JStream* s) {
     c->name = rdutf(s, (size_t)rd2(s));
     c->suid = rdn(s, 8);
     handle(s, c);
+    if (s->nclasses == s->capClasses) {
+        int cap = s->capClasses ? s->capClasses * 2 : 32;
+        JClass** n = (JClass**)realloc(s->classes, (size_t)cap * sizeof(JClass*));
+        if (!n) { s->bad = true; return NULL; }
+        s->classes = n;
+        s->capClasses = cap;
+    }
+    s->classes[s->nclasses++] = c;
     c->flags = rd1(s);
     c->nfields = rd2(s);
     c->fields = (JField*)alloc(s, (size_t)c->nfields * sizeof(JField));
@@ -236,7 +246,28 @@ void JStream_free(JStream* s) {
     for (int i = 0; i < s->nowned; ++i) free(s->owned[i]);
     free(s->owned);
     free(s->handles);
+    free(s->classes);
     free(s);
+}
+
+const char* JStream_unknownClass(const JStream* s, const char* const* known, int n) {
+    for (int i = 0; i < s->nclasses; ++i) {
+        const char* name = s->classes[i]->name;
+        bool found = false;
+        for (int k = 0; k < n && !found; ++k) found = name && strcmp(name, known[k]) == 0;
+        if (!found) return name ? name : "";
+    }
+    return NULL;
+}
+
+const char* JStream_suidMismatch(const JStream* s, const char* const* names, const int64_t* suids, int n) {
+    for (int i = 0; i < s->nclasses; ++i) {
+        const JClass* c = s->classes[i];
+        for (int k = 0; k < n; ++k) {
+            if (c->name && strcmp(c->name, names[k]) == 0 && c->suid != suids[k]) return c->name;
+        }
+    }
+    return NULL;
 }
 
 bool JNode_is(const JNode* n, const char* cls) {

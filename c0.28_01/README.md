@@ -1,20 +1,26 @@
-# Classic 0.27 SURVIVAL TEST
+# Classic 0.28_01
 
 [Back to all versions](../README.md)
 
-Released October 24, 2009. 0.26 SURVIVAL TEST is folded in here.
+Released October 27, 2009, the same day as 0.28, which is folded in here.
+Survival Test is over: it's creative building again, and multiplayer is back.
 
 ## What changed
 
-- TNT: you start a new level with 10, hitting it lights it, it explodes a bit later
-- Spiders, they leap at you
-- New tiles: slabs (two make a double slab), iron block, bricks, bookshelf, mossy cobblestone
-- Coal ore drops slabs, stone drops cobblestone
-- **F5** toggles rain, with splashes where it lands
-- Explosions leave smoke behind
-- A Limit framerate option
-- Signs are gone
-- Menus lost their background gradient
+- Creative
+  - Blocks break right away, placing uses nothing up, nothing takes damage, reach is 5 again
+  - Hearts, air, score and the arrow count are hidden
+  - The survival code is still in the jar, but it always starts in creative
+- **B** opens the block select screen with every placeable tile, obsidian included
+- Middle click picks the block you look at into the hotbar
+- **Enter** sets the spawn point, **R** takes you back to it
+- TNT doesn't explode anymore, it just breaks
+- Sheep, they eat grass and regrow their wool. They only spawn in survival, so you won't see them normally
+- Multiplayer is back
+  - Other players are full humanoid mobs with name tags, they push you a little when you walk into them
+  - **Tab** shows who's connected
+- Menus have their gradient back, water and lava sides use the whole texture
+- Chunks are drawn in two layers, sorted the way java does it
 
 ## How it was ported
 
@@ -24,10 +30,17 @@ Released October 24, 2009. 0.26 SURVIVAL TEST is folded in here.
 ## Differences from the original
 
 - It's a normal window, not an applet
-- No multiplayer. The original jar still has its connection code (the applet could get a server), it's left out here
 - Fully offline: no skin downloads, always `char.png`, and Save level.. and Load level.. stay greyed out, they need a minecraft.net login that's gone
 - At most 64 arrows and 256 dropped items exist at once, java has no limit
-- Singleplayer only, like the original
+- The applet got the server from the web page, here it's the command line: `minecraft.exe [host] [port] [username]`
+
+## Multiplayer
+
+There's no 0.28 server here yet. With a protocol 7 server running, from this version's folder:
+```bash
+./src/minecraft.exe 127.0.0.1 25565 yourname
+```
+No arguments means singleplayer.
 
 ## Building and running
 
@@ -47,7 +60,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.27_st/src
+cd mc-classic-c/c0.28_01/src
 make
 ```
 
@@ -70,5 +83,5 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.27 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.27_SURVIVAL_TEST)
-- [minecraft.wiki: Java Edition Classic 0.26 SURVIVAL TEST](https://minecraft.wiki/w/Java_Edition_Classic_0.26_SURVIVAL_TEST)
+- [minecraft.wiki: Java Edition Classic 0.28_01](https://minecraft.wiki/w/Java_Edition_Classic_0.28_01)
+- [minecraft.wiki: Java Edition Classic 0.28](https://minecraft.wiki/w/Java_Edition_Classic_0.28)

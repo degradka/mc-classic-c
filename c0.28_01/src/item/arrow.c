@@ -1,6 +1,7 @@
 // item/arrow.c
 
 #include "arrow.h"
+#include "../math_helper.h"
 #include "../mob.h"
 #include "../jrandom.h"
 #include "../renderer/textures.h"
@@ -40,10 +41,11 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
     e->heightOffset = 0.25f;
     e->makeStepSound = false;
 
-    float f7 = (float)cos((double)(-yaw) * M_PI / 180.0 - M_PI);
-    float f8 = (float)sin((double)(-yaw) * M_PI / 180.0 - M_PI);
-    float cp = (float)cos((double)(-pitch) * M_PI / 180.0);
-    float sp = (float)sin((double)(-pitch) * M_PI / 180.0);
+    const float degToRad = 3.1415927f / 180.0f;
+    float f7 = MathHelper_cos(-yaw * degToRad - 3.1415927f);
+    float f8 = MathHelper_sin(-yaw * degToRad - 3.1415927f);
+    float cp = MathHelper_cos(-pitch * degToRad);
+    float sp = MathHelper_sin(-pitch * degToRad);
     a->gravity = 1.0f / speed;
 
     // prevX and prevZ are offset from 0,0,0, not from the spawn,
@@ -57,9 +59,9 @@ void Arrow_init(Arrow* a, Level* level, Entity* owner, float x, float y, float z
 
     Entity_setPosition(e, x - f7 * 0.2f, y, z + f8 * 0.2f);
 
-    float horiz = sqrtf(e->motionX * e->motionX + e->motionZ * e->motionZ);
-    e->yRotation = e->prevYRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / M_PI);
-    e->xRotation = e->prevXRotation = (float)(atan2(e->motionY, horiz) * 180.0 / M_PI);
+    float horiz = MathHelper_sqrt(e->motionX * e->motionX + e->motionZ * e->motionZ);
+    e->yRotation = e->prevYRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / 3.1415927410125732);
+    e->xRotation = e->prevXRotation = (float)(atan2(e->motionY, horiz) * 180.0 / 3.1415927410125732);
 }
 
 void Arrow_startPickup(Arrow* a, Entity* target) {
@@ -116,7 +118,7 @@ void Arrow_onTick(Arrow* a) {
     e->motionZ *= 0.998f;
     e->motionY -= 0.02f * a->gravity;
 
-    float speed = sqrtf(e->motionX * e->motionX + e->motionY * e->motionY + e->motionZ * e->motionZ);
+    float speed = MathHelper_sqrt(e->motionX * e->motionX + e->motionY * e->motionY + e->motionZ * e->motionZ);
     int steps = (int)(speed / 0.2f + 1.0f);
     float stepX = e->motionX / (float)steps;
     float stepY = e->motionY / (float)steps;
@@ -150,9 +152,9 @@ void Arrow_onTick(Arrow* a) {
     }
 
     if (!a->hasHit) {
-        float horiz = sqrtf(e->motionX * e->motionX + e->motionZ * e->motionZ);
-        e->yRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / M_PI);
-        e->xRotation = (float)(atan2(e->motionY, horiz) * 180.0 / M_PI);
+        float horiz = MathHelper_sqrt(e->motionX * e->motionX + e->motionZ * e->motionZ);
+        e->yRotation = (float)(atan2(e->motionX, e->motionZ) * 180.0 / 3.1415927410125732);
+        e->xRotation = (float)(atan2(e->motionY, horiz) * 180.0 / 3.1415927410125732);
         while (e->xRotation - e->prevXRotation < -180.0f) e->prevXRotation -= 360.0f;
         while (e->xRotation - e->prevXRotation >= 180.0f) e->prevXRotation += 360.0f;
         while (e->yRotation - e->prevYRotation < -180.0f) e->prevYRotation -= 360.0f;

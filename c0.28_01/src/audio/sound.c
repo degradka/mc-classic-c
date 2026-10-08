@@ -2,6 +2,7 @@
 // top of the platform specific audio_backend, OGG decoding via stb_vorbis
 
 #include "sound.h"
+#include "../math_helper.h"
 #include "audio_backend.h"
 #include "../jrandom.h"
 #include "../timer.h"
@@ -133,13 +134,13 @@ static const SfxClip* loadSfx(const char* path) {
 static float rotationDiff(float x, float z) {
     x -= gListenerX;
     z -= gListenerZ;
-    float d = (float)sqrt(x * x + z * z);
+    float d = MathHelper_sqrt(x * x + z * z);
     x /= d;
     z /= d;
     d /= 2.0f;
     if (d > 1.0f) d = 1.0f;
-    float c = (float)cos((double)(-gListenerYaw) * M_PI / 180.0 + M_PI);
-    float s = (float)sin((double)(-gListenerYaw) * M_PI / 180.0 + M_PI);
+    float c = MathHelper_cos(-gListenerYaw * (3.1415927f / 180.0f) + 3.1415927f);
+    float s = MathHelper_sin(-gListenerYaw * (3.1415927f / 180.0f) + 3.1415927f);
     return (s * z - c * x) * d;
 }
 
@@ -148,7 +149,7 @@ static float distanceGain(float x, float y, float z) {
     float dz = z - gListenerZ;
     x -= gListenerX;
     y -= gListenerY;
-    float d = (float)sqrt(x * x + y * y + dz * dz);
+    float d = MathHelper_sqrt(x * x + y * y + dz * dz);
     d = 1.0f - d / 32.0f;
     if (d < 0.0f) d = 0.0f;
     return d;

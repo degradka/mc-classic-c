@@ -1,11 +1,12 @@
 // renderer/frustum.c
 
 #include "frustum.h"
+#include "../math_helper.h"
 #include <math.h>
 #include <GL/glew.h>
 
 static void frustum_normalizePlane(float f[6][4], int side) {
-    float m = (float)sqrt((double)(f[side][0]*f[side][0] + f[side][1]*f[side][1] + f[side][2]*f[side][2]));
+    float m = MathHelper_sqrt(f[side][0]*f[side][0] + f[side][1]*f[side][1] + f[side][2]*f[side][2]);
     f[side][0] /= m; f[side][1] /= m; f[side][2] /= m; f[side][3] /= m;
 }
 

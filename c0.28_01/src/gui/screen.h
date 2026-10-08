@@ -5,12 +5,15 @@
 
 #include "font.h"
 #include "button.h"
+#include <stdbool.h>
 
 typedef struct Screen Screen;
 
 struct Screen {
     int width, height;
     Font* font;
+    // Screen.allowUserInput, the player keeps moving and switching blocks while it's open
+    bool allowUserInput;
 
     void (*render)(Screen* self, int xMouse, int yMouse);
     void (*init)(Screen* self);

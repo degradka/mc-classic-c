@@ -1,6 +1,7 @@
 // inventory.c
 
 #include "inventory.h"
+#include "user.h"
 
 void Inventory_init(Inventory* inv) {
     for (int i = 0; i < 9; i++) {
@@ -53,4 +54,29 @@ bool Inventory_addResource(Inventory* inv, int tileId) {
     inv->count[slot]++;
     inv->flash[slot] = 5;
     return true;
+}
+
+void Inventory_replaceSlot(Inventory* inv, int tileId) {
+    int slot = Inventory_findSlot(inv, tileId);
+    if (slot >= 0) inv->id[slot] = inv->id[inv->selected];
+    inv->id[inv->selected] = tileId;
+}
+
+void Inventory_replaceSlotIndex(Inventory* inv, int index) {
+    if (index >= 0) Inventory_replaceSlot(inv, USER_CREATIVE_TILES[index]);
+}
+
+void Inventory_grabTexture(Inventory* inv, int tileId, bool creative) {
+    int slot = Inventory_findSlot(inv, tileId);
+    if (slot >= 0) {
+        inv->selected = slot;
+        return;
+    }
+    if (!creative || tileId <= 0) return;
+    for (int i = 0; i < USER_CREATIVE_TILE_COUNT; ++i) {
+        if (USER_CREATIVE_TILES[i] == tileId) {
+            Inventory_replaceSlot(inv, tileId);
+            return;
+        }
+    }
 }

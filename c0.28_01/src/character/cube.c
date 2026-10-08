@@ -100,13 +100,22 @@ void Cube_render(Cube* c) {
         c->built = 1;
     }
 
-    glPushMatrix();
-    glTranslatef(c->x, c->y, c->z);
-    glRotated(c->zRot * 180.0 / M_PI, 0, 0, 1);
-    glRotated(c->yRot * 180.0 / M_PI, 0, 1, 0);
-    glRotated(c->xRot * 180.0 / M_PI, 1, 0, 0);
-
+    if (c->xRot != 0.0f || c->yRot != 0.0f || c->zRot != 0.0f) {
+        glPushMatrix();
+        glTranslatef(c->x, c->y, c->z);
+        if (c->zRot != 0.0f) glRotatef(c->zRot * 57.295776f, 0.0f, 0.0f, 1.0f);
+        if (c->yRot != 0.0f) glRotatef(c->yRot * 57.295776f, 0.0f, 1.0f, 0.0f);
+        if (c->xRot != 0.0f) glRotatef(c->xRot * 57.295776f, 1.0f, 0.0f, 0.0f);
+        glCallList(c->displayList);
+        glPopMatrix();
+        return;
+    }
+    if (c->x != 0.0f || c->y != 0.0f || c->z != 0.0f) {
+        glTranslatef(c->x, c->y, c->z);
+        glCallList(c->displayList);
+        glTranslatef(-c->x, -c->y, -c->z);
+        return;
+    }
     glCallList(c->displayList);
-
-    glPopMatrix();
 }
+

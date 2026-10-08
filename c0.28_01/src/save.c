@@ -25,14 +25,14 @@ static const JField RANDOM_F[] = { F('Z', "haveNextNextGaussian"), F('D', "nextN
 static const JDesc RANDOM = { "java.util.Random", 3905348978240129619LL, 3, 3, RANDOM_F, NULL };
 
 static const JField LEVEL_F[] = {
-    F('I', "cloudColor"), F('J', "createTime"), F('I', "depth"), F('I', "fogColor"), F('I', "height"),
+    F('I', "cloudColor"), F('J', "createTime"), F('Z', "creativeMode"), F('I', "depth"), F('I', "fogColor"), F('I', "height"),
     F('Z', "networkMode"), F('F', "rotSpawn"), F('I', "skyColor"), F('I', "tickCount"), F('I', "unprocessed"),
     F('I', "waterLevel"), F('I', "width"), F('I', "xSpawn"), F('I', "ySpawn"), F('I', "zSpawn"),
     L('L', "blockMap", "Lcom/mojang/minecraft/level/BlockMap;"), L('[', "blocks", "[B"),
     L('L', "creator", "Ljava/lang/String;"), L('L', "name", "Ljava/lang/String;"),
     L('L', "player", "Lcom/mojang/minecraft/Entity;")
 };
-static const JDesc LEVEL = { "com.mojang.minecraft.level.Level", 0, 2, 20, LEVEL_F, NULL };
+static const JDesc LEVEL = { "com.mojang.minecraft.level.Level", 0, 2, 21, LEVEL_F, NULL };
 
 static const JField BLOCKMAP_F[] = {
     F('I', "depth"), F('I', "height"), F('I', "width"), L('L', "all", "Ljava/util/List;"),
@@ -52,14 +52,14 @@ static const JDesc AABB_D = { "com.mojang.minecraft.phys.AABB", 0, 2, 7, AABB_F,
 static const JField ENTITY_F[] = {
     F('F', "bbHeight"), F('F', "bbWidth"), F('Z', "collision"), F('F', "fallDistance"), F('F', "footSize"),
     F('F', "heightOffset"), F('Z', "horizontalCollision"), F('Z', "makeStepSound"), F('I', "nextStep"),
-    F('Z', "onGround"), F('Z', "removed"), F('Z', "slide"), F('I', "textureId"), F('F', "walkDist"),
+    F('Z', "noPhysics"), F('Z', "onGround"), F('F', "pushthrough"), F('Z', "removed"), F('Z', "slide"), F('I', "textureId"), F('F', "walkDist"),
     F('F', "walkDistO"), F('F', "x"), F('F', "xOld"), F('F', "xRot"), F('F', "xRotO"), F('F', "xd"), F('F', "xo"),
     F('F', "y"), F('F', "yOld"), F('F', "yRot"), F('F', "yRotO"), F('F', "ySlideOffset"), F('F', "yd"), F('F', "yo"),
     F('F', "z"), F('F', "zOld"), F('F', "zd"), F('F', "zo"),
     L('L', "bb", "Lcom/mojang/minecraft/phys/AABB;"), L('L', "blockMap", "Lcom/mojang/minecraft/level/BlockMap;"),
     L('L', "level", "Lcom/mojang/minecraft/level/Level;")
 };
-static const JDesc ENTITY = { "com.mojang.minecraft.Entity", 0, 2, 35, ENTITY_F, NULL };
+static const JDesc ENTITY = { "com.mojang.minecraft.Entity", 0, 2, 37, ENTITY_F, NULL };
 
 static const JField MOB_F[] = {
     F('I', "airSupply"), F('Z', "allowAlpha"), F('F', "animStep"), F('F', "animStepO"), F('I', "attackTime"),
@@ -86,6 +86,8 @@ static const JDesc CREEPER = { "com.mojang.minecraft.mob.Creeper", 0, 2, 0, NULL
 static const JDesc QUADRUPED = { "com.mojang.minecraft.mob.QuadrupedMob", 0, 2, 0, NULL, &MOB };
 static const JDesc PIG = { "com.mojang.minecraft.mob.Pig", 0, 2, 0, NULL, &QUADRUPED };
 static const JDesc SPIDER = { "com.mojang.minecraft.mob.Spider", 0, 2, 0, NULL, &QUADRUPED };
+static const JField SHEEP_F[] = { F('F', "graze"), F('F', "grazeO"), F('Z', "grazing"), F('I', "grazingTime"), F('Z', "hasFur") };
+static const JDesc SHEEP = { "com.mojang.minecraft.mob.Sheep", 0, 2, 5, SHEEP_F, &QUADRUPED };
 
 static const JField AI_F[] = { F('I', "defaultLookAngle") };
 static const JDesc AI = { "com.mojang.minecraft.mob.ai.AI", 0, 2, 1, AI_F, NULL };
@@ -101,10 +103,12 @@ static const JDesc ATTACKAI = { "com.mojang.minecraft.mob.ai.BasicAttackAI", 0, 
 static const JField PLAYERAI_F[] = { L('L', "this$0", "Lcom/mojang/minecraft/player/Player;") };
 static const JDesc PLAYERAI = { "com.mojang.minecraft.player.Player$1", 0, 2, 1, PLAYERAI_F, &BASICAI };
 static const JField SKELETONAI_F[] = { L('L', "this$0", "Lcom/mojang/minecraft/mob/Skeleton;") };
-static const JDesc SKELETONAI = { "com.mojang.minecraft.mob.Skeleton$1", 199217931220741070LL, 2, 1, SKELETONAI_F, &ATTACKAI };
+static const JDesc SKELETONAI = { "com.mojang.minecraft.mob.Skeleton$1", 0, 2, 1, SKELETONAI_F, &ATTACKAI };
 static const JField CREEPERAI_F[] = { L('L', "this$0", "Lcom/mojang/minecraft/mob/Creeper;") };
 static const JDesc JUMPAI = { "com.mojang.minecraft.mob.ai.JumpAttackAI", 0, 2, 0, NULL, &ATTACKAI };
-static const JDesc CREEPERAI = { "com.mojang.minecraft.mob.Creeper$1", -2523981573680831112LL, 2, 1, CREEPERAI_F, &ATTACKAI };
+static const JDesc CREEPERAI = { "com.mojang.minecraft.mob.Creeper$1", 0, 2, 1, CREEPERAI_F, &ATTACKAI };
+static const JField SHEEPAI_F[] = { L('L', "this$0", "Lcom/mojang/minecraft/mob/Sheep;") };
+static const JDesc SHEEPAI = { "com.mojang.minecraft.mob.Sheep$1", 1, 2, 1, SHEEPAI_F, &BASICAI };
 
 static const JField INVENTORY_F[] = { F('I', "selected"), L('[', "count", "[I"), L('[', "popTime", "[I"), L('[', "slots", "[I") };
 static const JDesc INVENTORY = { "com.mojang.minecraft.player.Inventory", 0, 2, 4, INVENTORY_F, NULL };
@@ -117,14 +121,10 @@ static const JField ARROW_F[] = {
     L('L', "owner", "Lcom/mojang/minecraft/Entity;")
 };
 static const JDesc ARROW = { "com.mojang.minecraft.item.Arrow", 0, 2, 14, ARROW_F, &ENTITY };
-static const JField TNT_F[] = { F('I', "life"), F('F', "xd"), F('F', "yd"), F('F', "zd") };
-static const JDesc TNT = { "com.mojang.minecraft.item.PrimedTnt", 0, 2, 4, TNT_F, &ENTITY };
-static const JField SMOLDER_F[] = { F('I', "life"), F('I', "lifeTime") };
-static const JDesc SMOLDER = { "com.mojang.minecraft.level.fx.Smolder", 0, 2, 2, SMOLDER_F, &ENTITY };
 
 /* writing */
 
-enum { K_NONE, K_PLAYER, K_MOB, K_ITEM, K_ARROW, K_TNT, K_SMOLDER };
+enum { K_NONE, K_PLAYER, K_MOB, K_ITEM, K_ARROW };
 
 typedef struct {
     JWriter w;
@@ -138,8 +138,6 @@ static int kindOf(const World* wd, const Entity* e) {
     if ((const Creature*)e >= wd->mobs && (const Creature*)e < wd->mobs + *wd->mobCount) return K_MOB;
     if ((const Item*)e >= wd->items && (const Item*)e < wd->items + *wd->itemCount) return ((const Item*)e)->pickedUp ? K_NONE : K_ITEM;
     if ((const Arrow*)e >= wd->arrows && (const Arrow*)e < wd->arrows + *wd->arrowCount) return ((const Arrow*)e)->pickedUp ? K_NONE : K_ARROW;
-    if ((const PrimedTnt*)e >= wd->tnts && (const PrimedTnt*)e < wd->tnts + *wd->tntCount) return K_TNT;
-    if ((const Smolder*)e >= wd->smolders && (const Smolder*)e < wd->smolders + *wd->smolderCount) return K_SMOLDER;
     return K_NONE;
 }
 
@@ -176,15 +174,17 @@ static void entityFields(Out* o, const Entity* e, bool own) {
     JW_u1(w, e->horizontalCollision);
     JW_u1(w, e->makeStepSound);
     JW_i4(w, e->nextStep);
+    JW_u1(w, e->noPhysics);
     JW_u1(w, e->onGround);
+    JW_f4(w, e->pushthrough);
     JW_u1(w, e->removed);
     JW_u1(w, kindOf(o->world, e) != K_ARROW);
     JW_i4(w, 0); // a gl texture id, means nothing in another run
     JW_f4(w, e->walkDist);
     JW_f4(w, e->walkDistO);
-    JW_f4(w, e->x); JW_f4(w, e->x); JW_f4(w, xr); JW_f4(w, xro); JW_f4(w, xd); JW_f4(w, e->prevX);
-    JW_f4(w, e->y); JW_f4(w, e->y); JW_f4(w, yr); JW_f4(w, yro); JW_f4(w, e->ySlideOffset); JW_f4(w, yd); JW_f4(w, e->prevY);
-    JW_f4(w, e->z); JW_f4(w, e->z); JW_f4(w, zd); JW_f4(w, e->prevZ);
+    JW_f4(w, e->x); JW_f4(w, e->slotted ? e->xOld : e->x); JW_f4(w, xr); JW_f4(w, xro); JW_f4(w, xd); JW_f4(w, e->prevX);
+    JW_f4(w, e->y); JW_f4(w, e->slotted ? e->yOld : e->y); JW_f4(w, yr); JW_f4(w, yro); JW_f4(w, e->ySlideOffset); JW_f4(w, yd); JW_f4(w, e->prevY);
+    JW_f4(w, e->z); JW_f4(w, e->slotted ? e->zOld : e->z); JW_f4(w, zd); JW_f4(w, e->prevZ);
     JW_object(w, &AABB_D, &e->boundingBox);
     JW_f4(w, 0.0f);
     JW_f4(w, e->boundingBox.minX); JW_f4(w, e->boundingBox.maxX);
@@ -252,7 +252,8 @@ static void mobFields(Out* o, const Entity* e, const char* model, const char* te
         const Creature* c = (const Creature*)e;
         const Ai* ai = &c->ai;
         const JDesc* d = c->kind == CREATURE_ZOMBIE ? &ATTACKAI : c->kind == CREATURE_SKELETON ? &SKELETONAI
-                       : c->kind == CREATURE_CREEPER ? &CREEPERAI : c->kind == CREATURE_SPIDER ? &JUMPAI : &BASICAI;
+                       : c->kind == CREATURE_CREEPER ? &CREEPERAI : c->kind == CREATURE_SPIDER ? &JUMPAI
+                       : c->kind == CREATURE_SHEEP ? &SHEEPAI : &BASICAI;
         JW_object(w, d, ai);
         JW_i4(w, ai->wanderPitch);
         JW_i4(w, ai->attackCooldown);
@@ -266,8 +267,8 @@ static void mobFields(Out* o, const Entity* e, const char* model, const char* te
         JW_ref(w, o->world->level);
         JW_ref(w, e);
         writeRandom(o, &ai->random, &ai->random);
-        if (d != &BASICAI) JW_i4(w, ai->damage);
-        if (d == &SKELETONAI || d == &CREEPERAI) JW_ref(w, e);
+        if (d != &BASICAI && d != &SHEEPAI) JW_i4(w, ai->damage);
+        if (d == &SKELETONAI || d == &CREEPERAI || d == &SHEEPAI) JW_ref(w, e);
     }
     JW_string(w, model);
     JW_string(w, texture);
@@ -293,16 +294,24 @@ static void writeEntity(Out* o, const Entity* e) {
         JW_intArray(w, p->inventory.id, 9);
     } else if (kind == K_MOB) {
         const Creature* c = (const Creature*)e;
-        static const char* const MODEL[] = { "zombie", "skeleton", "creeper", "pig", "spider" };
-        static const char* const TEXTURE[] = { "/mob/zombie.png", "/mob/skeleton.png", "/mob/creeper.png", "/mob/pig.png", "/mob/spider.png" };
+        static const char* const MODEL[] = { "zombie", "skeleton", "creeper", "pig", "spider", "sheep" };
+        static const char* const TEXTURE[] = { "/mob/zombie.png", "/mob/skeleton.png", "/mob/creeper.png", "/mob/pig.png", "/mob/spider.png", "/mob/sheep.png" };
         const JDesc* d = c->kind == CREATURE_ZOMBIE ? &ZOMBIE : c->kind == CREATURE_SKELETON ? &SKELETON
-                       : c->kind == CREATURE_CREEPER ? &CREEPER : c->kind == CREATURE_SPIDER ? &SPIDER : &PIG;
+                       : c->kind == CREATURE_CREEPER ? &CREEPER : c->kind == CREATURE_SPIDER ? &SPIDER
+                       : c->kind == CREATURE_SHEEP ? &SHEEP : &PIG;
         JW_object(w, d, e);
         entityFields(o, e, false);
         mobFields(o, e, MODEL[c->kind], TEXTURE[c->kind], false);
         if (c->kind == CREATURE_ZOMBIE || c->kind == CREATURE_SKELETON) {
             JW_u1(w, c->armor);
             JW_u1(w, c->helmet);
+        }
+        if (c->kind == CREATURE_SHEEP) {
+            JW_f4(w, c->graze);
+            JW_f4(w, c->grazeO);
+            JW_u1(w, c->grazing);
+            JW_i4(w, c->grazingTime);
+            JW_u1(w, c->hasFur);
         }
     } else if (kind == K_ITEM) {
         const Item* it = (const Item*)e;
@@ -327,18 +336,6 @@ static void writeEntity(Out* o, const Entity* e) {
         JW_f4(w, e->yRotation); JW_f4(w, e->prevYRotation); JW_f4(w, e->motionY);
         JW_f4(w, e->motionZ);
         writeEntityRef(o, a->owner);
-    } else if (kind == K_TNT) {
-        const PrimedTnt* t = (const PrimedTnt*)e;
-        JW_object(w, &TNT, e);
-        entityFields(o, e, false);
-        JW_i4(w, t->life);
-        JW_f4(w, t->xd); JW_f4(w, t->yd); JW_f4(w, t->zd);
-    } else if (kind == K_SMOLDER) {
-        const Smolder* sm = (const Smolder*)e;
-        JW_object(w, &SMOLDER, e);
-        entityFields(o, e, false);
-        JW_i4(w, sm->life);
-        JW_i4(w, sm->lifeTime);
     } else {
         JW_null(w);
     }
@@ -350,8 +347,6 @@ static int collect(const World* wd, const Entity** out) {
     for (int i = 0; i < *wd->mobCount; ++i) out[n++] = &wd->mobs[i].e;
     for (int i = 0; i < *wd->itemCount; ++i) if (!wd->items[i].pickedUp) out[n++] = &wd->items[i].e;
     for (int i = 0; i < *wd->arrowCount; ++i) if (!wd->arrows[i].pickedUp) out[n++] = &wd->arrows[i].e;
-    for (int i = 0; i < *wd->tntCount; ++i) out[n++] = &wd->tnts[i].e;
-    for (int i = 0; i < *wd->smolderCount; ++i) out[n++] = &wd->smolders[i].e;
     return n;
 }
 
@@ -387,7 +382,7 @@ bool Save_write(const World* wd, const char* path) {
     JWriter_init(&o.w);
     JWriter* w = &o.w;
 
-    int total = 1 + *wd->mobCount + *wd->itemCount + *wd->arrowCount + *wd->tntCount + *wd->smolderCount;
+    int total = 1 + *wd->mobCount + *wd->itemCount + *wd->arrowCount;
     const Entity** all = (const Entity**)malloc((size_t)total * sizeof(Entity*));
     const Entity** tmp = (const Entity**)malloc((size_t)total * sizeof(Entity*));
     if (!all || !tmp) { free(all); free(tmp); JWriter_free(w); return false; }
@@ -396,6 +391,7 @@ bool Save_write(const World* wd, const char* path) {
     JW_object(w, &LEVEL, lv);
     JW_i4(w, lv->cloudColor);
     JW_i8(w, lv->createTime);
+    JW_u1(w, lv->creativeMode);
     JW_i4(w, lv->depth);
     JW_i4(w, lv->fogColor);
     JW_i4(w, lv->height);
@@ -426,7 +422,9 @@ bool Save_write(const World* wd, const char* path) {
             for (int x = 0; x < gw; ++x) {
                 int m = 0;
                 for (int i = 0; i < n; ++i) {
-                    if (cell(all[i]->x, gw) == x && cell(all[i]->y, gd) == y && cell(all[i]->z, gh) == z) tmp[m++] = all[i];
+                    const Entity* e = all[i];
+                    float ex = e->slotted ? e->xOld : e->x, ey = e->slotted ? e->yOld : e->y, ez = e->slotted ? e->zOld : e->z;
+                    if (e->inGrid && cell(ex, gw) == x && cell(ey, gd) == y && cell(ez, gh) == z) tmp[m++] = e;
                 }
                 writeList(&o, NULL, tmp, m);
             }
@@ -531,11 +529,60 @@ static void nodeString(const JNode* n, char* dst, size_t size) {
     if (n && n->kind == JN_STRING && n->str) copyString(dst, size, (const unsigned char*)n->str, strlen(n->str));
 }
 
+// every class that can be read back
+static const char* const KNOWN_CLASSES[] = {
+    "[B", "[I", "[Ljava.util.ArrayList;", "java.util.ArrayList", "java.util.Random",
+    "com.mojang.minecraft.Entity", "com.mojang.minecraft.item.Arrow", "com.mojang.minecraft.item.Item",
+    "com.mojang.minecraft.level.BlockMap", "com.mojang.minecraft.level.BlockMap$Slot", "com.mojang.minecraft.level.Level",
+    "com.mojang.minecraft.mob.Creeper", "com.mojang.minecraft.mob.Creeper$1", "com.mojang.minecraft.mob.HumanoidMob",
+    "com.mojang.minecraft.mob.Mob", "com.mojang.minecraft.mob.Pig", "com.mojang.minecraft.mob.QuadrupedMob",
+    "com.mojang.minecraft.mob.Sheep", "com.mojang.minecraft.mob.Sheep$1", "com.mojang.minecraft.mob.Skeleton",
+    "com.mojang.minecraft.mob.Skeleton$1", "com.mojang.minecraft.mob.Spider", "com.mojang.minecraft.mob.Zombie",
+    "com.mojang.minecraft.mob.ai.AI", "com.mojang.minecraft.mob.ai.BasicAI", "com.mojang.minecraft.mob.ai.BasicAttackAI",
+    "com.mojang.minecraft.mob.ai.JumpAttackAI", "com.mojang.minecraft.phys.AABB", "com.mojang.minecraft.player.Inventory",
+    "com.mojang.minecraft.player.Player", "com.mojang.minecraft.player.Player$1",
+    "com.mojang.minecraft.item.TakeEntityAnim", "com.mojang.minecraft.net.NetworkPlayer",
+    "com.mojang.minecraft.particle.Particle", "com.mojang.minecraft.particle.TerrainParticle", "com.mojang.minecraft.particle.WaterDropParticle",
+};
+
+// a class whose serialVersionUID changed is refused, except
+// Player$1, Creeper$1 and Skeleton$1 which get through whatever they say
+static const char* const CHECKED_NAMES[] = {
+    "com.mojang.minecraft.Entity", "com.mojang.minecraft.item.Arrow", "com.mojang.minecraft.item.Item",
+    "com.mojang.minecraft.item.TakeEntityAnim", "com.mojang.minecraft.level.BlockMap",
+    "com.mojang.minecraft.level.BlockMap$Slot", "com.mojang.minecraft.level.Level", "com.mojang.minecraft.mob.Creeper",
+    "com.mojang.minecraft.mob.HumanoidMob", "com.mojang.minecraft.mob.Mob", "com.mojang.minecraft.mob.Pig",
+    "com.mojang.minecraft.mob.QuadrupedMob", "com.mojang.minecraft.mob.Sheep", "com.mojang.minecraft.mob.Sheep$1",
+    "com.mojang.minecraft.mob.Skeleton", "com.mojang.minecraft.mob.Spider", "com.mojang.minecraft.mob.Zombie",
+    "com.mojang.minecraft.mob.ai.AI", "com.mojang.minecraft.mob.ai.BasicAI", "com.mojang.minecraft.mob.ai.BasicAttackAI",
+    "com.mojang.minecraft.mob.ai.JumpAttackAI", "com.mojang.minecraft.net.NetworkPlayer",
+    "com.mojang.minecraft.particle.Particle", "com.mojang.minecraft.particle.TerrainParticle",
+    "com.mojang.minecraft.particle.WaterDropParticle", "com.mojang.minecraft.phys.AABB",
+    "com.mojang.minecraft.player.Inventory", "com.mojang.minecraft.player.Player",
+};
+static const int64_t CHECKED_SUIDS[] = {
+    0, 0, 0,
+    1, 0,
+    0, 0, 0,
+    0, 0, 0,
+    0, 0, 1,
+    0, 0, 0,
+    0, 0, 0,
+    0, 77479605454997290LL,
+    1, 1,
+    1, 0,
+    0, 0,
+};
+
 static bool loadV2(Level* level, const unsigned char* p, size_t len) {
     JNode* root = NULL;
     JStream* s = JStream_read(p, len, &root);
     if (!s) return false;
-    if (!JNode_is(root, LV)) { JStream_free(s); return false; }
+    if (!JNode_is(root, LV) || JStream_unknownClass(s, KNOWN_CLASSES, (int)(sizeof KNOWN_CLASSES / sizeof KNOWN_CLASSES[0])) ||
+        JStream_suidMismatch(s, CHECKED_NAMES, CHECKED_SUIDS, (int)(sizeof CHECKED_NAMES / sizeof CHECKED_NAMES[0]))) {
+        JStream_free(s);
+        return false;
+    }
     int w = (int)JNode_int(root, LV, "width"), h = (int)JNode_int(root, LV, "height"), d = (int)JNode_int(root, LV, "depth");
     JNode* b = JNode_obj(root, LV, "blocks");
     size_t total = (size_t)w * h * d;
@@ -550,6 +597,7 @@ static bool loadV2(Level* level, const unsigned char* p, size_t len) {
     nodeString(JNode_obj(root, LV, "name"), level->name, sizeof level->name);
     nodeString(JNode_obj(root, LV, "creator"), level->creator, sizeof level->creator);
     level->createTime = JNode_int(root, LV, "createTime");
+    level->creativeMode = JNode_int(root, LV, "creativeMode") != 0;
     level->xSpawn = (int)JNode_int(root, LV, "xSpawn");
     level->ySpawn = (int)JNode_int(root, LV, "ySpawn");
     level->zSpawn = (int)JNode_int(root, LV, "zSpawn");
@@ -619,6 +667,8 @@ static void readEntity(Entity* e, const JNode* n, bool own) {
     e->heightOffset = JNode_float(n, EN, "heightOffset");
     e->footSize = JNode_float(n, EN, "footSize");
     e->ySlideOffset = JNode_float(n, EN, "ySlideOffset");
+    e->noPhysics = JNode_int(n, EN, "noPhysics") != 0;
+    e->pushthrough = JNode_float(n, EN, "pushthrough");
     e->onGround = JNode_int(n, EN, "onGround") != 0;
     e->horizontalCollision = JNode_int(n, EN, "horizontalCollision") != 0;
     e->collision = JNode_int(n, EN, "collision") != 0;
@@ -725,10 +775,11 @@ bool Save_loadEntities(World* w) {
             havePlayer = true;
         } else if (strcmp(cls, "com.mojang.minecraft.mob.Zombie") == 0 || strcmp(cls, "com.mojang.minecraft.mob.Skeleton") == 0 ||
                    strcmp(cls, "com.mojang.minecraft.mob.Creeper") == 0 || strcmp(cls, "com.mojang.minecraft.mob.Pig") == 0 ||
-                   strcmp(cls, "com.mojang.minecraft.mob.Spider") == 0) {
+                   strcmp(cls, "com.mojang.minecraft.mob.Spider") == 0 || strcmp(cls, "com.mojang.minecraft.mob.Sheep") == 0) {
             if (*w->mobCount >= w->maxMobs) continue;
             CreatureKind kind = cls[25] == 'Z' ? CREATURE_ZOMBIE : strcmp(cls + 25, "Skeleton") == 0 ? CREATURE_SKELETON
-                              : cls[25] == 'C' ? CREATURE_CREEPER : strcmp(cls + 25, "Spider") == 0 ? CREATURE_SPIDER : CREATURE_PIG;
+                              : cls[25] == 'C' ? CREATURE_CREEPER : strcmp(cls + 25, "Spider") == 0 ? CREATURE_SPIDER
+                              : strcmp(cls + 25, "Sheep") == 0 ? CREATURE_SHEEP : CREATURE_PIG;
             Creature* c = &w->mobs[(*w->mobCount)++];
             Creature_init(c, kind, w->level, JNode_float(n, EN, "x"), JNode_float(n, EN, "y"), JNode_float(n, EN, "z"));
             e = &c->e;
@@ -738,6 +789,14 @@ bool Save_loadEntities(World* w) {
             if (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) {
                 c->helmet = JNode_int(n, "com.mojang.minecraft.mob.HumanoidMob", "helmet") != 0;
                 c->armor = JNode_int(n, "com.mojang.minecraft.mob.HumanoidMob", "armor") != 0;
+            }
+            if (kind == CREATURE_SHEEP) {
+                const char* SH = "com.mojang.minecraft.mob.Sheep";
+                c->graze = JNode_float(n, SH, "graze");
+                c->grazeO = JNode_float(n, SH, "grazeO");
+                c->grazing = JNode_int(n, SH, "grazing") != 0;
+                c->grazingTime = (int)JNode_int(n, SH, "grazingTime");
+                c->hasFur = JNode_int(n, SH, "hasFur") != 0;
             }
         } else if (strcmp(cls, "com.mojang.minecraft.item.Item") == 0) {
             if (*w->itemCount >= w->maxItems) continue;
@@ -772,30 +831,27 @@ bool Save_loadEntities(World* w) {
             e->motionX = JNode_float(n, AR, "xd");
             e->motionY = JNode_float(n, AR, "yd");
             e->motionZ = JNode_float(n, AR, "zd");
-        } else if (strcmp(cls, "com.mojang.minecraft.item.PrimedTnt") == 0) {
-            if (*w->tntCount >= w->maxTnts) continue;
-            PrimedTnt* t = &w->tnts[(*w->tntCount)++];
-            PrimedTnt_init(t, w->level, JNode_float(n, EN, "x"), JNode_float(n, EN, "y"), JNode_float(n, EN, "z"));
-            e = &t->e;
-            readEntity(e, n, false);
-            const char* TN = "com.mojang.minecraft.item.PrimedTnt";
-            t->life = (int)JNode_int(n, TN, "life");
-            t->xd = JNode_float(n, TN, "xd");
-            t->yd = JNode_float(n, TN, "yd");
-            t->zd = JNode_float(n, TN, "zd");
-        } else if (strcmp(cls, "com.mojang.minecraft.level.fx.Smolder") == 0) {
-            if (*w->smolderCount >= w->maxSmolders) continue;
-            Smolder* sm = &w->smolders[(*w->smolderCount)++];
-            Smolder_init(sm, w->level, 0, 0, 0);
-            e = &sm->e;
-            readEntity(e, n, false);
-            sm->life = (int)JNode_int(n, NULL, "life");
-            sm->lifeTime = (int)JNode_int(n, NULL, "lifeTime");
         }
         if (e) {
             pairs[np].node = n;
             pairs[np].e = e;
             np++;
+        }
+    }
+
+    // the file keeps where each entity was slotted and which grid cell holds it
+    const JNode* grid = bm ? JNode_obj(bm, NULL, "entityGrid") : NULL;
+    for (int i = 0; pairs && i < np; ++i) {
+        const JNode* n = pairs[i].node;
+        Entity* e = pairs[i].e;
+        e->slotted = true;
+        e->xOld = JNode_float(n, EN, "xOld");
+        e->yOld = JNode_float(n, EN, "yOld");
+        e->zOld = JNode_float(n, EN, "zOld");
+        e->inGrid = false;
+        for (int c = 0; grid && grid->elems && c < grid->len && !e->inGrid; ++c) {
+            const JNode* list = grid->elems[c];
+            for (int k = 0; list && k < list->nextra && !e->inGrid; ++k) e->inGrid = list->extra[k] == n;
         }
     }
 

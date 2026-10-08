@@ -1,6 +1,7 @@
 // level/level_renderer.c
 
 #include <GL/glew.h>
+#include "../math_helper.h"
 #include <GL/glu.h>
 #include <GLFW/glfw3.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include "../renderer/tessellator.h"
 #include <math.h>
 #include <stdio.h>
+#include "../java_sort.h"
 
 static Tessellator TESSELLATOR;
 
@@ -24,11 +26,9 @@ extern Tessellator TESSELLATOR;
 
 // the ground and water around the map
 // list 0 is ground and list 1 is water
+// the top uses whatever is bound when the list is called, render binds rock.png first
 static void compileSurroundingGround(LevelRenderer* r) {
-    glEnable(GL_TEXTURE_2D);
-    // no mipmaps anymore, every texture goes up with plain glTexImage2D
     GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
-    glBindTexture(GL_TEXTURE_2D, rockTex);
     glColor4f(0.5f, 0.5f, 0.5f, 1.0f);
 
     const float y = Level_getGroundLevel(r->level);
@@ -78,19 +78,12 @@ static void compileSurroundingGround(LevelRenderer* r) {
         Tessellator_vertexUV(&TESSELLATOR, (float)r->level->width, y,    (float)(zz + 0), 0.0f, 0.0f);
     }
     Tessellator_end(&TESSELLATOR);
-
-    glDisable(GL_BLEND);
 }
 
+// texturing, blending and water.png are set up by render before the list
 static void compileSurroundingWater(LevelRenderer* r) {
-    glEnable(GL_TEXTURE_2D);
     glColor3f(1.0f, 1.0f, 1.0f);
-    // no mipmaps, like compileSurroundingGround
-    GLuint waterTex = loadTexture("resources/water.png", GL_NEAREST);
-    glBindTexture(GL_TEXTURE_2D, waterTex);
-
     const float y = Level_getWaterLevel(r->level);
-    glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     int s = 128;
@@ -130,10 +123,13 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
     level->renderer = r;
 
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-    r->chunks = (Chunk*)malloc((size_t)total * sizeof(Chunk));
-    r->sortedChunks = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
-    r->dirtyScratch = (Chunk**)malloc((size_t)total * sizeof(Chunk*));
-    if (!r->chunks || !r->sortedChunks || !r->dirtyScratch) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
+    // a level under 16 wide has no chunks at all
+    size_t alloc = total > 0 ? (size_t)total : 1;
+    r->chunks = (Chunk*)malloc(alloc * sizeof(Chunk));
+    r->sortedChunks = (Chunk**)malloc(alloc * sizeof(Chunk*));
+    r->dirtyList = (Chunk**)malloc(alloc * sizeof(Chunk*));
+    r->dirtyCount = 0;
+    if (!r->chunks || !r->sortedChunks || !r->dirtyList) { fprintf(stderr, "Failed to allocate chunks\n"); exit(EXIT_FAILURE); }
 
     for (int x = 0; x < r->chunkAmountX; x++)
     for (int y = 0; y < r->chunkAmountY; y++)
@@ -143,12 +139,13 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
         int minChunkZ = z * CHUNK_SIZE, maxChunkZ = MIN(level->height, (z + 1) * CHUNK_SIZE);
         int idx = (x + y * r->chunkAmountX) * r->chunkAmountZ + z;
         Chunk_init(&r->chunks[idx], level, terrainTex, minChunkX, minChunkY, minChunkZ, maxChunkX, maxChunkY, maxChunkZ);
-        r->sortedChunks[idx] = &r->chunks[idx];
+        // sortedChunks starts out z, then y, then x
+        r->sortedChunks[(z * r->chunkAmountY + y) * r->chunkAmountX + x] = &r->chunks[idx];
     }
 
     r->drawDistance = 0;
     // sorts on the first render
-    r->lastSortX = r->lastSortY = r->lastSortZ = -900000.0;
+    r->lastSortX = r->lastSortY = r->lastSortZ = -9999.0f;
 
     r->surroundLists = glGenLists(2);
     glNewList(r->surroundLists + 0, GL_COMPILE);
@@ -160,6 +157,7 @@ void LevelRenderer_init(LevelRenderer* r, Level* level, int terrainTex) {
 
     r->cloudTick = 0;
     r->cloudTexture = loadTexture("resources/clouds.png", GL_NEAREST);
+    LevelRenderer_setDirty(r, 0, 0, 0, level->width, level->depth, level->height);
 }
 
 void LevelRenderer_tick(LevelRenderer* r) {
@@ -261,46 +259,35 @@ void LevelRenderer_renderSurroundingWater(const LevelRenderer* r) {
     glCallList(r->surroundLists + 1);
 }
 
-static const Player* gDistPlayer = NULL;
-static int distance_cmp(const void* a, const void* b) {
-    const Chunk* c1 = *(const Chunk* const*)a;
-    const Chunk* c2 = *(const Chunk* const*)b;
-    return (Chunk_distanceToSqr(c1, gDistPlayer) < Chunk_distanceToSqr(c2, gDistPlayer)) ? -1 : 1;
+// DistanceSorter, never returns 0
+static int distanceCmp(const void* a, const void* b, void* ctx) {
+    const Player* p = (const Player*)ctx;
+    return Chunk_distanceToSqr((const Chunk*)a, p) < Chunk_distanceToSqr((const Chunk*)b, p) ? -1 : 1;
 }
 
 void LevelRenderer_render(LevelRenderer* r, const Player* player, int layer) {
     int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
 
-    double xd = player->e.x - r->lastSortX;
-    double yd = player->e.y - r->lastSortY;
-    double zd = player->e.z - r->lastSortZ;
-    if (xd * xd + yd * yd + zd * zd > 64.0) {
+    float xd = player->e.x - r->lastSortX;
+    float yd = player->e.y - r->lastSortY;
+    float zd = player->e.z - r->lastSortZ;
+    if (xd * xd + yd * yd + zd * zd > 64.0f) {
         r->lastSortX = player->e.x;
         r->lastSortY = player->e.y;
         r->lastSortZ = player->e.z;
-        gDistPlayer = player;
-        qsort(r->sortedChunks, (size_t)total, sizeof(Chunk*), distance_cmp);
+        JavaSort_sort((void**)r->sortedChunks, total, distanceCmp, (void*)player);
     }
 
-    // pass 0 is list 0, cube faces and plants together
     bool any = false;
     for (int i = 0; i < total && !any; ++i) {
         const Chunk* c = r->sortedChunks[i];
-        if (!c->visible) continue;
-        if (layer == 0) any = !c->empty[0] || !c->empty[2];
-        else any = !c->empty[1];
+        any = c->visible && !c->empty[layer];
     }
     if (!any) return;
     glBindTexture(GL_TEXTURE_2D, r->terrainTex);
     for (int i = 0; i < total; ++i) {
         Chunk* c = r->sortedChunks[i];
-        if (!c->visible) continue;
-        if (layer == 0) {
-            if (!c->empty[0]) Chunk_render(c, 0);
-            if (!c->empty[2]) Chunk_render(c, 2);
-        } else if (!c->empty[1]) {
-            Chunk_render(c, 1);
-        }
+        if (c->visible && !c->empty[layer]) Chunk_render(c, layer);
     }
 }
 
@@ -313,53 +300,33 @@ void LevelRenderer_destroy(LevelRenderer* r) {
 
     free(r->chunks);
     free(r->sortedChunks);
-    free(r->dirtyScratch);
+    free(r->dirtyList);
 }
 
 /* dirty chunk prioritization */
 
-// sort state for qsort comparator
-static const Player* gSortPlayer = NULL;
-
-// DirtyChunkSorter, visible chunks first, then the nearest
-static int dirty_cmp(const void* a, const void* b) {
-    const Chunk* c1 = *(const Chunk* const*)a;
-    const Chunk* c2 = *(const Chunk* const*)b;
-
-    if (c1 == c2) return 0;
-
-    if (c1->visible && !c2->visible) return -1;
-    if (c2->visible && !c1->visible) return  1;
-
-    double dist1 = Chunk_distanceToSqr(c1, gSortPlayer);
-    double dist2 = Chunk_distanceToSqr(c2, gSortPlayer);
-    return (dist1 < dist2) ? -1 : 1;
+// DirtyChunkSorter: hidden chunks first, then the farthest, so the best ones end up last
+static int dirtyCmp(const void* a, const void* b, void* ctx) {
+    const Chunk* c1 = (const Chunk*)a;
+    const Chunk* c2 = (const Chunk*)b;
+    const Player* p = (const Player*)ctx;
+    if (c1->visible && !c2->visible) return 1;
+    if (c2->visible && !c1->visible) return -1;
+    return Chunk_distanceToSqr(c1, p) < Chunk_distanceToSqr(c2, p) ? 1 : -1;
 }
 
+// sorts the dirty list in place and rebuilds the last 3, like the render loop does
 int LevelRenderer_updateDirtyChunks(LevelRenderer* r, const Player* player) {
-    // dirty chunks go into a reused buffer, no malloc every frame
-    int total = r->chunkAmountX * r->chunkAmountY * r->chunkAmountZ;
-    Chunk** list = r->dirtyScratch;
-
-    int n = 0;
-    for (int i = 0; i < total; ++i) {
-        if (Chunk_isDirty(&r->chunks[i])) list[n++] = &r->chunks[i];
+    JavaSort_sort((void**)r->dirtyList, r->dirtyCount, dirtyCmp, (void*)player);
+    int last = r->dirtyCount - 1;
+    int n = r->dirtyCount < 3 ? r->dirtyCount : 3;
+    for (int i = 0; i < n; ++i) {
+        Chunk* c = r->dirtyList[last - i];
+        r->dirtyCount--;
+        Chunk_rebuild(c);
+        c->dirty = false;
     }
-    if (n == 0) return 0;
-
-    // sort with priorities
-    gSortPlayer = player;
-    qsort(list, (size_t)n, sizeof(Chunk*), dirty_cmp);
-
-    // rebuild up to 4 a frame
-    int limit = n < 3 ? n : 3;
-    for (int i = 0; i < limit; ++i) {
-        Chunk_rebuild(list[i], 0); // solid
-        Chunk_rebuild(list[i], 1); // liquid
-        Chunk_rebuild(list[i], 2); // plants
-    }
-
-    return limit;
+    return n;
 }
 
 // the mining cracks, the hit tile's shape a bit bigger with a darkening blend
@@ -392,7 +359,7 @@ void LevelRenderer_renderHit(LevelRenderer* r, const HitResult* h, float digFrac
     glEnable(GL_BLEND);
     glEnable(GL_ALPHA_TEST);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glColor4f(1.0f, 1.0f, 1.0f, (float)(sin((double)currentTimeMillis() / 100.0) * 0.2 + 0.4) * 0.5f);
+    glColor4f(1.0f, 1.0f, 1.0f, (MathHelper_sin((float)currentTimeMillis() / 100.0f) * 0.2f + 0.4f) * 0.5f);
     if (digFraction > 0.0f) {
         renderDigOverlay(r->level, r->terrainTex, h->x, h->y, h->z, digFraction);
     }
@@ -408,46 +375,44 @@ void LevelRenderer_renderHitOutline(const Level* level, const HitResult* h) {
     glDisable(GL_TEXTURE_2D);
     glDepthMask(GL_FALSE);
 
-    // the tile's shape, air would crash
+    // the tile's shape, nothing is drawn on air
     int id = Level_getTile(level, h->x, h->y, h->z);
     const Tile* t = id > 0 ? gTiles[id] : NULL;
-    const float g = 0.002f;
-    float x0 = (float)h->x - g, y0 = (float)h->y - g, z0 = (float)h->z - g;
-    float x1 = (float)(h->x + 1) + g, y1 = (float)(h->y + 1) + g, z1 = (float)(h->z + 1) + g;
     if (t) {
-        x0 = (float)h->x + t->xx0 - g; y0 = (float)h->y + t->yy0 - g; z0 = (float)h->z + t->zz0 - g;
-        x1 = (float)h->x + t->xx1 + g; y1 = (float)h->y + t->yy1 + g; z1 = (float)h->z + t->zz1 + g;
+        const float g = 0.002f;
+        float x0 = (float)h->x + t->xx0 - g, y0 = (float)h->y + t->yy0 - g, z0 = (float)h->z + t->zz0 - g;
+        float x1 = (float)h->x + t->xx1 + g, y1 = (float)h->y + t->yy1 + g, z1 = (float)h->z + t->zz1 + g;
+
+        glBegin(GL_LINE_STRIP);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x0, y0, z0);
+        glEnd();
+
+        glBegin(GL_LINE_STRIP);
+        glVertex3f(x0, y1, z0);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x0, y1, z0);
+        glEnd();
+
+        glBegin(GL_LINES);
+        glVertex3f(x0, y0, z0); glVertex3f(x0, y1, z0);
+        glVertex3f(x1, y0, z0); glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1);
+        glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1);
+        glEnd();
     }
-
-    glBegin(GL_LINE_STRIP);
-    glVertex3f(x0, y0, z0);
-    glVertex3f(x1, y0, z0);
-    glVertex3f(x1, y0, z1);
-    glVertex3f(x0, y0, z1);
-    glVertex3f(x0, y0, z0);
-    glEnd();
-
-    glBegin(GL_LINE_STRIP);
-    glVertex3f(x0, y1, z0);
-    glVertex3f(x1, y1, z0);
-    glVertex3f(x1, y1, z1);
-    glVertex3f(x0, y1, z1);
-    glVertex3f(x0, y1, z0);
-    glEnd();
-
-    glBegin(GL_LINES);
-    glVertex3f(x0, y0, z0); glVertex3f(x0, y1, z0);
-    glVertex3f(x1, y0, z0); glVertex3f(x1, y1, z0);
-    glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1);
-    glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1);
-    glEnd();
 
     glDepthMask(GL_TRUE);
     glEnable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
 }
 
-void LevelRenderer_setDirty(const LevelRenderer* r, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+void LevelRenderer_setDirty(LevelRenderer* r, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     minX /= CHUNK_SIZE; minY /= CHUNK_SIZE; minZ /= CHUNK_SIZE;
     maxX /= CHUNK_SIZE; maxY /= CHUNK_SIZE; maxZ /= CHUNK_SIZE;
 
@@ -462,7 +427,10 @@ void LevelRenderer_setDirty(const LevelRenderer* r, int minX, int minY, int minZ
     for (int x = minX; x <= maxX; ++x)
     for (int y = minY; y <= maxY; ++y)
     for (int z = minZ; z <= maxZ; ++z) {
-        Chunk_setDirty(&r->chunks[(x + y * r->chunkAmountX) * r->chunkAmountZ + z]);
+        Chunk* c = &r->chunks[(x + y * r->chunkAmountX) * r->chunkAmountZ + z];
+        if (c->dirty) continue;
+        Chunk_setDirty(c);
+        r->dirtyList[r->dirtyCount++] = c;
     }
 }
 

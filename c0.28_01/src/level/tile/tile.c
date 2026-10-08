@@ -1,6 +1,7 @@
 // level/tile/tile.c
 
 #include "tile.h"
+#include "../../math_helper.h"
 #include "../../particle/particle_engine.h"
 #include "../../particle/particle.h"
 #include <string.h>
@@ -57,9 +58,8 @@ static int Tile_default_getTexture(const Tile* self, int face) {
     return self->textureId;
 }
 
-static int Tile_default_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+static int Tile_default_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int face) {
     (void)self; (void)face;
-    if (layer == 1) return 0;
     return !Level_isSolidTile(lvl, x, y, z);
 }
 
@@ -71,7 +71,8 @@ static void emitFace(int tex, Tessellator* t, int face,
     float u1 = (xt + 15.99f) / 256.0f;
     float v0 = yt / 256.0f;
     float v1 = (yt + 15.99f) / 256.0f;
-    if (face >= 2 && tex < 240) {
+    // sides take the shape's slice of the texture, unless the shape sticks out (liquids)
+    if (face >= 2 && tex < 240 && !(sy0 < 0.0f || sy1 > 1.0f)) {
         v0 = ((float)yt + sy0 * 15.99f) / 256.0f;
         v1 = ((float)yt + sy1 * 15.99f) / 256.0f;
     }
@@ -118,12 +119,6 @@ static void Tile_default_renderFace(const Tile* self, Tessellator* t, int x, int
 void Tile_renderFaceTex(const Tile* self, Tessellator* t, int x, int y, int z, int face, int tex) {
     emitFace(tex, t, face, x + self->xx0, x + self->xx1, y + self->yy0, y + self->yy1, z + self->zz0, z + self->zz1,
              self->yy0, self->yy1);
-}
-
-void Tile_renderCubeFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
-    const float g = 0.001f;
-    emitFace(self->getTexture(self, face), t, face, x + self->xx0 - g, x + self->xx1 + g, y + self->yy0 - g, y + self->yy1 + g,
-             z + self->zz0 - g, z + self->zz1 - g, self->yy0, self->yy1);
 }
 
 // Tile.renderBackFace, the inside of a liquid surface
@@ -180,16 +175,27 @@ static float faceBrightness(const Tile* self, const Level* lvl, int x, int y, in
     return Level_getBrightness(lvl, x, y, z);
 }
 
-static void Tile_render_shared(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z) {
-    const float bottom = 0.5f, zSide = 0.8f, xSide = 0.6f;
+static bool Tile_default_render(const Tile* self, const Level* lvl, int x, int y, int z, Tessellator* t) {
     static const int dir[6][3] = { { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 }, { -1, 0, 0 }, { 1, 0, 0 } };
-    const float shade[6] = { bottom, 1.0f, zSide, zSide, xSide, xSide };
+    static const float shade[6] = { 0.5f, 1.0f, 0.8f, 0.8f, 0.6f, 0.6f };
+    bool drew = false;
     for (int face = 0; face < 6; ++face) {
         int nx = x + dir[face][0], ny = y + dir[face][1], nz = z + dir[face][2];
-        if (!self->shouldRenderFace(self, lvl, nx, ny, nz, layer, face)) continue;
+        if (!self->shouldRenderFace(self, lvl, nx, ny, nz, face)) continue;
         float b = faceBrightness(self, lvl, nx, ny, nz);
         Tessellator_color(t, shade[face] * b, shade[face] * b, shade[face] * b);
         self->renderFace(self, t, x, y, z, face);
+        drew = true;
+    }
+    return drew;
+}
+
+// drawn at x -2 with fixed per face shading
+static void Tile_default_renderGuiItem(const Tile* self, Tessellator* t) {
+    static const float shade[6] = { 0.5f, 1.0f, 0.8f, 0.8f, 0.6f, 0.6f };
+    for (int face = 0; face < 6; ++face) {
+        Tessellator_color(t, shade[face], shade[face], shade[face]);
+        self->renderFace(self, t, -2, 0, 0, face);
     }
 }
 
@@ -203,17 +209,8 @@ static void Tile_default_renderItem(const Tile* self, Tessellator* t) {
 }
 
 
-// stone drops cobblestone
-static int Stone_getDropResource(const Tile* self) { (void)self; return TILE_STONEBRICK.id; }
-
 // OreTile, coal ore really drops a slab
 static int Ore_getDropCount(const Tile* self) { (void)self; return JRandom_nextIntN(tileRandom(), 3) + 1; }
-static int Ore_getDropResource(const Tile* self) {
-    if (self == &TILE_COAL_ORE) return TILE_SLAB.id;
-    if (self == &TILE_GOLD_ORE) return TILE_GOLD_BLOCK.id;
-    if (self == &TILE_IRON_ORE) return TILE_IRON_BLOCK.id;
-    return self->id;
-}
 
 // MetalTile
 static int Metal_getTexture(const Tile* self, int face) {
@@ -224,20 +221,21 @@ static int Metal_getTexture(const Tile* self, int face) {
 
 static int Slab_getTexture(const Tile* self, int face) { (void)self; return face <= 1 ? 6 : 5; }
 static int Slab_isSolid(const Tile* self) { return self == &TILE_DOUBLE_SLAB; }
-static int Slab_getDropResource(const Tile* self) { (void)self; return TILE_SLAB.id; }
 // a slab with anything on top becomes a double slab, a slab on a slab joins it
-static void Slab_neighborChanged(const Tile* self, Level* lvl, int x, int y, int z, int type) {
-    (void)type;
-    if (self != &TILE_SLAB) return;
-    int above = Level_getTile(lvl, x, y + 1, z);
-    if (above > 0) {
-        level_setTile(lvl, x, y, z, TILE_DOUBLE_SLAB.id);
-        if (above == TILE_SLAB.id) level_setTile(lvl, x, y + 1, z, 0);
-    }
+// this runs for the double slab too
+static void Slab_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
     if (Level_getTile(lvl, x, y - 1, z) == TILE_SLAB.id) {
         level_setTile(lvl, x, y, z, 0);
         level_setTile(lvl, x, y - 1, z, TILE_DOUBLE_SLAB.id);
     }
+}
+
+static int Slab_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int face) {
+    if (face == 1) return 1;
+    if (!Tile_default_shouldRenderFace(self, lvl, x, y, z, face)) return 0;
+    if (face == 0) return 1;
+    return Level_getTile(lvl, x, y, z) != self->id;
 }
 
 static int Tnt_getTexture(const Tile* self, int face) {
@@ -246,16 +244,6 @@ static int Tnt_getTexture(const Tile* self, int face) {
     return self->textureId;
 }
 static int NoDrop_getDropCount(const Tile* self) { (void)self; return 0; }
-
-// implemented in minecraft.c, spawns into the primed tnt list
-extern void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z, int life);
-
-// TntTile.onTileRemoved, one an explosion broke goes off sooner
-static void Tnt_onExploded(const Tile* self, Level* lvl, int x, int y, int z) {
-    (void)self;
-    const int life = 40;
-    Minecraft_spawnPrimedTnt(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f, JRandom_nextIntN(tileRandom(), life / 4) + life / 8);
-}
 
 static int Bookshelf_getTexture(const Tile* self, int face) { return face <= 1 ? 4 : self->textureId; }
 
@@ -268,7 +256,6 @@ static void Tile_default_neighborChanged(const Tile* self, Level* lvl, int x, in
 }
 
 static int Tile_default_getDropCount(const Tile* self) { (void)self; return 1; }
-static int Tile_default_getDropResource(const Tile* self) { return self->id; }
 
 static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int)) {
     t->id = id; t->textureId = tex;
@@ -277,14 +264,14 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->tileId = t->calmTileId = t->spreadSpeed = 0;
     t->isCube = true;
     t->explodable = true;
-    t->onExploded = NULL;
     t->tickDelay = 0;
     t->particleGravity = 1.0f;
     t->hardnessTicks = 20;
     t->xx0 = t->yy0 = t->zz0 = 0.0f;
     t->xx1 = t->yy1 = t->zz1 = 1.0f;
     t->getTexture = getTex ? getTex : Tile_default_getTexture;
-    t->render = Tile_render_shared;
+    t->render = Tile_default_render;
+    t->renderLayer = 0;
     t->onTick = NULL;
     t->isSolid     = Tile_default_isSolid;
     t->blocksLight = Tile_default_blocksLight;
@@ -294,10 +281,10 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->shouldRenderFace = Tile_default_shouldRenderFace;
     t->renderFace = Tile_default_renderFace;
     t->renderItem = Tile_default_renderItem;
+    t->renderGuiItem = Tile_default_renderGuiItem;
     t->onPlace = NULL;
     t->onRemoved = NULL;
     t->getDropCount    = Tile_default_getDropCount;
-    t->getDropResource = Tile_default_getDropResource;
 
     gTiles[id] = t;
 }
@@ -316,6 +303,7 @@ Tile TILE_BRICK;
 Tile TILE_TNT;
 Tile TILE_BOOKSHELF;
 Tile TILE_MOSSY_STONE;
+Tile TILE_OBSIDIAN;
 Tile TILE_WATER;
 Tile TILE_CALM_WATER;
 Tile TILE_LAVA;
@@ -341,9 +329,6 @@ static int Grass_getTexture(const Tile* self, int face) {
     (void)self;
     return (face == 1) ? 0 : (face == 0) ? 2 : 3;
 }
-
-// grass drops dirt
-static int Grass_getDropResource(const Tile* self) { (void)self; return TILE_DIRT.id; }
 
 static void Grass_onTick(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
@@ -438,14 +423,13 @@ static void Liquid_neighborChanged(const Tile* self, Level* lvl, int x, int y, i
 }
 
 // no face against the same liquid
-static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+static int Liquid_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int face) {
     if (x < 0 || y < 0 || z < 0 || x >= lvl->width || z >= lvl->height) return 0;
-    if (layer != 1 && self->liquidType == LIQUID_WATER) return 0;
     int id = Level_getTile(lvl, x, y, z);
     if (id == self->tileId || id == self->calmTileId) return 0;
     if (face == 1 && (Level_getTile(lvl, x - 1, y, z) == 0 || Level_getTile(lvl, x + 1, y, z) == 0 ||
                       Level_getTile(lvl, x, y, z - 1) == 0 || Level_getTile(lvl, x, y, z + 1) == 0)) return 1;
-    return Tile_default_shouldRenderFace(self, lvl, x, y, z, -1, face);
+    return Tile_default_shouldRenderFace(self, lvl, x, y, z, face);
 }
 
 static void Liquid_renderFace(const Tile* self, Tessellator* t, int x, int y, int z, int face) {
@@ -485,8 +469,8 @@ static void emitCross(const Tile* self, Tessellator* t, float x, float y, float 
     float v0 = (float)yt / 256.0f;
     float v1 = ((float)yt + 15.99f) / 256.0f;
     for (int r = 0; r < 2; ++r) {
-        float xa = (float)(sin((double)r * M_PI / (double)2 + 0.7853981633974483) * 0.5);
-        float za = (float)(cos((double)r * M_PI / (double)2 + 0.7853981633974483) * 0.5);
+        float xa = (float)((double)MathHelper_sin((float)r * 3.1415927f / 2.0f + 0.7853982f) * 0.5);
+        float za = (float)((double)MathHelper_cos((float)r * 3.1415927f / 2.0f + 0.7853982f) * 0.5);
         float x0 = x + 0.5f - xa, x1 = x + 0.5f + xa;
         float y0 = y, y1 = y + 1.0f;
         float z0 = z + 0.5f - za, z1 = z + 0.5f + za;
@@ -501,13 +485,16 @@ static void emitCross(const Tile* self, Tessellator* t, float x, float y, float 
     }
 }
 
-static void Bush_render(const Tile* self, Tessellator* t, const Level* lvl,
-                        int layer, int x, int y, int z)
-{
-    (void)layer;
+static bool Bush_render(const Tile* self, const Level* lvl, int x, int y, int z, Tessellator* t) {
     float b = Level_getBrightness(lvl, x, y, z);
     Tessellator_color(t, b, b, b);
     emitCross(self, t, (float)x, (float)y, (float)z);
+    return true;
+}
+
+static void Bush_renderGuiItem(const Tile* self, Tessellator* t) {
+    Tessellator_color(t, 1.0f, 1.0f, 1.0f);
+    emitCross(self, t, -2.0f, 0.0f, 0.0f);
 }
 
 // the held plant
@@ -581,13 +568,11 @@ static int Log_getTexture(const Tile* self, int face) {
 
 // 3-5 planks
 static int Log_getDropCount(const Tile* self)    { (void)self; return JRandom_nextIntN(tileRandom(), 3) + 3; }
-static int Log_getDropResource(const Tile* self) { (void)self; return TILE_WOOD.id; }
 
 static int Leaves_isSolid(const Tile* self)     { (void)self; return 0; }
 static int Leaves_blocksLight(const Tile* self) { (void)self; return 0; }
 // a sapling 1 in 10
 static int Leaves_getDropCount(const Tile* self)    { (void)self; return (JRandom_nextIntN(tileRandom(), 10) == 0) ? 1 : 0; }
-static int Leaves_getDropResource(const Tile* self) { (void)self; return TILE_BUSH.id; }
 
 static void Sponge_onPlace(const Tile* self, Level* lvl, int x, int y, int z) {
     (void)self;
@@ -614,9 +599,9 @@ static void Sponge_onRemoved(const Tile* self, Level* lvl, int x, int y, int z) 
 // not solid for light and face culling, still solid to walk into
 static int Glass_blocksLight(const Tile* self) { (void)self; return 0; }
 static int Glass_isSolid(const Tile* self) { (void)self; return 0; }
-static int Glass_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face) {
+static int Glass_shouldRenderFace(const Tile* self, const Level* lvl, int x, int y, int z, int face) {
     if (Level_getTile(lvl, x, y, z) == self->id) return 0;
-    return Tile_default_shouldRenderFace(self, lvl, x, y, z, layer, face);
+    return Tile_default_shouldRenderFace(self, lvl, x, y, z, face);
 }
 
 void Tile_registerAll(void) {
@@ -643,7 +628,6 @@ void Tile_registerAll(void) {
     TILE_WOOD.hardnessTicks       = 30;
     TILE_BUSH.hardnessTicks       = 0;
     TILE_BEDROCK.hardnessTicks    = 19980;
-    TILE_ROCK.getDropResource = Stone_getDropResource;
     TILE_ROCK.explodable = TILE_STONEBRICK.explodable = TILE_BEDROCK.explodable = false;
     TILE_BUSH.xx0 = TILE_BUSH.zz0 = 0.1f;
     TILE_BUSH.xx1 = TILE_BUSH.zz1 = 0.9f;
@@ -651,13 +635,13 @@ void Tile_registerAll(void) {
 
     TILE_GRASS.onTick     = Grass_onTick;
     TILE_GRASS.ticksRandomly = true;
-    TILE_GRASS.getDropResource = Grass_getDropResource;
 
     TILE_BUSH.isSolid     = Bush_isSolid;
     TILE_BUSH.blocksLight = Bush_blocksLight;
     TILE_BUSH.getAABB     = Bush_getAABB;
     TILE_BUSH.render      = Bush_render;
     TILE_BUSH.renderItem  = Bush_renderItem;
+    TILE_BUSH.renderGuiItem = Bush_renderGuiItem;
     TILE_BUSH.onTick      = Bush_onTick;
     TILE_BUSH.ticksRandomly = true;
     TILE_BUSH.isCube = false;
@@ -705,6 +689,7 @@ void Tile_registerAll(void) {
     TILE_LAVA.shouldRenderFace       = Liquid_shouldRenderFace;
     TILE_CALM_LAVA.shouldRenderFace  = Liquid_shouldRenderFace;
 
+    TILE_WATER.renderLayer = TILE_CALM_WATER.renderLayer = 1;
     TILE_WATER.renderFace      = Liquid_renderFace;
     TILE_CALM_WATER.renderFace = Liquid_renderFace;
     TILE_LAVA.renderFace       = Liquid_renderFace;
@@ -750,7 +735,6 @@ void Tile_registerAll(void) {
     TILE_COAL_ORE.hardnessTicks = 60;
     TILE_GOLD_ORE.explodable = TILE_IRON_ORE.explodable = TILE_COAL_ORE.explodable = false;
     TILE_GOLD_ORE.getDropCount = TILE_IRON_ORE.getDropCount = TILE_COAL_ORE.getDropCount = Ore_getDropCount;
-    TILE_GOLD_ORE.getDropResource = TILE_IRON_ORE.getDropResource = TILE_COAL_ORE.getDropResource = Ore_getDropResource;
     TILE_LOG.hardnessTicks      = 50;
     TILE_LEAVES.hardnessTicks   = 4;
 
@@ -762,9 +746,7 @@ void Tile_registerAll(void) {
     TILE_LEAVES.particleGravity = 0.4f;
 
     TILE_LOG.getDropCount       = Log_getDropCount;
-    TILE_LOG.getDropResource    = Log_getDropResource;
     TILE_LEAVES.getDropCount    = Leaves_getDropCount;
-    TILE_LEAVES.getDropResource = Leaves_getDropResource;
 
     TILE_SAND.soundType     = SOUND_GRAVEL;
     TILE_GRAVEL.soundType   = SOUND_GRAVEL;
@@ -809,6 +791,7 @@ void Tile_registerAll(void) {
         plants[i]->getAABB     = Bush_getAABB;
         plants[i]->render      = Bush_render;
         plants[i]->renderItem  = Bush_renderItem;
+        plants[i]->renderGuiItem = Bush_renderGuiItem;
         plants[i]->ticksRandomly = true;
         plants[i]->isCube = false;
         plants[i]->hardnessTicks = 0;
@@ -838,8 +821,8 @@ void Tile_registerAll(void) {
         slabs[i]->hardnessTicks = 40;
         slabs[i]->explodable = false;
         slabs[i]->isSolid = Slab_isSolid;
-        slabs[i]->neighborChanged = Slab_neighborChanged;
-        slabs[i]->getDropResource = Slab_getDropResource;
+        slabs[i]->onPlace = Slab_onPlace;
+        slabs[i]->shouldRenderFace = Slab_shouldRenderFace;
     }
     TILE_SLAB.yy1 = 0.5f;
     TILE_SLAB.isCube = false;
@@ -853,7 +836,6 @@ void Tile_registerAll(void) {
     TILE_TNT.soundType = SOUND_CLOTH;
     TILE_TNT.hardnessTicks = 0;
     TILE_TNT.getDropCount = NoDrop_getDropCount;
-    TILE_TNT.onExploded = Tnt_onExploded;
 
     registerTile(&TILE_BOOKSHELF, 47, 35, Bookshelf_getTexture);
     TILE_BOOKSHELF.soundType = SOUND_WOOD;
@@ -864,13 +846,15 @@ void Tile_registerAll(void) {
     TILE_MOSSY_STONE.soundType = SOUND_STONE;
     TILE_MOSSY_STONE.hardnessTicks = 20;
     TILE_MOSSY_STONE.explodable = false;
+
+    registerTile(&TILE_OBSIDIAN, 49, 37, NULL);
+    TILE_OBSIDIAN.soundType = SOUND_STONE;
+    TILE_OBSIDIAN.hardnessTicks = 200;
+    TILE_OBSIDIAN.explodable = false;
 }
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine) {
-    if (self == &TILE_TNT) {
-        Minecraft_spawnPrimedTnt(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f, -1);
-        return;
-    }
+    if (self == &TILE_TNT && !lvl->creativeMode) return;
     const int spread = 4;
 
     for (int ox = 0; ox < spread; ++ox)
@@ -909,18 +893,14 @@ void Tile_spawnHitParticle(const Tile* self, Level* lvl, int x, int y, int z, in
     ParticleEngine_add(engine, &p);
 }
 
-extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
-
 void Tile_dropItemsChance(const Tile* self, Level* lvl, int x, int y, int z, float chance) {
+    (void)lvl; (void)x; (void)y; (void)z;
     int count = self->getDropCount(self);
-    int resource = self->getDropResource(self);
     for (int i = 0; i < count; i++) {
         if (JRandom_nextFloat(tileRandom()) > chance) continue;
-        float spread = 0.7f;
-        float jx = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
-        float jy = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
-        float jz = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
-        Minecraft_spawnItem(lvl, (float)x + jx, (float)y + jy, (float)z + jz, resource);
+        JRandom_nextFloat(tileRandom());
+        JRandom_nextFloat(tileRandom());
+        JRandom_nextFloat(tileRandom());
     }
 }
 

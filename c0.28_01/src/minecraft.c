@@ -15,6 +15,7 @@
 #include <GLFW/glfw3.h>
 
 #include "common.h"
+#include "math_helper.h"
 
 #include "level/level.h"
 #include "level/level_renderer.h"
@@ -27,12 +28,12 @@
 #include "options.h"
 #include "audio/sound.h"
 #include "user.h"
+#include "gui/block_select_screen.h"
+#include "level/levelgen/level_gen.h"
 #include "character/creature.h"
 #include "character/cube.h"
 #include "item/arrow.h"
 #include "item/item.h"
-#include "item/primed_tnt.h"
-#include "level/fx/smolder.h"
 #include "timer.h"
 #include "hitresult.h"
 #include "gui/font.h"
@@ -44,12 +45,10 @@
 #include "net/network_player.h"
 #include "save.h"
 
-#define MAX_MOBS 4096
-#define MAX_NET_PLAYERS 32
+#define MAX_MOBS 4096 // the in play cap is 320 on a normal map and 1280 on a huge one
+#define MAX_NET_PLAYERS 256
 #define MAX_ARROWS 64
 #define MAX_ITEMS 256
-#define MAX_TNTS 256
-#define MAX_SMOLDERS 4096 // every cell an explosion reaches gets one
 
 static GLFWwindow*    window;
 static Level          level;
@@ -59,22 +58,18 @@ static Timer          timer;
 static Creature       mobs[MAX_MOBS];
 static Arrow          arrows[MAX_ARROWS];
 static Item           items[MAX_ITEMS];
-static PrimedTnt      tnts[MAX_TNTS];
-static Smolder        smolders[MAX_SMOLDERS];
 static ParticleEngine particleEngine;
 static User           user;
 
 static int mobCount = 0;
 static int arrowCount = 0;
 static int itemCount = 0;
-static int tntCount = 0;
 // F5, offline only
 static bool gRaining = false;
-static int smolderCount = 0;
 
 static World currentWorld(void) {
     return (World){ &level, &player, mobs, &mobCount, MAX_MOBS, items, &itemCount, MAX_ITEMS,
-                    arrows, &arrowCount, MAX_ARROWS, tnts, &tntCount, MAX_TNTS, smolders, &smolderCount, MAX_SMOLDERS };
+                    arrows, &arrowCount, MAX_ARROWS };
 }
 
 // the first person hand, heldBlend fades the held block out and back in when it changes
@@ -87,6 +82,8 @@ static Cube  handArmCube;
 static bool  handArmCubeBuilt = false;
 
 static NetworkPlayer netPlayers[MAX_NET_PLAYERS];
+// the slots of the network players in the level, in the order they were added
+static int netOrder[MAX_NET_PLAYERS];
 static int netPlayerCount = 0;
 
 // gameplay mouse and key events are queued by the glfw callbacks and drained in tick
@@ -122,6 +119,8 @@ static ChatLine chatLines[CHAT_BACKLOG_MAX];
 static int chatLineCount = 0;
 
 static bool gConnected  = false;       // set once the Login packet went out
+static bool gMultiplayer = false;      // Minecraft.connectionManager != null
+static bool gTickBroke = false;
 static bool gConnecting = false;       // the connect thread is running
 static bool gLoading    = false;       // from the connect until LevelFinalize
 static NetConnection gConn;
@@ -131,6 +130,8 @@ static char gConnectUsername[64] = ""; // empty falls back to "guest"
 
 static int texTerrain = 0;
 static int texDirt = 0;
+static int texRock = 0;
+static int texWater = 0;
 static int texGui = 0;
 static int texIcons = 0;
 
@@ -160,14 +161,14 @@ static HitResult hitResult;
 
 static PauseScreen gPauseScreen;
 static GameOverScreen gGameOverScreen;
-static Screen*     activeScreen = NULL;
+static Screen*     activeScreen = NULL; // not null means a menu is open
 static int prevScreenClick = GLFW_RELEASE;
 
 static void tick(Player* player, GLFWwindow* window);
 static void computeGuiMouse(int* xm, int* ym);
 void Minecraft_setScreen(Screen* screen);
 
-// Minecraft.releaseMouse, clears the keys and opens the pause menu
+/* input and GL state helpers */
 
 // Minecraft.releaseMouse, clears the keys and opens the pause menu
 static void releaseMouseAndOpenPause(void) {
@@ -194,31 +195,74 @@ void Minecraft_closeScreenAndGrabMouse(void) {
     glfwSetCursorPos(window, ww * 0.5, wh * 0.5);
 }
 
+void Minecraft_levelLoadUpdate(const char* status);
+int Minecraft_countMobs(void);
+
+// the jar always builds a CreativeGameMode, survival is only there by editing the code
+static const bool gSurvival = false;
+
+// survival spawns the first mobs of a new level
+static void GameMode_spawnInitial(Level* lvl) {
+    if (!gSurvival) return;
+    Minecraft_levelLoadUpdate("Spawning..");
+    MobSpawner_spawn(lvl, lvl->width * lvl->height * lvl->depth / 800, NULL, true);
+}
+
+// creative takes everything but players out of the grid (not out of the level)
+static void GameMode_setLevel(Level* lvl) {
+    lvl->creativeMode = !gSurvival;
+    if (gSurvival) return;
+    for (int i = 0; i < mobCount; ++i) mobs[i].e.inGrid = false;
+    for (int i = 0; i < arrowCount; ++i) arrows[i].e.inGrid = false;
+    for (int i = 0; i < itemCount; ++i) items[i].e.inGrid = false;
+}
+
 // only for a player the level didn't already have
-static void giveStartItems(Player* p) {
+static void GameMode_newPlayer(Player* p) {
+    if (!gSurvival) return;
     p->inventory.id[8] = TILE_TNT.id;
     p->inventory.count[8] = 10;
+}
+
+// creative fills the empty hotbar slots with the first blocks of the list
+static void GameMode_adjustPlayer(Player* p) {
+    if (gSurvival) return;
+    for (int i = 0; i < 9; ++i) {
+        p->inventory.count[i] = 1;
+        if (p->inventory.id[i] > 0) continue;
+        p->inventory.id[i] = USER_CREATIVE_TILES[i];
+    }
+}
+
+// survival tops the mobs up every tick
+static void GameMode_tick(void) {
+    if (!gSurvival) return;
+    int n = level.width * level.height * level.depth / 64 / 64 / 64;
+    if (JRandom_nextIntN(&level.random, 100) < n && Minecraft_countMobs() < n * 20) {
+        MobSpawner_spawn(&level, n, &player.e, false);
+    }
 }
 
 void Minecraft_generateNewLevelSized(int sizePreset) {
     int size = 128 << sizePreset;
 
-    // before Level_resize, world gen spawns mobs into mobs[]
     Sound_detachAll();
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    tntCount = 0;
-    smolderCount = 0;
 
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, size, size, 64);
+    GameMode_spawnInitial(&level);
+    GameMode_setLevel(&level);
     LevelRenderer_init(&levelRenderer, &level, texTerrain);
     levelRenderer.drawDistance = gOptions.viewDistance;
 
+    // a new player, and the particles are cleared
     memset(&player, 0, sizeof player);
     Player_init(&player, &level);
-    giveStartItems(&player);
+    GameMode_newPlayer(&player);
+    GameMode_adjustPlayer(&player);
     ParticleEngine_clear(&particleEngine);
 }
 
@@ -242,6 +286,7 @@ void Minecraft_setScreen(Screen* screen) {
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 }
 
+// no check for a connection here
 void Minecraft_sendChat(const char* text) {
     if (!gConnected) return;
     NetConnection_sendMessage(&gConn, text);
@@ -258,6 +303,99 @@ void Minecraft_openMessageScreen(const char* title, const char* message) {
     gLoading = false;
 }
 
+// ConnectionManager.players, a HashMap<Byte, NetworkPlayer>. its iteration
+// order is the tab list order
+static int playerMapCap = 16, playerMapSize = 0;
+static int playerMapHead[256];
+static int playerMapNext[128];
+static int playerMapSlot[128];
+
+static void PlayerMap_clear(void) {
+    playerMapCap = 16;
+    playerMapSize = 0;
+    for (int i = 0; i < 256; ++i) playerMapHead[i] = -1;
+    for (int i = 0; i < 128; ++i) playerMapSlot[i] = -1;
+}
+
+static int javaHash(int h) {
+    unsigned int u = (unsigned int)h;
+    u ^= (u >> 20) ^ (u >> 12);
+    return (int)(u ^ (u >> 7) ^ (u >> 4));
+}
+
+// new keys go to the head of their bucket, a resize walks the old buckets in order
+static void PlayerMap_put(int key, int slot) {
+    if (playerMapSlot[key] >= 0) {
+        playerMapSlot[key] = slot;
+        return;
+    }
+    int b = javaHash(key) & (playerMapCap - 1);
+    playerMapNext[key] = playerMapHead[b];
+    playerMapHead[b] = key;
+    playerMapSlot[key] = slot;
+    if (playerMapSize++ >= playerMapCap * 3 / 4) {
+        int cap = playerMapCap * 2;
+        int head[256];
+        for (int i = 0; i < 256; ++i) head[i] = -1;
+        for (int j = 0; j < playerMapCap; ++j) {
+            for (int k = playerMapHead[j]; k >= 0; ) {
+                int next = playerMapNext[k];
+                int nb = javaHash(k) & (cap - 1);
+                playerMapNext[k] = head[nb];
+                head[nb] = k;
+                k = next;
+            }
+        }
+        memcpy(playerMapHead, head, sizeof head);
+        playerMapCap = cap;
+    }
+}
+
+static int PlayerMap_remove(int key) {
+    int slot = playerMapSlot[key];
+    if (slot < 0) return -1;
+    int* link = &playerMapHead[javaHash(key) & (playerMapCap - 1)];
+    while (*link != key) link = &playerMapNext[*link];
+    *link = playerMapNext[key];
+    playerMapSize--;
+    playerMapSlot[key] = -1;
+    return slot;
+}
+
+static NetworkPlayer* findNetworkPlayer(int id) {
+    if (id < 0 || id > 127 || playerMapSlot[id] < 0) return NULL;
+    return &netPlayers[playerMapSlot[id]];
+}
+
+// a slot is free once neither the map nor the level holds its player
+static void releaseNetPlayer(int slot) {
+    if (netPlayers[slot].mapped || netPlayers[slot].inLevel) return;
+    NetworkPlayer_free(&netPlayers[slot]);
+}
+
+static void removeNetPlayerFromLevel(int slot) {
+    netPlayers[slot].inLevel = false;
+    for (int i = 0; i < netPlayerCount; ++i) {
+        if (netOrder[i] != slot) continue;
+        memmove(&netOrder[i], &netOrder[i + 1], (size_t)(netPlayerCount - i - 1) * sizeof(int));
+        netPlayerCount--;
+        break;
+    }
+    releaseNetPlayer(slot);
+}
+
+void Minecraft_dropConnectionManager(void) {
+    gMultiplayer = false;
+}
+
+// the lost connection handler sets connectionManager to null and then reads it
+// again, so run() catches a NullPointerException and swaps in its own error screen
+void Minecraft_connectionBroke(void) {
+    Minecraft_openMessageScreen("Client error", "The game broke! [java.lang.NullPointerException]");
+    gMultiplayer = false;
+    gTickBroke = true;
+}
+
 // LevelFinalize, the spawn comes later in a SpawnPlayer packet
 void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     LevelRenderer_destroy(&levelRenderer);
@@ -268,9 +406,15 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    tntCount = 0;
-    smolderCount = 0;
-    netPlayerCount = 0;
+    // the new level has none of the network players, the map still does
+    while (netPlayerCount > 0) removeNetPlayerFromLevel(netOrder[0]);
+    GameMode_setLevel(&level);
+    // the new level has no Player, so it's a new one, userType back to 0
+    memset(&player, 0, sizeof player);
+    Player_init(&player, &level);
+    GameMode_newPlayer(&player);
+    GameMode_adjustPlayer(&player);
+    ParticleEngine_clear(&particleEngine);
     gLoading = false;
 }
 
@@ -294,23 +438,25 @@ void Minecraft_setLevelSpawnPos(int x, int y, int z, float rot) {
     Level_setSpawnPos(&level, x, y, z, rot);
 }
 
-static NetworkPlayer* findNetworkPlayer(int id) {
-    for (int i = 0; i < netPlayerCount; i++) {
-        if (netPlayers[i].used && netPlayers[i].id == id) return &netPlayers[i];
-    }
-    return NULL;
-}
-
-// SpawnPlayer with id >= 0, a remote player joining
+// SpawnPlayer with id >= 0, a HashMap put, so an id already in use
+// just loses its mapping and the old player stays in the level
 void Minecraft_spawnNetworkPlayer(int id, const char* name, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
-    NetworkPlayer* existing = findNetworkPlayer(id);
-    if (existing) {
-        // a spawn for an id already in use reuses its slot
-        NetworkPlayer_init(existing, &level, id, name, xRaw, yRaw, zRaw, yaw, pitch);
-        return;
+    if (id < 0 || id > 127) return;
+    int slot = -1;
+    for (int i = 0; i < MAX_NET_PLAYERS; ++i) {
+        if (!netPlayers[i].mapped && !netPlayers[i].inLevel) { slot = i; break; }
     }
-    if (netPlayerCount >= MAX_NET_PLAYERS) return;
-    NetworkPlayer_init(&netPlayers[netPlayerCount++], &level, id, name, xRaw, yRaw, zRaw, yaw, pitch);
+    if (slot < 0) return;
+    NetworkPlayer_init(&netPlayers[slot], &level, id, name, xRaw, yRaw, zRaw, yaw, pitch);
+    int old = playerMapSlot[id];
+    PlayerMap_put(id, slot);
+    if (old >= 0) {
+        netPlayers[old].mapped = false;
+        releaseNetPlayer(old);
+    }
+    netPlayers[slot].mapped = true;
+    netPlayers[slot].inLevel = true;
+    netOrder[netPlayerCount++] = slot;
 }
 
 void Minecraft_teleportNetworkPlayer(int id, int xRaw, int yRaw, int zRaw, float yaw, float pitch) {
@@ -333,15 +479,14 @@ void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch) {
     if (np) NetworkPlayer_queueLook(np, yaw, pitch);
 }
 
-// DespawnPlayer, swap remove like mobs[]
+// DespawnPlayer, out of the map and out of the level
 void Minecraft_despawnNetworkPlayer(int id) {
-    for (int i = 0; i < netPlayerCount; i++) {
-        if (netPlayers[i].used && netPlayers[i].id == id) {
-            netPlayers[i] = netPlayers[netPlayerCount - 1];
-            netPlayerCount--;
-            return;
-        }
-    }
+    if (id < 0 || id > 127) return;
+    int slot = PlayerMap_remove(id);
+    if (slot < 0) return;
+    netPlayers[slot].mapped = false;
+    if (netPlayers[slot].inLevel) removeNetPlayerFromLevel(slot);
+    else releaseNetPlayer(slot);
 }
 
 // Minecraft.addChatMessage, the newest line goes first
@@ -421,6 +566,7 @@ static void Minecraft_drawLoadingScreen(int percent) {
     Font_drawShadow(&gFont, &hudTess, gLoadStatus, (screenWidth - statusWidth) / 2, screenHeight / 2 - 4 + 8, 0xFFFFFF);
 
     glfwSwapBuffers(window);
+    // glfw needs a poll to keep the window responding
     glfwPollEvents();
 }
 
@@ -443,8 +589,8 @@ const char* Minecraft_getUserName(void) {
     return user.name;
 }
 
-bool Minecraft_isConnected(void) {
-    return gConnected;
+bool Minecraft_isMultiplayer(void) {
+    return gMultiplayer;
 }
 
 int Minecraft_getGuiTexture(void) {
@@ -458,7 +604,8 @@ const char* Minecraft_getHoveredTabName(void) {
 static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods) {
     (void)w; (void)scancode; (void)mods;
 
-    if (activeScreen) {
+    // keys go to the open screen, only the chat screen gets key repeat
+    if (activeScreen && !activeScreen->allowUserInput) {
         if (action == GLFW_REPEAT && !ChatInputScreen_isThis(activeScreen)) return;
         if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
         if (activeScreen->keyPressed) activeScreen->keyPressed(activeScreen, 0, key);
@@ -470,7 +617,7 @@ static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mo
 
 static void mouseButtonCallback(GLFWwindow* w, int button, int action, int mods) {
     (void)w; (void)mods;
-    if (activeScreen) return;
+    if (activeScreen && !activeScreen->allowUserInput) return;
     if (action == GLFW_PRESS || action == GLFW_RELEASE) queueInput(EVENT_MOUSE, button, action == GLFW_PRESS);
 }
 
@@ -549,7 +696,17 @@ static void setupFog(void) {
     }
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT, GL_AMBIENT);
-    glEnable(GL_LIGHTING);
+}
+
+static bool entityVisible(const Frustum* fr, const Entity* e, float camX, float camY, float camZ) {
+    if (!e->inGrid || !Entity_shouldRender(e, camX, camY, camZ)) return false;
+    int cx, cy, cz;
+    Entity_gridCell(e, &cx, &cy, &cz);
+    float x0 = (float)((cx << 4) - 2), x1 = (float)(((cx + 1) << 4) + 2);
+    float y0 = (float)((cy << 4) - 2), y1 = (float)(((cy + 1) << 4) + 2);
+    float z0 = (float)((cz << 4) - 2), z1 = (float)(((cz + 1) << 4) + 2);
+    if (!frustum_cubeIn(fr, x0, y0, z0, x1, y1, z1)) return false;
+    return frustum_cubeFullyIn(fr, x0, y0, z0, x1, y1, z1) || frustum_isVisible(fr, &e->boundingBox);
 }
 
 // Level.isSolid(x, y, z, r), any of the 8 corners in a solid tile
@@ -580,7 +737,7 @@ static void setupEntityLighting(bool enable) {
     glEnable(GL_NORMALIZE);
 
     float dx = 0.0f, dy = -1.0f, dz = 0.5f;
-    float len = sqrtf(dx * dx + dy * dy + dz * dz);
+    float len = MathHelper_sqrt(dx * dx + dy * dy + dz * dz);
     GLfloat lightDir[4]     = { dx / len, dy / len, dz / len, 0.0f }; // w=0, directional
     GLfloat lightDiffuse[4] = { 0.3f, 0.3f, 0.3f, 1.0f };
     GLfloat lightAmbient[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -592,7 +749,24 @@ static void setupEntityLighting(bool enable) {
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, modelAmbient);
 }
 
+/* boot and shutdown */
+
+// any gl error at these points quits
+static void checkGlError(const char* where) {
+    GLenum err = glGetError();
+    if (err == GL_NO_ERROR) return;
+    printf("########## GL ERROR ##########\n");
+    printf("@ %s\n", where);
+    printf("%d: %s\n", (int)err, (const char*)gluErrorString(err));
+    exit(0);
+}
+
 static int init(Level* lvl, LevelRenderer* lr, Player* p) {
+    // a thread started once the gl context exists makes nvidia's driver stall a sync for seconds,
+    // so every thread is running before the window opens
+    Options_init(&gOptions);
+    Sound_init(gOptions.music, gOptions.sound);
+
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
         return 0;
@@ -624,6 +798,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
         fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
         return 0;
     }
+    // glew's lookup leaves an error behind on some drivers
+    glGetError();
+    checkGlError("Pre startup");
 
     glEnable(GL_TEXTURE_2D);
     glShadeModel(GL_SMOOTH);
@@ -642,6 +819,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     glEnable(GL_ALPHA_TEST);
     glAlphaFunc(GL_GREATER, 0.0f);
+    checkGlError("Startup");
 
     int ww, wh; glfwGetWindowSize(window, &ww, &wh);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -652,9 +830,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     glfwSetCharCallback(window, charCallback);
 
     Tile_registerAll();
-    Options_init(&gOptions);
     Textures_setAnaglyph(gOptions.anaglyph3d);
-    Sound_init(gOptions.music, gOptions.sound);
 
     // "guest" when connecting without a name, "anonymous" otherwise
 
@@ -663,6 +839,8 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     texTerrain = loadTexture("resources/terrain.png", GL_NEAREST);
     texDirt    = loadTexture("resources/dirt.png", GL_NEAREST);
+    texRock    = loadTexture("resources/rock.png", GL_NEAREST);
+    texWater   = loadTexture("resources/water.png", GL_NEAREST);
     texGui     = loadTexture("resources/gui.png", GL_NEAREST);
     texIcons   = loadTexture("resources/icons.png", GL_NEAREST);
     Font_init(&gFont, "resources/default.png");
@@ -674,15 +852,14 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     gTextureFX[0]->tick(gTextureFX[0]);
     gTextureFX[1]->tick(gTextureFX[1]);
 
-    // before Level_init, world gen spawns mobs into mobs[]
     Sound_detachAll();
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
-    tntCount = 0;
-    smolderCount = 0;
 
-    Level_init(lvl, 256, 256, 64);
+    // nothing gets loaded or generated when it's about to connect
+    if (gConnectHost[0]) Level_initPlaceholder(lvl);
+    else if (!Level_init(lvl, 256, 256, 64)) GameMode_spawnInitial(lvl);
     LevelRenderer_init(lr, lvl, texTerrain);
     lr->drawDistance = gOptions.viewDistance;
     calcLightDepths(lvl, 0, 0, lvl->width, lvl->height);
@@ -690,7 +867,10 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     Player_init(p, lvl);
     Level_setPlayer(lvl, &p->e);
     World world = currentWorld();
-    if (!Save_loadEntities(&world)) giveStartItems(p);
+    bool loadedPlayer = !gConnectHost[0] && Save_loadEntities(&world);
+    GameMode_setLevel(lvl);
+    if (!loadedPlayer) GameMode_newPlayer(p);
+    GameMode_adjustPlayer(p);
 
     ParticleEngine_init(&particleEngine, lvl, (GLuint)texTerrain);
 
@@ -698,19 +878,21 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
 
     // a host argument means multiplayer
     if (gConnectHost[0]) {
-        Entity_setPosition(&p->e, 0.0f, 0.0f, 0.0f);
         // tick polls the connect thread and shows "Connecting.." meanwhile
+        PlayerMap_clear();
+        gMultiplayer = true;
         NetConnection_beginConnect(&gConn, gConnectHost, gConnectPort, Minecraft_getUserName());
         gConnecting = true;
         gLoading = true;
     }
+    checkGlError("Post startup");
 
     return 1;
 }
 
 static void destroy(Level* lvl) {
-    // don't let a downloaded server level overwrite the local singleplayer save
-    if (!gConnected) {
+    // never in multiplayer, that would overwrite level.dat with the server's level or the empty one
+    if (!gConnectHost[0]) {
         World world = currentWorld();
         Save_write(&world, "level.dat");
     }
@@ -721,7 +903,7 @@ static void destroy(Level* lvl) {
     glfwTerminate();
 }
 
-// the death spin and the hurt shake, hurtDir sets the shake axis
+/* camera */
 
 // the death spin and the hurt shake, hurtDir sets the shake axis
 static void applyHurtTilt(Player* p, float t) {
@@ -733,7 +915,7 @@ static void applyHurtTilt(Player* p, float t) {
     }
     if (hurtProgress < 0.0f) return;
     hurtProgress /= (float)e->hurtDuration;
-    float shake = sinf(hurtProgress * hurtProgress * hurtProgress * hurtProgress * (float)M_PI);
+    float shake = MathHelper_sin(hurtProgress * hurtProgress * hurtProgress * hurtProgress * 3.1415927f);
     float dir = e->hurtDir;
     glRotatef(-dir, 0.0f, 1.0f, 0.0f);
     glRotatef(-shake * 14.0f, 0.0f, 0.0f, 1.0f);
@@ -746,10 +928,10 @@ static void applyViewBob(Player* p, float t) {
     float walk = p->e.walkDist + walkDelta * t;
     float bob = p->oBob + (p->bob - p->oBob) * t;
     float tilt = p->oTilt + (p->tilt - p->oTilt) * t;
-    glTranslatef(sinf(walk * (float)M_PI) * bob * 0.5f,
-                 -fabsf(cosf(walk * (float)M_PI) * bob), 0.0f);
-    glRotatef(sinf(walk * (float)M_PI) * bob * 3.0f, 0.0f, 0.0f, 1.0f);
-    glRotatef(fabsf(cosf(walk * (float)M_PI + 0.2f) * bob) * 5.0f, 1.0f, 0.0f, 0.0f);
+    glTranslatef(MathHelper_sin(walk * 3.1415927f) * bob * 0.5f,
+                 -fabsf(MathHelper_cos(walk * 3.1415927f) * bob), 0.0f);
+    glRotatef(MathHelper_sin(walk * 3.1415927f) * bob * 3.0f, 0.0f, 0.0f, 1.0f);
+    glRotatef(fabsf(MathHelper_cos(walk * 3.1415927f + 0.2f) * bob) * 5.0f, 1.0f, 0.0f, 0.0f);
     glRotatef(tilt, 1.0f, 0.0f, 0.0f);
 }
 
@@ -840,13 +1022,15 @@ static void drawGui(float partialTicks) {
     glBindTexture(GL_TEXTURE_2D, texIcons);
     drawGuiBlit(screenWidth / 2 - 7, screenHeight / 2 - 7, 0, 0, 16, 16);
 
+    // the lastHealth ghost hearts flicker while invulnerable, not in the last 10 ticks
     {
         int flicker = (player.e.invulnerableTime / 3 % 2 == 1) ? 1 : 0;
         if (player.e.invulnerableTime < 10) flicker = 0;
         int health = player.e.health;
         int lastHealth = player.e.lastHealth;
         JRandom_setSeed(&gHudRandom, (int32_t)((uint32_t)gHudTicks * 312871u));
-        for (int i = 0; i < 10; ++i) {
+        // only survival has hearts and air
+        if (gSurvival) for (int i = 0; i < 10; ++i) {
             int bgFrame = flicker ? 1 : 0;
             int hx = screenWidth / 2 - 91 + (i << 3);
             int hy = screenHeight - 32;
@@ -862,7 +1046,7 @@ static void drawGui(float partialTicks) {
     }
 
     // bubbles only with the eyes under water
-    if (Entity_isUnderWater(&player.e)) {
+    if (gSurvival && Entity_isUnderWater(&player.e)) {
         int full = (int)ceil((player.e.airSupply - 2) * 10.0 / 300.0);
         int popping = (int)ceil(player.e.airSupply * 10.0 / 300.0) - full;
         for (int i = 0; i < full + popping; ++i) {
@@ -888,9 +1072,9 @@ static void drawGui(float partialTicks) {
         int flash = player.inventory.flash[i];
         if (flash > 0) {
             float f3 = ((float)flash - partialTicks) / 5.0f;
-            float f4 = -(float)sin((double)(f3 * f3) * M_PI) * 8.0f;
-            float f5 = (float)sin((double)(f3 * f3) * M_PI) + 1.0f;
-            float f6 = (float)sin((double)f3 * M_PI) + 1.0f;
+            float f4 = -MathHelper_sin(f3 * f3 * 3.1415927f) * 8.0f;
+            float f5 = MathHelper_sin(f3 * f3 * 3.1415927f) + 1.0f;
+            float f6 = MathHelper_sin(f3 * 3.1415927f) + 1.0f;
             glTranslatef(10.0f, f4 + 10.0f, 0.0f);
             glScalef(f5, f6, 1.0f);
             glTranslatef(-10.0f, -10.0f, 0.0f);
@@ -906,9 +1090,7 @@ static void drawGui(float partialTicks) {
         glBindTexture(GL_TEXTURE_2D, texTerrain);
         Tessellator_begin(&hudTess);
         const Tile* slotTile = gTiles[slotId];
-        if (slotTile && slotTile->render) {
-            slotTile->render(slotTile, &hudTess, &level, 0, -2, 0, 0);
-        }
+        if (slotTile) slotTile->renderGuiItem(slotTile, &hudTess);
         Tessellator_end(&hudTess);
 
         glPopMatrix();
@@ -928,13 +1110,15 @@ static void drawGui(float partialTicks) {
         Font_drawShadow(&gFont, &hudTess, gFpsText, 2, 12, 0xFFFFFF);
     }
 
-    char scoreMsg[48];
-    snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", player.score);
-    Font_drawShadow(&gFont, &hudTess, scoreMsg, screenWidth - Font_width(&gFont, scoreMsg) - 2, 2, 0xFFFFFF);
+    if (gSurvival) {
+        char scoreMsg[48];
+        snprintf(scoreMsg, sizeof scoreMsg, "Score: &e%d", player.score);
+        Font_drawShadow(&gFont, &hudTess, scoreMsg, screenWidth - Font_width(&gFont, scoreMsg) - 2, 2, 0xFFFFFF);
 
-    char arrowsMsg[32];
-    snprintf(arrowsMsg, sizeof arrowsMsg, "Arrows: %d", player.arrows);
-    Font_drawShadow(&gFont, &hudTess, arrowsMsg, screenWidth / 2 + 8, screenHeight - 33, 0xFFFFFF);
+        char arrowsMsg[32];
+        snprintf(arrowsMsg, sizeof arrowsMsg, "Arrows: %d", player.arrows);
+        Font_drawShadow(&gFont, &hudTess, arrowsMsg, screenWidth / 2 + 8, screenHeight - 33, 0xFFFFFF);
+    }
 
     // the newest 10 lines under 10 seconds old, the newest 20 while the chat screen is open
     {
@@ -959,18 +1143,31 @@ static void drawGui(float partialTicks) {
     // the Tab player list
 
     if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && gConnected) {
-        Screen_fillGradient(cx - 128, cy - 80, cx + 128, cy + 68, 0xB3000000u, 0xCC333333u);
+        glEnable(GL_BLEND);
+        glDisable(GL_TEXTURE_2D);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBegin(GL_QUADS);
+        glColor4f(0.0f, 0.0f, 0.0f, 0.7f);
+        glVertex2f((float)(cx + 128), (float)(cy - 68 - 12));
+        glVertex2f((float)(cx - 128), (float)(cy - 68 - 12));
+        glColor4f(0.2f, 0.2f, 0.2f, 0.8f);
+        glVertex2f((float)(cx - 128), (float)(cy + 68));
+        glVertex2f((float)(cx + 128), (float)(cy + 68));
+        glEnd();
+        glDisable(GL_BLEND);
+        glEnable(GL_TEXTURE_2D);
 
         const char* header = "Connected players:";
         Font_drawShadow(&gFont, &hudTess, header, cx - Font_width(&gFont, header) / 2, cy - 76, 0xFFFFFF);
 
-        const char* names[1 + MAX_NET_PLAYERS];
+        const char* names[1 + 128];
         int nameCount = 0;
         names[nameCount++] = Minecraft_getUserName();
-        for (int i = 0; i < netPlayerCount; i++) {
-            if (netPlayers[i].used) names[nameCount++] = netPlayers[i].name;
+        for (int b = 0; b < playerMapCap; ++b) {
+            for (int k = playerMapHead[b]; k >= 0; k = playerMapNext[k]) names[nameCount++] = netPlayers[playerMapSlot[k]].name;
         }
 
+        // the hover is only checked while a screen is open, the mouse is hidden otherwise
         bool canHover = (activeScreen != NULL);
         int xm = 0, ym = 0;
         if (canHover) computeGuiMouse(&xm, &ym);
@@ -998,7 +1195,7 @@ static void drawGui(float partialTicks) {
     }
 }
 
-// strict, a point on the edge is outside
+/* picking */
 
 // strict, a point on the edge is outside
 static bool aabbContainsPoint(const AABB* box, float x, float y, float z) {
@@ -1028,12 +1225,13 @@ static void pick(float t) {
     float pz = player.e.prevZ + (player.e.z - player.e.prevZ) * t;
     float pitch = player.e.prevXRotation + (player.e.xRotation - player.e.prevXRotation) * t;
     float yaw = player.e.prevYRotation + (player.e.yRotation - player.e.prevYRotation) * t;
-    float cy = (float)cos((double)(-yaw) * M_PI / 180.0 - M_PI);
-    float sy = (float)sin((double)(-yaw) * M_PI / 180.0 - M_PI);
-    float cp = (float)cos((double)(-pitch) * M_PI / 180.0);
-    float sp = (float)sin((double)(-pitch) * M_PI / 180.0);
+    float cy = MathHelper_cos(-yaw * (3.1415927f / 180.0f) - 3.1415927f);
+    float sy = MathHelper_sin(-yaw * (3.1415927f / 180.0f) - 3.1415927f);
+    float cp = MathHelper_cos(-pitch * (3.1415927f / 180.0f));
+    float sp = MathHelper_sin(-pitch * (3.1415927f / 180.0f));
     float dx = sy * cp, dy = sp, dz = cy * cp;
-    const float reach = 4.0f;
+    // survival reach is 4
+    const float reach = gSurvival ? 4.0f : 5.0f;
 
     float sx = px, sy2 = py, sz = pz;
     int hx, hy, hz, face;
@@ -1043,24 +1241,17 @@ static void pick(float t) {
     float dist = reach;
     if (hasBlock) {
         float ax = px - vx, ay = py - vy, az = pz - vz;
-        dist = sqrtf(ax * ax + ay * ay + az * az);
+        dist = MathHelper_sqrt(ax * ax + ay * ay + az * az);
     }
 
     AABB reachBox = AABB_expand(&player.e.boundingBox, dx * dist, dy * dist, dz * dist);
     Entity* hitEntity = NULL;
     for (int i = 0; i < mobCount; i++) {
-        if (pickEntity(&mobs[i].e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = &mobs[i].e;
-    }
-    for (int i = 0; i < tntCount; i++) {
-        if (pickEntity(&tnts[i].e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = &tnts[i].e;
-    }
-    for (int i = 0; i < smolderCount; i++) {
-        if (pickEntity(&smolders[i].e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = &smolders[i].e;
+        if (mobs[i].e.inGrid && pickEntity(&mobs[i].e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = &mobs[i].e;
     }
     for (int i = 0; i < netPlayerCount; i++) {
-        if (netPlayers[i].used && pickEntity(&netPlayers[i].base, &reachBox, px, py, pz, dx, dy, dz, &dist)) {
-            hitEntity = &netPlayers[i].base;
-        }
+        Entity* e = &netPlayers[netOrder[i]].e;
+        if (e->inGrid && pickEntity(e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = e;
     }
 
     if (hitEntity) {
@@ -1078,8 +1269,16 @@ static void pick(float t) {
 bool Minecraft_findArrowTarget(const AABB* box, const Entity* owner, int flightTime, Entity** outHit) {
     for (int i = 0; i < mobCount; i++) {
         Entity* e = &mobs[i].e;
-        if (e->removed) continue;
+        if (e->removed || !e->inGrid) continue;
         if (e == owner && flightTime <= 5) continue;
+        if (AABB_intersects(&e->boundingBox, box)) {
+            *outHit = e;
+            return true;
+        }
+    }
+    for (int i = 0; i < netPlayerCount; i++) {
+        Entity* e = &netPlayers[netOrder[i]].e;
+        if (e->removed || !e->inGrid) continue;
         if (AABB_intersects(&e->boundingBox, box)) {
             *outHit = e;
             return true;
@@ -1104,7 +1303,7 @@ void Minecraft_checkArrowPickups(Entity* playerEntity) {
     Player* p = (Player*)playerEntity;
     for (int i = 0; i < arrowCount; i++) {
         Arrow* a = &arrows[i];
-        if (a->e.removed || a->pickedUp || !a->hasHit) continue;
+        if (a->e.removed || !a->e.inGrid || a->pickedUp || !a->hasHit) continue;
         if (a->owner != playerEntity) continue;
         if (p->arrows >= PLAYER_MAX_ARROWS) continue;
         if (!AABB_intersects(&a->e.boundingBox, &box)) continue;
@@ -1120,51 +1319,32 @@ void Minecraft_spawnExplosionParticle(Level* lvl, float x, float y, float z, flo
     ParticleEngine_add(&particleEngine, &p);
 }
 
-// PrimedTnt's debris, textured as tnt
-void Minecraft_spawnTntParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz) {
-    Particle p;
-    Particle_initTerrain(&p, lvl, x, y, z, mx, my, mz, &TILE_TNT);
-    ParticleEngine_add(&particleEngine, &p);
-}
-
-void Minecraft_spawnSmoke(Level* lvl, float x, float y, float z) {
-    Particle p;
-    Particle_initSmoke(&p, lvl, x, y, z);
-    ParticleEngine_add(&particleEngine, &p);
-}
-
-// life < 0 keeps the full fuse
-void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z, int life) {
-    if (tntCount >= MAX_TNTS) return;
-    PrimedTnt* t = &tnts[tntCount++];
-    PrimedTnt_init(t, lvl, x, y, z);
-    if (life >= 0) t->life = life;
-}
-
-void Minecraft_spawnSmolder(Level* lvl, int x, int y, int z) {
-    if (smolderCount >= MAX_SMOLDERS) return;
-    Smolder_init(&smolders[smolderCount++], lvl, x, y, z);
-}
-
 void Minecraft_hurtEntitiesInExplosion(Level* lvl, Entity* source, float x, float y, float z, float radius) {
     (void)lvl;
     for (int i = 0; i < mobCount; i++) {
         Entity* e = &mobs[i].e;
-        if (e->removed || e == source) continue;
+        if (e->removed || !e->inGrid || e == source) continue;
         float dx = e->x - x, dy = e->y - y, dz = e->z - z;
-        float ratio = sqrtf(dx * dx + dy * dy + dz * dz) / radius;
+        float ratio = MathHelper_sqrt(dx * dx + dy * dy + dz * dz) / radius;
+        if (ratio <= 1.0f) Mob_hurt(e, source, (int)((1.0f - ratio) * 15.0f + 1.0f));
+    }
+    for (int i = 0; i < netPlayerCount; i++) {
+        Entity* e = &netPlayers[netOrder[i]].e;
+        if (e->removed || !e->inGrid || e == source) continue;
+        float dx = e->x - x, dy = e->y - y, dz = e->z - z;
+        float ratio = MathHelper_sqrt(dx * dx + dy * dy + dz * dz) / radius;
         if (ratio <= 1.0f) Mob_hurt(e, source, (int)((1.0f - ratio) * 15.0f + 1.0f));
     }
     if (&player.e != source) {
         float dx = player.e.x - x, dy = player.e.y - y, dz = player.e.z - z;
-        float ratio = sqrtf(dx * dx + dy * dy + dz * dz) / radius;
+        float ratio = MathHelper_sqrt(dx * dx + dy * dy + dz * dz) / radius;
         if (ratio <= 1.0f) Mob_hurt(&player.e, source, (int)((1.0f - ratio) * 15.0f + 1.0f));
     }
 }
 
 // every Mob counts, the local player and network players too
 int Minecraft_countMobs(void) {
-    return mobCount + 1;
+    return mobCount + 1 + netPlayerCount;
 }
 
 // the push at the end of BasicAI.tick, every pushable mob overlapping the grown box
@@ -1172,12 +1352,23 @@ void Minecraft_pushNearby(Entity* mob) {
     AABB box = AABB_grow(&mob->boundingBox, 0.2f, 0.0f, 0.2f);
     for (int i = 0; i < mobCount; ++i) {
         Entity* e = &mobs[i].e;
-        if (e == mob || e->removed || !AABB_intersects(&e->boundingBox, &box)) continue;
+        if (e == mob || e->removed || !e->inGrid || !AABB_intersects(&e->boundingBox, &box)) continue;
+        Entity_pushEntity(e, mob);
+    }
+    for (int i = 0; i < netPlayerCount; ++i) {
+        Entity* e = &netPlayers[netOrder[i]].e;
+        if (e == mob || e->removed || !e->inGrid || !AABB_intersects(&e->boundingBox, &box)) continue;
         Entity_pushEntity(e, mob);
     }
     if (&player.e != mob && !player.e.removed && AABB_intersects(&player.e.boundingBox, &box)) {
         Entity_pushEntity(&player.e, mob);
     }
+}
+
+// MobSpawner builds the rolled mob and drops it, only its Math.random calls matter
+void Minecraft_buildDiscardedMob(Level* lvl, int kind, float x, float y, float z) {
+    Creature scratch;
+    Creature_init(&scratch, (CreatureKind)kind, lvl, x, y, z);
 }
 
 // MobSpawner builds the mob first and drops it if its box overlaps any entity
@@ -1203,7 +1394,7 @@ void Minecraft_checkItemPickups(Entity* playerEntity) {
     AABB box = AABB_grow(&playerEntity->boundingBox, 1.0f, 0.0f, 1.0f);
     for (int i = 0; i < itemCount; i++) {
         Item* it = &items[i];
-        if (it->e.removed || it->pickedUp) continue;
+        if (it->e.removed || !it->e.inGrid || it->pickedUp) continue;
         if (!AABB_intersects(&it->e.boundingBox, &box)) continue;
         if (Inventory_addResource(&player.inventory, it->resource)) {
             Item_startPickup(it, playerEntity);
@@ -1211,21 +1402,25 @@ void Minecraft_checkItemPickups(Entity* playerEntity) {
     }
 }
 
-// creative breaks right away, survival only breaks tiles with no hardness
+/* input actions */
 
-// survival only breaks tiles with no hardness on a click
+// creative breaks right away, survival only breaks tiles with no hardness
 static void destroyBlock(int x, int y, int z);
 
 static void clickBlock(int x, int y, int z) {
+    if (!gSurvival) {
+        destroyBlock(x, y, z);
+        return;
+    }
     int id = Level_getTile(&level, x, y, z);
     if (id > 0 && gTiles[id] && gTiles[id]->hardnessTicks == 0) destroyBlock(x, y, z);
 }
 
-// drops first, then the tile goes away with sound and particles
+// survival rolls the drops first
 static void destroyBlock(int x, int y, int z) {
     int id = Level_getTile(&level, x, y, z);
     const Tile* t = (id > 0 && id < 256) ? gTiles[id] : NULL;
-    if (t) Tile_dropItems(t, &level, x, y, z);
+    if (gSurvival && t) Tile_dropItems(t, &level, x, y, z);
     bool changed = Level_netSetTile(&level, x, y, z, 0);
     if (t && changed) {
         if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 0, Inventory_getSelected(&player.inventory));
@@ -1278,6 +1473,7 @@ static float blockDamageFraction(float partialTicks) {
 
 // survival eats a mushroom on right click
 static bool useItem(int id) {
+    if (!gSurvival) return false;
     if (id == TILE_MUSHROOM_RED.id && Inventory_consume(&player.inventory, id)) {
         Mob_hurt(&player.e, NULL, 3);
         return true;
@@ -1293,22 +1489,17 @@ static bool useItem(int id) {
 static bool isFreeOfEntities(const AABB* box) {
     if (AABB_intersects(&player.e.boundingBox, box)) return false;
     for (int i = 0; i < mobCount; ++i) {
-        if (AABB_intersects(&mobs[i].e.boundingBox, box)) return false;
+        if (mobs[i].e.inGrid && AABB_intersects(&mobs[i].e.boundingBox, box)) return false;
     }
     for (int i = 0; i < arrowCount; ++i) {
-        if (AABB_intersects(&arrows[i].e.boundingBox, box)) return false;
+        if (arrows[i].e.inGrid && AABB_intersects(&arrows[i].e.boundingBox, box)) return false;
     }
     for (int i = 0; i < itemCount; ++i) {
-        if (AABB_intersects(&items[i].e.boundingBox, box)) return false;
-    }
-    for (int i = 0; i < tntCount; ++i) {
-        if (AABB_intersects(&tnts[i].e.boundingBox, box)) return false;
-    }
-    for (int i = 0; i < smolderCount; ++i) {
-        if (AABB_intersects(&smolders[i].e.boundingBox, box)) return false;
+        if (items[i].e.inGrid && AABB_intersects(&items[i].e.boundingBox, box)) return false;
     }
     for (int i = 0; i < netPlayerCount; ++i) {
-        if (netPlayers[i].used && AABB_intersects(&netPlayers[i].base.boundingBox, box)) return false;
+        const Entity* e = &netPlayers[netOrder[i]].e;
+        if (e->inGrid && AABB_intersects(&e->boundingBox, box)) return false;
     }
     return true;
 }
@@ -1331,7 +1522,7 @@ static void clickMouse(int button) {
         }
     }
     if (isHitNull) {
-        if (button == 0) gClickCooldown = 10;
+        if (button == 0 && gSurvival) gClickCooldown = 10;
         return;
     }
     if (hitResult.type == HITRESULT_ENTITY) {
@@ -1363,7 +1554,7 @@ static void clickMouse(int button) {
     if (placed->getAABB && placed->getAABB(placed, x, y, z, &box)) {
         if (!isFreeOfEntities(&box)) return;
     }
-    if (!Inventory_consume(&player.inventory, sel)) return;
+    if (gSurvival && !Inventory_consume(&player.inventory, sel)) return;
     if (gConnected) NetConnection_sendSetBlock(&gConn, x, y, z, 1, sel);
     Level_netSetTile(&level, x, y, z, sel);
     heldBlend = 0.0f;
@@ -1404,8 +1595,8 @@ static void handleMouseEvent(const InputEvent* ev) {
     if (ev->code == GLFW_MOUSE_BUTTON_MIDDLE && !isHitNull) {
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
         if (id == TILE_GRASS.id) id = TILE_DIRT.id;
-        int slot = Inventory_findSlot(&player.inventory, id);
-        if (slot >= 0) player.inventory.selected = slot;
+        if (id == TILE_DOUBLE_SLAB.id) id = TILE_SLAB.id;
+        Inventory_grabTexture(&player.inventory, id, !gSurvival);
     }
 }
 
@@ -1413,14 +1604,27 @@ static void handleKeyEvent(const InputEvent* ev) {
     setPlayerKey(ev->code, ev->pressed);
     if (!ev->pressed) return;
     int key = ev->code;
+    if (activeScreen && activeScreen->keyPressed) activeScreen->keyPressed(activeScreen, 0, key);
     if (!activeScreen) {
         if (key == GLFW_KEY_ESCAPE) releaseMouseAndOpenPause();
+        if (!gSurvival) {
+            if (key == gOptions.keys[OPT_KEY_LOAD_LOC].glfwKey) Player_resetPos(&player);
+            if (key == gOptions.keys[OPT_KEY_SAVE_LOC].glfwKey) {
+                Level_setSpawnPos(&level, (int)player.e.x, (int)player.e.y, (int)player.e.z, player.e.yRotation);
+                Player_resetPos(&player);
+            }
+        }
         // F5 toggles rain, offline only
-        if (key == GLFW_KEY_F5 && !gConnected) gRaining = !gRaining;
-        if (key == GLFW_KEY_TAB && !gConnected && player.arrows > 0 && arrowCount < MAX_ARROWS) {
+        if (key == GLFW_KEY_F5 && !gMultiplayer) gRaining = !gRaining;
+        if (key == GLFW_KEY_TAB && !gMultiplayer && player.arrows > 0 && arrowCount < MAX_ARROWS) {
             Arrow_init(&arrows[arrowCount++], &level, &player.e,
                        player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation, 1.2f);
             player.arrows--;
+        }
+        // creative opens the block select screen
+        if (key == gOptions.keys[OPT_KEY_BUILD].glfwKey && !gSurvival) {
+            int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
+            BlockSelectScreen_open(&gFont, fbw * 240 / fbh, 240, &player.inventory, texTerrain);
         }
         if (key == gOptions.keys[OPT_KEY_CHAT].glfwKey && gConnected) {
             Player_releaseAllKeys(&player);
@@ -1443,11 +1647,21 @@ static void handleKeyEvent(const InputEvent* ev) {
 // the gameplay half of Minecraft.tick: queued mouse and key events, click repeat, then mining
 static void tickInput(void) {
     if (!activeScreen && player.e.health <= 0) Minecraft_setScreen(NULL);
-    if (!activeScreen) {
+    if (!activeScreen || activeScreen->allowUserInput) {
         int n = inputQueueCount;
         inputQueueCount = 0;
         for (int i = 0; i < n; ++i) {
-            if (inputQueue[i].kind != EVENT_KEY) handleMouseEvent(&inputQueue[i]);
+            const InputEvent* ev = &inputQueue[i];
+            if (ev->kind == EVENT_KEY) continue;
+            if (activeScreen && ev->kind == EVENT_MOUSE) {
+                if (ev->pressed && activeScreen->mouseClicked) {
+                    int xm, ym;
+                    computeGuiMouse(&xm, &ym);
+                    activeScreen->mouseClicked(activeScreen, xm, ym, ev->code == GLFW_MOUSE_BUTTON_LEFT ? 0 : ev->code == GLFW_MOUSE_BUTTON_RIGHT ? 1 : 2);
+                }
+                continue;
+            }
+            handleMouseEvent(ev);
         }
         if (gClickCooldown > 0) gClickCooldown--;
         for (int i = 0; i < n; ++i) {
@@ -1467,7 +1681,7 @@ static void tickInput(void) {
             }
         }
         bool mining = !activeScreen && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && isMouseGrabbed();
-        if (gClickCooldown <= 0) {
+        if (gSurvival && gClickCooldown <= 0) {
             if (mining && !isHitNull && hitResult.type == HITRESULT_TILE) {
                 hitBlock(hitResult.x, hitResult.y, hitResult.z, hitResult.f);
             } else {
@@ -1507,11 +1721,13 @@ static void handleScreenClicks(GLFWwindow* w) {
     prevScreenClick = left;
 }
 
-// the held block, or the bare arm from char.png
+/* frame */
 
 // the held block, or the bare arm from char.png
 static void renderHand(Player* p, float partialTicks, int pass) {
     if (!handArmCubeBuilt) {
+        // the left arm box at its own origin, the arm is drawn
+        // without the part's offset
         Cube_init(&handArmCube, 40, 16);
         handArmCube.mirror = 1;
         Cube_addBox(&handArmCube, -1, -2, -2, 4, 12, 4);
@@ -1542,18 +1758,18 @@ static void renderHand(Player* p, float partialTicks, int pass) {
     const float baseScale = 0.8f;
     if (handSwinging) {
         float swing = ((float)handSwingTicks + partialTicks) / 7.0f;
-        float dip = sinf(swing * (float)M_PI);
-        float rise = sinf(sqrtf(swing) * (float)M_PI);
-        glTranslatef(-rise * 0.4f, sinf(sqrtf(swing) * (float)M_PI * 2.0f) * 0.2f, -dip * 0.2f);
+        float dip = MathHelper_sin(swing * 3.1415927f);
+        float rise = MathHelper_sin(MathHelper_sqrt(swing) * 3.1415927f);
+        glTranslatef(-rise * 0.4f, MathHelper_sin(MathHelper_sqrt(swing) * 3.1415927f * 2.0f) * 0.2f, -dip * 0.2f);
     }
     glTranslatef(0.7f * baseScale, -0.65f * baseScale - (1.0f - blend) * 0.6f, -0.9f * baseScale);
     glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
     glEnable(GL_RESCALE_NORMAL);
     if (handSwinging) {
         float swing = ((float)handSwingTicks + partialTicks) / 7.0f;
-        float rise = sinf(sqrtf(swing) * (float)M_PI);
+        float rise = MathHelper_sin(MathHelper_sqrt(swing) * 3.1415927f);
         glRotatef(rise * 80.0f, 0.0f, 1.0f, 0.0f);
-        glRotatef(-sinf(swing * swing * (float)M_PI) * 20.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(-MathHelper_sin(swing * swing * 3.1415927f) * 20.0f, 1.0f, 0.0f, 0.0f);
     }
 
     float brightness = Level_getBrightness(&level, (int)p->e.x, (int)p->e.y, (int)p->e.z);
@@ -1574,6 +1790,7 @@ static void renderHand(Player* p, float partialTicks, int pass) {
         glScalef(1.0f, -1.0f, -1.0f);
         glTranslatef(0.0f, 0.2f, 0.0f);
         glRotatef(-120.0f, 0.0f, 0.0f, 1.0f);
+        // the arm is drawn at 0.0625, Cube_render can't bake it in
         glScalef(0.0625f, 0.0625f, 0.0625f);
         Cube_render(&handArmCube);
     }
@@ -1608,7 +1825,7 @@ static void renderRain(const Player* p, float t) {
             float scroll = ((float)((gRainTicks + x * 3121 + z * 418711) % 32) + t) / 32.0f;
             float dx = (float)x + 0.5f - p->e.x;
             float dz = (float)z + 0.5f - p->e.z;
-            float d = (float)sqrt(dx * dx + dz * dz) / 5.0f;
+            float d = MathHelper_sqrt(dx * dx + dz * dz) / 5.0f;
             glColor4f(1.0f, 1.0f, 1.0f, (1.0f - d * d) * 0.7f);
             float v0 = (float)y0 * 2.0f / 8.0f + scroll * 2.0f;
             float v1 = (float)y1 * 2.0f / 8.0f + scroll * 2.0f;
@@ -1701,69 +1918,63 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
 
     setupEntityLighting(true);
 
-    // the camera for the distance cull
+    // BlockMap.render: the entity's grid cell (2 blocks bigger) has to be in view, a cell fully in
+    // view draws everything in it, otherwise the entity's box decides
     float camX = p->e.prevX + (p->e.x - p->e.prevX) * t;
     float camY = p->e.prevY + (p->e.y - p->e.prevY) * t;
     float camZ = p->e.prevZ + (p->e.z - p->e.prevZ) * t;
 
     for (int i = 0; i < mobCount; ++i) {
         const Creature* c = &mobs[i];
-        if (Entity_shouldRender(&c->e, camX, camY, camZ) && frustum_isVisible(&frustum, &c->e.boundingBox)) {
+        if (entityVisible(&frustum, &c->e, camX, camY, camZ)) {
             Creature_render(c, t);
         }
     }
 
     for (int i = 0; i < netPlayerCount; ++i) {
-        const NetworkPlayer* np = &netPlayers[i];
-        if (frustum_isVisible(&frustum, &np->base.boundingBox)) {
+        const NetworkPlayer* np = &netPlayers[netOrder[i]];
+        if (entityVisible(&frustum, &np->e, camX, camY, camZ)) {
             NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
         }
     }
 
     for (int i = 0; i < arrowCount; ++i) {
         const Arrow* a = &arrows[i];
-        if (Entity_shouldRender(&a->e, camX, camY, camZ) && frustum_isVisible(&frustum, &a->e.boundingBox)) {
+        if (entityVisible(&frustum, &a->e, camX, camY, camZ)) {
             Arrow_render(a, t);
         }
     }
 
     for (int i = 0; i < itemCount; ++i) {
         const Item* it = &items[i];
-        if (Entity_shouldRender(&it->e, camX, camY, camZ) && frustum_isVisible(&frustum, &it->e.boundingBox)) {
+        if (entityVisible(&frustum, &it->e, camX, camY, camZ)) {
             Item_render(it, t);
-        }
-    }
-
-    for (int i = 0; i < tntCount; ++i) {
-        const PrimedTnt* tnt = &tnts[i];
-        if (Entity_shouldRender(&tnt->e, camX, camY, camZ) && frustum_isVisible(&frustum, &tnt->e.boundingBox)) {
-            PrimedTnt_render(tnt, t);
         }
     }
 
     setupEntityLighting(false);
     setupFog();
     ParticleEngine_render(&particleEngine, p, t);
+    glBindTexture(GL_TEXTURE_2D, texRock);
+    glEnable(GL_TEXTURE_2D);
     LevelRenderer_renderSurroundingGround(lr);
-    glDisable(GL_BLEND);
-    glDisable(GL_LIGHTING);
     setupFog();
     LevelRenderer_renderClouds(lr, t, gOptions.anaglyph3d);
     setupFog();
-    glEnable(GL_LIGHTING);
 
     // drawn for entity hits too, at 0 0 0
     if (!isHitNull) {
-        glDisable(GL_LIGHTING);
         glDisable(GL_ALPHA_TEST);
         LevelRenderer_renderHit(&levelRenderer, &hitResult, blockDamageFraction(t));
         LevelRenderer_renderHitOutline(&level, &hitResult);
         glEnable(GL_ALPHA_TEST);
-        glEnable(GL_LIGHTING);
     }
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     setupFog();
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBindTexture(GL_TEXTURE_2D, texWater);
     LevelRenderer_renderSurroundingWater(lr);
     glDisable(GL_BLEND);
     glEnable(GL_BLEND);
@@ -1777,7 +1988,6 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     LevelRenderer_render(lr, p, 1);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    glDisable(GL_LIGHTING);
     glDisable(GL_FOG);
     if (gRaining) renderRain(p, t);
 
@@ -1817,6 +2027,7 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
 
         Timer_advanceTime(&timer);
         for (int i = 0; i < timer.ticks; ++i) tick(p, window);
+        checkGlError("Pre render");
 
         // the Game over screen comes back whenever nothing is open and the player is dead
         if (!activeScreen && p->e.health <= 0) {
@@ -1827,14 +2038,12 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
 
         // while loading, tick draws the loading screen itself
         if (!gLoading) {
-            if (screenWasActive) {
+            if (screenWasActive && activeScreen && !activeScreen->allowUserInput) {
                 handleScreenClicks(window);
-                // a button can close the screen
-                if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
-
             }
 
             render(lvl, lr, p, window, timer.partialTicks);
+            checkGlError("Post render");
         }
 
         frames++;
@@ -1854,8 +2063,12 @@ static void run(Level* lvl, LevelRenderer* lr, Player* p) {
 
 // minecraft.exe [host] [port] [username], no args is singleplayer
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+    if (argc >= 2) {
+        snprintf(gConnectHost, sizeof gConnectHost, "%s", argv[1]);
+        if (argc >= 3) gConnectPort = atoi(argv[2]);
+        if (argc >= 4) snprintf(gConnectUsername, sizeof gConnectUsername, "%s", argv[3]);
+    }
+    MathHelper_init();
 
     run(&level, &levelRenderer, &player);
     return EXIT_SUCCESS;
@@ -1926,6 +2139,7 @@ static void tick(Player* p, GLFWwindow* w) {
     (void)w;
 
     gTickCount++;
+    GameMode_tick();
 
     glBindTexture(GL_TEXTURE_2D, texTerrain);
     for (int i = 0; i < 2; ++i) {
@@ -1945,6 +2159,8 @@ static void tick(Player* p, GLFWwindow* w) {
 
     Sound_tickMusic();
 
+    // our position goes out every tick, even before our SpawnPlayer arrives,
+    // so others see us at 0,0,0 for a moment
     if (gConnecting) {
         if (NetConnection_pollConnecting(&gConn)) {
             gConnecting = false;
@@ -1953,12 +2169,19 @@ static void tick(Player* p, GLFWwindow* w) {
     }
     if (gConnected) {
         NetConnection_tick(&gConn);
+        // the exception leaves the rest of the tick undone
+        if (gTickBroke) {
+            gTickBroke = false;
+            return;
+        }
+        // not while the level is still downloading
         if (gConnected && gConn.levelLoaded) {
             NetConnection_sendTeleportSelf(&gConn, p->e.x, p->e.y, p->e.z, p->e.yRotation, p->e.xRotation);
         }
     }
 
     tickInput();
+    if (activeScreen && activeScreen->tick) activeScreen->tick(activeScreen);
 
     // the hand swing and the held block fade
     gRainTicks++;
@@ -1999,62 +2222,59 @@ static void tick(Player* p, GLFWwindow* w) {
     LevelRenderer_tick(&levelRenderer); // scrolls the clouds
 
     for (int i = 0; i < mobCount; ) {
+        Entity_gridInsert(&mobs[i].e);
         Creature_onTick(&mobs[i]);
         if (mobs[i].e.removed) {
             removeMob(i);
             continue;
         }
+        Entity_gridTick(&mobs[i].e);
         i++;
     }
 
+    // world gen mobs were added before the player, so they tick first
+    Entity_gridInsert(&p->e);
     Player_onTick(p);
+    Entity_gridTick(&p->e);
 
     for (int i = 0; i < arrowCount; ) {
+        Entity_gridInsert(&arrows[i].e);
         Arrow_onTick(&arrows[i]);
         if (arrows[i].e.removed) {
             arrows[i] = arrows[arrowCount - 1];
             arrowCount--;
             continue;
         }
+        Entity_gridTick(&arrows[i].e);
         i++;
     }
 
     for (int i = 0; i < itemCount; ) {
+        Entity_gridInsert(&items[i].e);
         Item_onTick(&items[i]);
         if (items[i].e.removed) {
             items[i] = items[itemCount - 1];
             itemCount--;
             continue;
         }
+        Entity_gridTick(&items[i].e);
         i++;
     }
 
-    for (int i = 0; i < tntCount; ) {
-        PrimedTnt_onTick(&tnts[i]);
-        if (tnts[i].e.removed) {
-            tnts[i] = tnts[tntCount - 1];
-            tntCount--;
+    for (int i = 0; i < netPlayerCount; ) {
+        NetworkPlayer* np = &netPlayers[netOrder[i]];
+        Entity_gridInsert(&np->e);
+        NetworkPlayer_onTick(np);
+        if (np->e.removed) {
+            removeNetPlayerFromLevel(netOrder[i]);
             continue;
         }
+        Entity_gridTick(&np->e);
         i++;
-    }
-
-    for (int i = 0; i < smolderCount; ) {
-        Smolder_onTick(&smolders[i]);
-        if (smolders[i].e.removed) {
-            smolders[i] = smolders[smolderCount - 1];
-            smolderCount--;
-            continue;
-        }
-        i++;
-    }
-
-    for (int i = 0; i < netPlayerCount; i++) {
-        NetworkPlayer_onTick(&netPlayers[i]);
     }
 
     // the server owns the tiles in multiplayer
-    if (!gConnected) Level_onTick(&level);
+    if (!gMultiplayer) Level_onTick(&level);
 
     ParticleEngine_onTick(&particleEngine);
 }

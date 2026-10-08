@@ -51,10 +51,21 @@ typedef struct Entity {
     float run, oRun;
     bool collision;
     float footSize, ySlideOffset; // step up, mobs can walk up half a block
+    bool noPhysics;    // move just shifts the box
+    // BlockMap: the position it was last slotted at, and whether its grid cell holds it.
+    // creative takes everything but the player out of the grid only, those keep
+    // ticking unseen until they walk into another 16 block slot
+    bool slotted, inGrid;
+    float xOld, yOld, zOld;
+    float pushthrough; // how much of a push goes through, network players
     float timeOffs, mobRot, rotA; // Mob fields only kept for the save
     float animStep, animStepO;
     // fired once, the tick health first reaches 0
     void (*onDeath)(struct Entity* self, struct Entity* attacker);
+    // runs right after the ai tick in Mob.aiStep, the sheep's graze
+    void (*afterAiStep)(struct Entity* self);
+    // a hurt override that runs before Mob.hurt, true when it took the hit (sheep shearing)
+    bool (*hurtOverride)(struct Entity* self, struct Entity* attacker);
     // Mob.ai, NULL for the player and anything that isn't a mob
     Ai* ai;
     // who gets the kill score, arrows credit their shooter
@@ -76,6 +87,11 @@ void Entity_move(Entity* e, float dx, float dy, float dz);
 void Entity_moveRelative(Entity* e, float x, float z, float speed);
 bool Entity_isLit(const Entity* e);
 float Entity_getBrightness(const Entity* e);
+// BlockMap.insert the first time, then BlockMap.tickAll's slot check after each tick
+void Entity_gridInsert(Entity* e);
+void Entity_gridTick(Entity* e);
+// the grid cell the BlockMap keeps it in
+void Entity_gridCell(const Entity* e, int* cx, int* cy, int* cz);
 bool  Entity_shouldRender(const Entity* e, float cx, float cy, float cz);
 void Entity_remove(Entity* e);
 // Entity.push(Entity): both get shoved apart, 0.05 divided by the squared distance

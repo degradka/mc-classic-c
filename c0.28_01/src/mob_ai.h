@@ -35,12 +35,16 @@ struct Ai {
     void (*onAfterUpdate)(Ai* ai, Entity* mob);
     // only after a hit lands, the creeper's self damage
     void (*onAfterAttack)(Ai* ai, Entity* mob, Entity* target);
+    // replaces BasicAI.update, the sheep's grazing, which calls Ai_update itself
+    void (*onUpdate)(Ai* ai, Entity* mob);
 };
 
 void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage);
 
 // BasicAI.tick, called from Mob_onTick
 void Ai_tick(Ai* ai, Entity* mob);
+// BasicAI.update, or BasicAttackAI.update when chase is on
+void Ai_update(Ai* ai, Entity* mob);
 
 // BasicAttackAI.hurt, Mob_hurt calls it first
 void Ai_onHurt(Ai* ai, Entity* mob, Entity* attacker, int damage);

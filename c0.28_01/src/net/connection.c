@@ -29,6 +29,8 @@ extern void Minecraft_queueNetworkPlayerMove(int id, int dx, int dy, int dz);
 extern void Minecraft_queueNetworkPlayerLook(int id, float yaw, float pitch);
 extern void Minecraft_despawnNetworkPlayer(int id);
 extern void Minecraft_setUserType(int userType);
+extern void Minecraft_dropConnectionManager(void);
+extern void Minecraft_connectionBroke(void);
 
 /* wire format helpers */
 
@@ -104,6 +106,7 @@ bool NetConnection_pollConnecting(NetConnection* c) {
     if (c->connectResult == 0) return false; // still in flight
 
     if (c->connectResult == 2) {
+        Minecraft_dropConnectionManager();
         Minecraft_openMessageScreen("Failed to connect",
             "You failed to connect to the server. It's probably down!");
         return true;
@@ -115,7 +118,7 @@ bool NetConnection_pollConnecting(NetConnection* c) {
     c->levelBuf = (unsigned char*)malloc((size_t)c->levelBufCapacity);
 
     writeByte(c, (unsigned char)PACKET_LOGIN);
-    writeByte(c, 6);
+    writeByte(c, 7);
     writeString(c, c->connectUsername);
     writeString(c, "--"); // session id, the server ignores it
     writeByte(c, 0); // userType, always 0
@@ -287,6 +290,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
         case PACKET_DISCONNECT: {
             char reason[65];
             readString(f, reason, sizeof reason);
+            NetConnection_close(c);
             Minecraft_openMessageScreen("Connection lost", reason);
             break;
         }
@@ -303,8 +307,8 @@ void NetConnection_tick(NetConnection* c) {
         int n = NetSocket_read(c->sock, c->readBuf + c->readLen, spaceLeft);
         if (n > 0) c->readLen += n;
         else if (n < 0) {
-            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
             NetConnection_close(c);
+            Minecraft_connectionBroke();
             return;
         }
     }
@@ -313,12 +317,13 @@ void NetConnection_tick(NetConnection* c) {
     for (int packets = 0; packets < 100 && consumedTotal < c->readLen; packets++) {
         int consumed = dispatchOne(c, c->readBuf + consumedTotal, c->readLen - consumedTotal);
         if (consumed < 0) {
-            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
             NetConnection_close(c);
+            Minecraft_connectionBroke();
             return;
         }
         if (consumed == 0) break; // incomplete packet, wait for more data
         consumedTotal += consumed;
+        if (!c->connected) return; // kicked
     }
     if (consumedTotal > 0) {
         memmove(c->readBuf, c->readBuf + consumedTotal, (size_t)(c->readLen - consumedTotal));
@@ -331,8 +336,8 @@ void NetConnection_tick(NetConnection* c) {
             memmove(c->writeBuf, c->writeBuf + n, (size_t)(c->writeLen - n));
             c->writeLen -= n;
         } else if (n < 0) {
-            Minecraft_openMessageScreen("Disconnected!", "You've lost connection to the server");
             NetConnection_close(c);
+            Minecraft_connectionBroke();
         }
     }
 }

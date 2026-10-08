@@ -52,6 +52,8 @@ typedef struct Level {
 
     // set for a level from a server, only its SetBlock packets change tiles
     bool networkMode;
+    // set by the game mode, mobs take no damage while it's on
+    bool creativeMode;
 
     // the local player, mobs chase it
     Entity* player;
@@ -68,7 +70,10 @@ typedef struct {
 
 ArrayList_AABB Level_getCubes(const Level* level, const AABB* boundingBox);
 
-void  Level_init(Level* level, int width, int height, int depth);
+// true when level.dat was loaded, false when it generated a new map
+bool  Level_init(Level* level, int width, int height, int depth);
+// the empty 8x8x8 level used while connecting to a server
+void  Level_initPlaceholder(Level* level);
 void  Level_destroy(Level* level);
 // frees the existing blocks and lightDepths, allocates at the new size, and
 // regenerates. Caller must rebuild the LevelRenderer afterward since its

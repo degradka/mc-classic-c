@@ -13,6 +13,7 @@ typedef enum {
     CREATURE_CREEPER,
     CREATURE_PIG,
     CREATURE_SPIDER,
+    CREATURE_SHEEP,
 } CreatureKind;
 
 typedef struct Creature {
@@ -21,10 +22,15 @@ typedef struct Creature {
     CreatureKind kind;
     bool helmet, armor;
     float bobStrength; // the spider has none
+    bool hasFur, grazing;
+    int grazingTime;
+    float graze, grazeO;
 } Creature;
 
 void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float y, float z);
 void Creature_onTick(Creature* c);
 void Creature_render(const Creature* c, float partialTicks);
+// Sheep.hurt, true when the hit only sheared it
+bool Creature_shear(Creature* c, Entity* attacker);
 
 #endif

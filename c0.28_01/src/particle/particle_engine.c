@@ -6,6 +6,7 @@
 #include <math.h>
 #include "../renderer/textures.h"
 #include "../player.h"
+#include "../math_helper.h"
 
 void ParticleEngine_init(ParticleEngine* pe, Level* level, GLuint terrainTex) {
     pe->level = level;
@@ -50,11 +51,11 @@ void ParticleEngine_onTick(ParticleEngine* pe) {
 }
 
 void ParticleEngine_render(ParticleEngine* pe, const Player* player, float partialTicks) {
-    float cameraX = -((float)cos((double)player->e.yRotation * M_PI / 180.0));
-    float cameraZ = -((float)sin((double)player->e.yRotation * M_PI / 180.0));
-    float cameraXWithY = -cameraZ * (float)sin((double)player->e.xRotation * M_PI / 180.0);
-    float cameraZWithY = cameraX * (float)sin((double)player->e.xRotation * M_PI / 180.0);
-    float cameraY = (float)cos((double)player->e.xRotation * M_PI / 180.0);
+    float cameraX = -MathHelper_cos(player->e.yRotation * 3.1415927f / 180.0f);
+    float cameraZ = -MathHelper_sin(player->e.yRotation * 3.1415927f / 180.0f);
+    float cameraXWithY = -cameraZ * MathHelper_sin(player->e.xRotation * 3.1415927f / 180.0f);
+    float cameraZWithY = cameraX * MathHelper_sin(player->e.xRotation * 3.1415927f / 180.0f);
+    float cameraY = MathHelper_cos(player->e.xRotation * 3.1415927f / 180.0f);
 
     for (int t = 0; t < 2; ++t) {
         if (pe->count[t] == 0) continue;

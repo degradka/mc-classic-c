@@ -1,5 +1,6 @@
 // character/zombie_model.c
 
+#include "../math_helper.h"
 #include "zombie_model.h"
 #include "../common.h"
 #include <math.h>
@@ -31,18 +32,19 @@ void ZombieModel_init(ZombieModel* m) {
 }
 
 void ZombieModel_render(ZombieModel* m, float animStep, float run, float age, float headYaw, float headPitch) {
-    m->head.yRot      = headYaw   / 57.29578f;
-    m->head.xRot      = headPitch / 57.29578f;
-    m->rightArm.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 2.0f * run;
-    m->rightArm.zRot  = (float)(cos(animStep * 0.2312) + 1.0) * run;
-    m->leftArm.xRot   = (float)cos(animStep * 0.6662) * 2.0f * run;
-    m->leftArm.zRot   = (float)(cos(animStep * 0.2812) - 1.0) * run;
-    m->rightLeg.xRot  = (float)cos(animStep * 0.6662) * 1.4f * run;
-    m->leftLeg.xRot   = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
-    m->rightArm.zRot += (float)cos(age * 0.09) * 0.05f + 0.05f;
-    m->leftArm.zRot  -= (float)cos(age * 0.09) * 0.05f + 0.05f;
-    m->rightArm.xRot += (float)sin(age * 0.067) * 0.05f;
-    m->leftArm.xRot  -= (float)sin(age * 0.067) * 0.05f;
+    const float pi = 3.1415927f;
+    m->head.yRot      = headYaw   / 57.295776f;
+    m->head.xRot      = headPitch / 57.295776f;
+    m->rightArm.xRot  = MathHelper_cos(animStep * 0.6662f + pi) * 2.0f * run;
+    m->rightArm.zRot  = (MathHelper_cos(animStep * 0.2312f) + 1.0f) * run;
+    m->leftArm.xRot   = MathHelper_cos(animStep * 0.6662f) * 2.0f * run;
+    m->leftArm.zRot   = (MathHelper_cos(animStep * 0.2812f) - 1.0f) * run;
+    m->rightLeg.xRot  = MathHelper_cos(animStep * 0.6662f) * 1.4f * run;
+    m->leftLeg.xRot   = MathHelper_cos(animStep * 0.6662f + pi) * 1.4f * run;
+    m->rightArm.zRot += MathHelper_cos(age * 0.09f) * 0.05f + 0.05f;
+    m->leftArm.zRot  -= MathHelper_cos(age * 0.09f) * 0.05f + 0.05f;
+    m->rightArm.xRot += MathHelper_sin(age * 0.067f) * 0.05f;
+    m->leftArm.xRot  -= MathHelper_sin(age * 0.067f) * 0.05f;
 
     Cube_render(&m->head);
     Cube_render(&m->body);

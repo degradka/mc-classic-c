@@ -1,5 +1,6 @@
 // character/mob_skeleton_model.c
 
+#include "../math_helper.h"
 #include "mob_skeleton_model.h"
 #include "../common.h"
 #include <math.h>
@@ -32,24 +33,27 @@ void MobSkeletonModel_init(MobSkeletonModel* m) {
 
 void MobSkeletonModel_render(MobSkeletonModel* m, float animStep, float run, float age,
                              float headYaw, float headPitch, float attackSwing) {
-    m->head.yRot = headYaw   / 57.29578f;
-    m->head.xRot = headPitch / 57.29578f;
+    const float pi = 3.1415927f;
+    m->head.yRot = headYaw   / 57.295776f;
+    m->head.xRot = headPitch / 57.295776f;
 
-    float f2 = (float)sin(attackSwing * M_PI);
-    float oneMinus = 1.0f - attackSwing;
-    float f3 = (float)sin((1.0f - oneMinus * oneMinus) * M_PI);
-
+    float f2 = MathHelper_sin(attackSwing * pi);
+    float f3 = MathHelper_sin((1.0f - (1.0f - attackSwing) * (1.0f - attackSwing)) * pi);
+    m->rightArm.zRot = 0.0f;
+    m->leftArm.zRot = 0.0f;
     m->rightArm.yRot = -(0.1f - f2 * 0.6f);
-    m->leftArm.yRot  =  (0.1f - f2 * 0.6f);
-    m->rightArm.xRot = -1.5707964f - f2 * 1.2f + f3 * 0.4f;
-    m->leftArm.xRot  = -1.5707964f - f2 * 1.2f + f3 * 0.4f;
-    m->rightArm.zRot = (float)cos(age * 0.09) * 0.05f + 0.05f;
-    m->leftArm.zRot  = -((float)cos(age * 0.09) * 0.05f + 0.05f);
-    m->rightArm.xRot += (float)sin(age * 0.067) * 0.05f;
-    m->leftArm.xRot  -= (float)sin(age * 0.067) * 0.05f;
+    m->leftArm.yRot  =  0.1f - f2 * 0.6f;
+    m->rightArm.xRot = -1.5707964f;
+    m->leftArm.xRot  = -1.5707964f;
+    m->rightArm.xRot -= f2 * 1.2f - f3 * 0.4f;
+    m->leftArm.xRot  -= f2 * 1.2f - f3 * 0.4f;
+    m->rightArm.zRot += MathHelper_cos(age * 0.09f) * 0.05f + 0.05f;
+    m->leftArm.zRot  -= MathHelper_cos(age * 0.09f) * 0.05f + 0.05f;
+    m->rightArm.xRot += MathHelper_sin(age * 0.067f) * 0.05f;
+    m->leftArm.xRot  -= MathHelper_sin(age * 0.067f) * 0.05f;
 
-    m->rightLeg.xRot = (float)cos(animStep * 0.6662) * 1.4f * run;
-    m->leftLeg.xRot  = (float)cos(animStep * 0.6662 + M_PI) * 1.4f * run;
+    m->rightLeg.xRot = MathHelper_cos(animStep * 0.6662f) * 1.4f * run;
+    m->leftLeg.xRot  = MathHelper_cos(animStep * 0.6662f + pi) * 1.4f * run;
 
     Cube_render(&m->head);
     Cube_render(&m->body);

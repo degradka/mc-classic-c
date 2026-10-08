@@ -1,6 +1,7 @@
 // level/level.c
 
 #include "level.h"
+#include "../math_helper.h"
 #include "level_renderer.h"
 #include "tile/tile.h"
 #include "levelgen/level_gen.h"
@@ -23,7 +24,7 @@ static int* allocLightDepths(int width, int height, int depth) {
     return depths;
 }
 
-void Level_init(Level* level, int width, int height, int depth) {
+static void setup(Level* level, int width, int height, int depth) {
     level->width = width;
     level->height = height;
     level->depth = depth;
@@ -44,12 +45,25 @@ void Level_init(Level* level, int width, int height, int depth) {
     level->cloudColor = 0xFFFFFF;
     level->waterLevel = depth / 2;
 
-    level->blocks = (byte*)malloc((size_t)width * height * depth);
+    level->blocks = (byte*)calloc((size_t)width * height * depth, 1);
     level->lightDepths = allocLightDepths(width, height, depth);
     if (!level->blocks || !level->lightDepths) {
         fprintf(stderr, "Failed to allocate level memory\n");
         exit(EXIT_FAILURE);
     }
+}
+
+void Level_initPlaceholder(Level* level) {
+    setup(level, 8, 8, 8);
+    calcLightDepths(level, 0, 0, level->width, level->height);
+    // findSpawn runs before initTransient sets the water level
+    level->waterLevel = 0;
+    Level_findSpawn(level);
+    level->waterLevel = level->depth / 2;
+}
+
+bool Level_init(Level* level, int width, int height, int depth) {
+    setup(level, width, height, depth);
 
     bool mapLoaded = Save_loadLevel(level, "level.dat");
     if (!mapLoaded) {
@@ -58,6 +72,7 @@ void Level_init(Level* level, int width, int height, int depth) {
 
     calcLightDepths(level, 0, 0, level->width, level->height);
     if (level->xSpawn == 0 && level->ySpawn == 0 && level->zSpawn == 0) Level_findSpawn(level);
+    return mapLoaded;
 }
 
 // Minecraft.generateNewLevel, the size can change
@@ -385,7 +400,7 @@ static bool clipShape(const Tile* t, int x, int y, int z, const float* start, co
         if (axis == 1) { a1 = 0; a2 = 2; }
         if (!(p[a1] >= lo[a1] && p[a1] <= hi[a1] && p[a2] >= lo[a2] && p[a2] <= hi[a2])) continue;
         float dx = p[0] - s[0], dy = p[1] - s[1], dz = p[2] - s[2];
-        float dist = (float)sqrt(dx * dx + dy * dy + dz * dz);
+        float dist = MathHelper_sqrt(dx * dx + dy * dy + dz * dz);
         if (bestFace < 0 || dist < bestDist) {
             bestDist = dist;
             bestFace = faceOf[k];
@@ -604,20 +619,8 @@ void Level_addToTickNextTick(Level* level, int x, int y, int z, int tileId) {
     pushTickEntry(level, e);
 }
 
-extern int Minecraft_countMobs(void);
-
 void Level_onTick(Level* level) {
     level->tickCount++;
-
-    // the mob top up: volume/64/64/64 is both the chance out of 100 to try this tick
-    // and, times 20, the cap on the mob count with the player counted
-    // it spawns away from the player instead of the spawn point
-    int spawnAttempts = level->width * level->height * level->depth / 64 / 64 / 64;
-    if (JRandom_nextIntN(&level->random, 100) < spawnAttempts) {
-        if (Minecraft_countMobs() < spawnAttempts * 20) {
-            LevelGen_maybeSpawnMobs(level, spawnAttempts, level->player, false);
-        }
-    }
 
     if (level->tickCount % 5 == 0 && level->tickListSize > 0) {
         int n = level->tickListSize;
@@ -666,10 +669,6 @@ void Level_onTick(Level* level) {
 
 extern void Minecraft_hurtEntitiesInExplosion(Level* level, Entity* source, float x, float y, float z, float radius);
 
-// every block with its center in the radius goes, each with a 30% chance of its drops
-// then Minecraft_hurtEntitiesInExplosion hurts the entities
-extern void Minecraft_spawnSmolder(Level* level, int x, int y, int z);
-
 void Level_explode(Level* level, Entity* source, float x, float y, float z, float radius) {
     int x0 = (int)(x - radius - 1.0f);
     int x1 = (int)(x + radius + 1.0f);
@@ -688,12 +687,9 @@ void Level_explode(Level* level, Entity* source, float x, float y, float z, floa
                 if (!(dx * dx + dy * dy + dz * dz < radius * radius)) continue;
                 int id = Level_getTile(level, bx, by, bz);
                 const Tile* t = (id > 0 && id < 256) ? gTiles[id] : NULL;
-                if (t && !t->explodable) continue;
-                Minecraft_spawnSmolder(level, bx, by, bz);
-                if (!t) continue;
+                if (!t || !t->explodable) continue;
                 Tile_dropItemsChance(t, level, bx, by, bz, 0.3f);
                 level_setTile(level, bx, by, bz, 0);
-                if (t->onExploded) t->onExploded(t, level, bx, by, bz);
             }
         }
     }

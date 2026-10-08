@@ -116,7 +116,8 @@ int NetSocket_read(sock_t sock, void* buf, int len) {
 #endif
         return -1;
     }
-    if (n == 0) return -1; // orderly remote close
+    // an orderly close reads as nothing
+    if (n == 0) return 0;
     return n;
 }
 

@@ -32,4 +32,11 @@ void Mob_knockback(Entity* e, Entity* attacker);
 // Mob.travel, the ai moves with it, the player has its own copy
 void Mob_travel(Entity* e, float strafe, float forward);
 
+// Mob.renderModel, draws one pose, called a second time for the hurt flash
+typedef void (*MobModelFn)(const void* self, float animStep, float run, float age,
+                           float headYaw, float headPitch, float attackSwing, float partialTicks);
+// Mob.render, brightness is the mob's getBrightness (the creeper pulses)
+void Mob_render(const Entity* e, float partialTicks, float brightness, float bobStrength, bool allowAlpha,
+                MobModelFn model, const void* self);
+
 #endif

@@ -2,6 +2,7 @@
 
 #include "item.h"
 #include "../jrandom.h"
+#include "../math_helper.h"
 #include "../renderer/textures.h"
 #include "../level/tile/tile.h"
 #include <GL/glew.h>
@@ -144,7 +145,7 @@ void Item_render(const Item* it, float partialTicks) {
     glPushMatrix();
     glColor4f(brightness, brightness, brightness, 1.0f);
 
-    float wave = (float)sin((double)(spin / 10.0f));
+    float wave = MathHelper_sin(spin / 10.0f);
     float bob = wave * 0.1f + 0.1f;
     float ix = e->prevX + (e->x - e->prevX) * partialTicks;
     float iy = e->prevY + (e->y - e->prevY) * partialTicks + bob;

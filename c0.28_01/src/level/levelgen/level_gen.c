@@ -4,6 +4,7 @@
 #include "../tile/tile.h"
 #include "../../character/creature.h"
 #include "../../jrandom.h"
+#include "../../math_helper.h"
 #include "synth/synth.h"
 #include "synth/perlin_noise.h"
 #include "synth/distort.h"
@@ -18,6 +19,7 @@ extern void Minecraft_levelLoadProgress(int percent);
 extern const char* Minecraft_getUserName(void);
 // false if the mob's box overlaps another entity
 extern bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z);
+extern void Minecraft_buildDiscardedMob(Level* lvl, int kind, float x, float y, float z);
 
 typedef struct {
     Level* level;
@@ -144,15 +146,15 @@ static void carveCaves(Gen* gen) {
         float y = JRandom_nextFloat(r) * (float)d;
         float z = JRandom_nextFloat(r) * (float)h;
         int length = (int)((JRandom_nextFloat(r) + JRandom_nextFloat(r)) * 200.0f);
-        float yaw = (float)((double)JRandom_nextFloat(r) * M_PI * 2.0);
+        float yaw = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
         float yawSpeed = 0.0f;
-        float pitch = (float)((double)JRandom_nextFloat(r) * M_PI * 2.0);
+        float pitch = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
         float pitchSpeed = 0.0f;
         float radiusScale = JRandom_nextFloat(r) * JRandom_nextFloat(r);
         for (int step = 0; step < length; ++step) {
-            x = (float)((double)x + sin(yaw) * cos(pitch));
-            z = (float)((double)z + cos(yaw) * cos(pitch));
-            y = (float)((double)y + sin(pitch));
+            x += MathHelper_sin(yaw) * MathHelper_cos(pitch);
+            z += MathHelper_cos(yaw) * MathHelper_cos(pitch);
+            y += MathHelper_sin(pitch);
             yaw += yawSpeed * 0.2f;
             yawSpeed *= 0.9f;
             yawSpeed += nextFloatDiff(r);
@@ -166,7 +168,7 @@ static void carveCaves(Gen* gen) {
             float cz = z + (JRandom_nextFloat(r) * 4.0f - 2.0f) * 0.2f;
             float radius = ((float)d - cy) / (float)d;
             radius = 1.2f + (radius * 3.5f + 1.0f) * radiusScale;
-            radius = (float)(sin((double)step * M_PI / (double)length) * (double)radius);
+            radius = MathHelper_sin((float)step * 3.1415927f / (float)length) * radius;
             for (int bx = (int)(cx - radius); bx <= (int)(cx + radius); ++bx) {
                 for (int by = (int)(cy - radius); by <= (int)(cy + radius); ++by) {
                     for (int bz = (int)(cz - radius); bz <= (int)(cz + radius); ++bz) {
@@ -196,14 +198,14 @@ static void placeOre(Gen* gen, int oreId, int percent, int phase) {
         float y = JRandom_nextFloat(r) * (float)d;
         float z = JRandom_nextFloat(r) * (float)h;
         int length = (int)((JRandom_nextFloat(r) + JRandom_nextFloat(r)) * 75.0f * (float)percent / 100.0f);
-        float yaw = (float)((double)JRandom_nextFloat(r) * M_PI * 2.0);
+        float yaw = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
         float yawSpeed = 0.0f;
-        float pitch = (float)((double)JRandom_nextFloat(r) * M_PI * 2.0);
+        float pitch = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
         float pitchSpeed = 0.0f;
         for (int step = 0; step < length; ++step) {
-            x = (float)((double)x + sin(yaw) * cos(pitch));
-            z = (float)((double)z + cos(yaw) * cos(pitch));
-            y = (float)((double)y + sin(pitch));
+            x += MathHelper_sin(yaw) * MathHelper_cos(pitch);
+            z += MathHelper_cos(yaw) * MathHelper_cos(pitch);
+            y += MathHelper_sin(pitch);
             yaw += yawSpeed * 0.2f;
             yawSpeed *= 0.9f;
             yawSpeed += nextFloatDiff(r);
@@ -211,7 +213,7 @@ static void placeOre(Gen* gen, int oreId, int percent, int phase) {
             pitch *= 0.5f;
             pitchSpeed *= 0.9f;
             pitchSpeed += nextFloatDiff(r);
-            float radius = (float)(sin((double)step * M_PI / (double)length) * (double)percent / 100.0 + 1.0);
+            float radius = MathHelper_sin((float)step * 3.1415927f / (float)length) * (float)percent / 100.0f + 1.0f;
             for (int bx = (int)(x - radius); bx <= (int)(x + radius); ++bx) {
                 for (int by = (int)(y - radius); by <= (int)(y + radius); ++by) {
                     for (int bz = (int)(z - radius); bz <= (int)(z + radius); ++bz) {
@@ -317,7 +319,7 @@ static void addWater(Gen* gen) {
         tiles += floodFillLiquid(gen, x, y, z, water);
     }
     setNextPhase(100);
-    printf("Flood filled %lld tiles\n", tiles);
+    (void)tiles;
 }
 
 static void addLava(Gen* gen) {
@@ -335,7 +337,7 @@ static void addLava(Gen* gen) {
         floodFillLiquid(gen, x, y, z, TILE_CALM_LAVA.id);
     }
     setNextPhase(100);
-    printf("LavaCount: %d\n", lavaCount);
+    (void)lavaCount;
 }
 
 // gravel on lake and sea beds, grass on dry ground, sand on low dry ground
@@ -414,7 +416,7 @@ static void plantMushrooms(Gen* gen, const int* heightmap) {
             }
         }
     }
-    printf("Added %d mushrooms\n", placed);
+    (void)placed;
 }
 
 static void plantTrees(Gen* gen, const int* heightmap) {
@@ -439,8 +441,8 @@ static void plantTrees(Gen* gen, const int* heightmap) {
     }
 }
 
-// Level.maybeSpawnMobs, used by world gen and by Level.tick while playing
-int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress) {
+// the rolled mob is built (its constructor still eats Math.random) and dropped, only a sheep gets added
+int MobSpawner_spawn(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress) {
     JRandom* r = &level->random;
     const int w = level->width, h = level->height, d = level->depth;
     // the rolls 0 1 2 3 are Zombie, Skeleton, Pig, Creeper
@@ -482,7 +484,8 @@ int LevelGen_maybeSpawnMobs(Level* level, int attempts, const Entity* referenceE
                     dz = fz - (float)level->zSpawn;
                 }
                 if (dx * dx + dy * dy + dz * dz < 256.0f) continue;
-                if (Minecraft_spawnMob(level, kind, fx, fy, fz)) placed++;
+                Minecraft_buildDiscardedMob(level, kind, fx, fy, fz);
+                if (Minecraft_spawnMob(level, CREATURE_SHEEP, fx, fy, fz)) placed++;
             }
         }
     }
@@ -530,8 +533,4 @@ void LevelGen_generateMap(Level* level) {
 
     plantTrees(&gen, heightmap);
     free(heightmap);
-
-    Minecraft_levelLoadUpdate("Spawning..");
-    int spawned = LevelGen_maybeSpawnMobs(level, gen.w * gen.h * gen.d / 800, NULL, true);
-    printf("%d mobs\n", spawned);
 }

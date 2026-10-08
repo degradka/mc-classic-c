@@ -21,21 +21,21 @@ typedef struct Chunk {
     int maxX, maxY, maxZ;
 
     int  lists;
-    bool dirty;
+    bool dirty; // already in the renderer's dirty list
     long long dirtiedTime;
     bool visible; // set once per frame by LevelRenderer_cull
-    bool empty[3];
+    bool empty[2];
 
     double x, y, z;
 } Chunk;
 
 void Chunk_init(Chunk* chunk, Level* level, GLuint texture, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
 void Chunk_destroy(Chunk* chunk);
-void Chunk_rebuild(Chunk* chunk, int layer);
+void Chunk_rebuild(Chunk* chunk);
 void Chunk_render(Chunk* chunk, int layer);
 void Chunk_setDirty(Chunk* chunk);
 
 static inline bool Chunk_isDirty(const Chunk* c) { return c->dirty; }
-double Chunk_distanceToSqr(const Chunk* c, const Player* p);
+float Chunk_distanceToSqr(const Chunk* c, const Player* p);
 
 #endif  // CHUNK_H

@@ -1,6 +1,7 @@
 // renderer/texture_fx.c: the animated water and lava
 
 #include "texture_fx.h"
+#include "../math_helper.h"
 #include "../jrandom.h"
 #include <stdlib.h>
 #include <math.h>
@@ -39,8 +40,8 @@ static void Lava_tick(TextureFX* base) {
     for (int x = 0; x < TEXTURE_FX_SIZE; ++x) {
         for (int y = 0; y < TEXTURE_FX_SIZE; ++y) {
             float f = 0.0f;
-            int i = (int)(sin(y * M_PI * 2.0 / TEXTURE_FX_SIZE) * 1.2000000476837158);
-            int j = (int)(sin(x * M_PI * 2.0 / TEXTURE_FX_SIZE) * 1.2000000476837158);
+            int i = (int)(MathHelper_sin((float)y * 3.1415927f * 2.0f / 16.0f) * 1.2f);
+            int j = (int)(MathHelper_sin((float)x * 3.1415927f * 2.0f / 16.0f) * 1.2f);
 
             for (int k = x - 1; k <= x + 1; ++k) {
                 for (int m = y - 1; m <= y + 1; ++m) {

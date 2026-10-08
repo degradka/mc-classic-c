@@ -39,6 +39,7 @@ void Player_init(Player* player, Level* level);
 void Player_die(Entity* self, Entity* attacker);
 
 void Player_awardKillScore(Player* player, int points);
+void Player_resetPos(Player* player);
 
 void Player_onTick(Player* player);
 void Player_turn(Player* player, GLFWwindow* window, float dx, float dy);

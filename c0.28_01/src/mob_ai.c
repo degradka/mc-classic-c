@@ -1,6 +1,7 @@
 // mob_ai.c
 
 #include "mob_ai.h"
+#include "math_helper.h"
 #include "mob.h"
 #include "level/level.h"
 #include <stdlib.h>
@@ -23,6 +24,7 @@ void Ai_init(Ai* ai, bool chase, int wanderPitch, float runSpeed, int damage) {
     JRandom_initRandom(&ai->random);
     ai->onDeathTimeout = NULL;
     ai->onAfterUpdate = NULL;
+    ai->onUpdate = NULL;
     ai->onAfterAttack = NULL;
 }
 
@@ -69,9 +71,9 @@ static void Ai_doAttack(Ai* ai, Entity* mob) {
     }
 
     if (ai->attackTarget) {
-        float dist3d = sqrtf(dx * dx + dy * dy + dz * dz);
-        mob->yRotation = (float)(atan2(dz, dx) * 180.0 / M_PI) - 90.0f;
-        mob->xRotation = -(float)(atan2(dy, dist3d) * 180.0 / M_PI);
+        float dist3d = MathHelper_sqrt(dx * dx + dy * dy + dz * dz);
+        mob->yRotation = (float)(atan2(dz, dx) * 180.0 / 3.1415927410125732) - 90.0f;
+        mob->xRotation = -(float)(atan2(dy, dist3d) * 180.0 / 3.1415927410125732);
         if (dist3d < 2.0f && ai->attackCooldown == 0) {
             Ai_tryAttack(ai, mob, ai->attackTarget);
         }
@@ -100,6 +102,11 @@ static void Ai_wanderStep(Ai* ai, Entity* mob) {
     }
 }
 
+void Ai_update(Ai* ai, Entity* mob) {
+    Ai_wanderStep(ai, mob);
+    if (ai->chase) Ai_doAttack(ai, mob);
+}
+
 void Ai_tick(Ai* ai, Entity* mob) {
     // idle 600 ticks, then 1 in 800 a tick it gets removed if over 32 blocks from the player
     ai->noActionTime++;
@@ -124,11 +131,10 @@ void Ai_tick(Ai* ai, Entity* mob) {
         ai->wantsJump = false;
         ai->speedX = ai->speedZ = 0.0f;
         ai->turnSpeed = 0.0f;
+    } else if (ai->onUpdate) {
+        ai->onUpdate(ai, mob);
     } else {
-        Ai_wanderStep(ai, mob);
-        if (ai->chase) {
-            Ai_doAttack(ai, mob);
-        }
+        Ai_update(ai, mob);
     }
 
     bool inWater = Entity_isInWater(mob);

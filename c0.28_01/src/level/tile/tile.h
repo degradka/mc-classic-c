@@ -68,7 +68,10 @@ struct Tile {
     float xx0, yy0, zz0, xx1, yy1, zz1;
 
     int  (*getTexture)(const Tile* self, int face);
-    void (*render)(const Tile* self, Tessellator* t, const Level* lvl, int layer, int x, int y, int z);
+    // Tile.render, draws itself into a chunk list, true when it drew anything
+    bool (*render)(const Tile* self, const Level* lvl, int x, int y, int z, Tessellator* t);
+    // Tile.getRenderLayer, the chunk list it goes into, water 1, everything else 0
+    int renderLayer;
     void (*onTick)(const Tile* self, Level* lvl, int x, int y, int z);
 
     int  (*isSolid)(const Tile* self);
@@ -85,43 +88,42 @@ struct Tile {
     void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
     // only called right after the player places the tile
     void (*onBlockAdded)(const Tile* self, Level* lvl, int x, int y, int z);
-    // an explosion just broke it, TNT lights itself
-    void (*onExploded)(const Tile* self, Level* lvl, int x, int y, int z);
 
-    int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int layer, int face);
+    int  (*shouldRenderFace)(const Tile* self, const Level* lvl, int x, int y, int z, int face);
     void (*renderFace)(const Tile* self, Tessellator* t, int x, int y, int z, int face);
 
     // the held block in first person
     void (*renderItem)(const Tile* self, Tessellator* t);
+    // the hotbar and block select icon, shaded per face, no begin/end
+    void (*renderGuiItem)(const Tile* self, Tessellator* t);
 
-    // how many items break off and which tile they are, one of itself by default
+    // Tile.quantityDropped, how many drop rolls Tile_dropItems makes
     int  (*getDropCount)(const Tile* self);
-    int  (*getDropResource)(const Tile* self);
 };
 
 // indexed by tile id
 extern const Tile* gTiles[256];
 
-extern Tile TILE_ROCK;      // id=1
-extern Tile TILE_GRASS;     // id=2
-extern Tile TILE_DIRT;      // id=3
-extern Tile TILE_STONEBRICK;// id=4
-extern Tile TILE_WOOD;      // id=5
-extern Tile TILE_BUSH;      // id=6
-extern Tile TILE_BEDROCK;   // id=7
+extern Tile TILE_ROCK;       // id=1
+extern Tile TILE_GRASS;      // id=2
+extern Tile TILE_DIRT;       // id=3
+extern Tile TILE_STONEBRICK; // id=4
+extern Tile TILE_WOOD;       // id=5
+extern Tile TILE_BUSH;       // id=6
+extern Tile TILE_BEDROCK;    // id=7
 
 extern Tile TILE_WATER;      // id=8
 extern Tile TILE_CALM_WATER; // id=9
 extern Tile TILE_LAVA;       // id=10
 extern Tile TILE_CALM_LAVA;  // id=11
 
-extern Tile TILE_SAND;   // id=12
-extern Tile TILE_GRAVEL; // id=13
-extern Tile TILE_GOLD_ORE;  // id=14
-extern Tile TILE_IRON_ORE;  // id=15
-extern Tile TILE_COAL_ORE;  // id=16
-extern Tile TILE_LOG;    // id=17
-extern Tile TILE_LEAVES; // id=18
+extern Tile TILE_SAND;     // id=12
+extern Tile TILE_GRAVEL;   // id=13
+extern Tile TILE_GOLD_ORE; // id=14
+extern Tile TILE_IRON_ORE; // id=15
+extern Tile TILE_COAL_ORE; // id=16
+extern Tile TILE_LOG;      // id=17
+extern Tile TILE_LEAVES;   // id=18
 
 extern Tile TILE_SPONGE; // id=19
 extern Tile TILE_GLASS;  // id=20
@@ -142,18 +144,17 @@ extern Tile TILE_BRICK;       // id=45
 extern Tile TILE_TNT;         // id=46
 extern Tile TILE_BOOKSHELF;   // id=47
 extern Tile TILE_MOSSY_STONE; // id=48
+extern Tile TILE_OBSIDIAN;    // id=49
 
 void Tile_registerAll(void);
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine);
 void Tile_spawnHitParticle(const Tile* self, Level* lvl, int x, int y, int z, int face, ParticleEngine* engine);
 
-// spawns the drops, each at a random point inside the broken block
+// the drop randoms are still rolled but no Item spawns
 void Tile_dropItems(const Tile* self, Level* lvl, int x, int y, int z);
-// the chunk builder's face, grown by 0.001 (z max shrinks)
-void Tile_renderCubeFace(const Tile* self, Tessellator* t, int x, int y, int z, int face);
 void Tile_renderFaceTex(const Tile* self, Tessellator* t, int x, int y, int z, int face, int tex);
-// each item only drops with that chance, explosions use 0.3
+// each roll passes with that chance, explosions use 0.3
 void Tile_dropItemsChance(const Tile* self, Level* lvl, int x, int y, int z, float chance);
 
 #endif

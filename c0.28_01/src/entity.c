@@ -1,6 +1,7 @@
 // entity.c: base entity, physics and movement
 
 #include "entity.h"
+#include "math_helper.h"
 #include "level/tile/tile.h"
 #include "audio/sound.h"
 #include "mob.h"
@@ -43,6 +44,13 @@ void Entity_init(Entity* e, Level* level) {
     e->fallDistance = 0.0f;
     e->dead = false;
     e->onDeath = NULL;
+    e->afterAiStep = NULL;
+    e->hurtOverride = NULL;
+    e->noPhysics = false;
+    e->slotted = false;
+    e->inGrid = true;
+    e->xOld = e->yOld = e->zOld = 0.0f;
+    e->pushthrough = 0.0f;
     e->ai = NULL;
     e->killCredit = NULL;
     e->aiClassTag = AI_CLASS_NONE;
@@ -62,12 +70,11 @@ void Entity_setPosition(Entity* e, float x, float y, float z) {
     e->boundingBox = AABB_create(x - w, y - h, z - w, x + w, y + h, z + w);
 }
 
-// starts at the spawn and climbs until free
+// Entity.resetPos, climbs from the spawn until free. a spawn at y <= 0 leaves the position alone
 void Entity_resetPosition(Entity* e) {
     float x = e->level->xSpawn + 0.5f;
     float z = e->level->zSpawn + 0.5f;
 
-    // a spawn at y <= 0 leaves the position alone
     for (float y = (float)e->level->ySpawn; y > 0.0f; y += 1.0f) {
         Entity_setPosition(e, x, y, z);
         ArrayList_AABB hits = Level_getCubes(e->level, &e->boundingBox);
@@ -114,6 +121,13 @@ static void collide(Entity* e, float* dx, float* dy, float* dz) {
 }
 
 void Entity_move(Entity* e, float dx, float dy, float dz) {
+    if (e->noPhysics) {
+        AABB_move(&e->boundingBox, dx, dy, dz);
+        e->x = (e->boundingBox.minX + e->boundingBox.maxX) / 2.0f;
+        e->y = e->boundingBox.minY + e->heightOffset - e->ySlideOffset;
+        e->z = (e->boundingBox.minZ + e->boundingBox.maxZ) / 2.0f;
+        return;
+    }
     const float ox = dx, oy = dy, oz = dz;
     const float startX = e->x, startZ = e->z;
     const AABB start = e->boundingBox;
@@ -172,7 +186,7 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
     // footsteps, a step is used up even on a tile with no sound
     float ddx = e->x - startX;
     float ddz = e->z - startZ;
-    e->walkDist = (float)((double)e->walkDist + sqrt((double)(ddx * ddx + ddz * ddz)) * 0.6);
+    e->walkDist = (float)((double)e->walkDist + (double)MathHelper_sqrt(ddx * ddx + ddz * ddz) * 0.6);
     if (e->makeStepSound) {
         int tileId = Level_getTile(e->level, (int)e->x, (int)(e->y - 0.2f - e->heightOffset), (int)e->z);
         if (e->walkDist > (float)e->nextStep && tileId > 0) {
@@ -191,15 +205,15 @@ void Entity_move(Entity* e, float dx, float dy, float dz) {
 }
 
 void Entity_moveRelative(Entity* e, float x, float z, float speed) {
-    float d = sqrtf(x*x + z*z);
+    float d = MathHelper_sqrt(x * x + z * z);
     if (d < 0.01f) return;
     if (d < 1.0f) d = 1.0f;
 
     float k = speed / d;
     x *= k; z *= k;
 
-    const float s = (float)sin((double)e->yRotation * M_PI / 180.0);
-    const float c = (float)cos((double)e->yRotation * M_PI / 180.0);
+    const float s = MathHelper_sin(e->yRotation * 3.1415927f / 180.0f);
+    const float c = MathHelper_cos(e->yRotation * 3.1415927f / 180.0f);
 
     e->motionX += x * c - z * s;
     e->motionZ += z * c + x * s;
@@ -248,13 +262,15 @@ void Entity_pushEntity(Entity* self, Entity* other) {
     float dz = other->z - self->z;
     float d = dx * dx + dz * dz;
     if (d >= 0.01f) {
-        d = (float)sqrt(d);
+        d = MathHelper_sqrt(d);
         dx /= d;
         dz /= d;
         dx /= d;
         dz /= d;
         dx *= 0.05f;
         dz *= 0.05f;
+        dx *= 1.0f - self->pushthrough;
+        dz *= 1.0f - self->pushthrough;
         self->motionX -= dx;
         self->motionZ -= dz;
         other->motionX += dx;
@@ -265,6 +281,46 @@ void Entity_pushEntity(Entity* self, Entity* other) {
 void Entity_setSize(Entity* e, float width, float height) {
     e->boundingBoxWidth  = width;
     e->boundingBoxHeight = height;
+}
+
+static int gridSlot(float v, int cells) {
+    int s = (int)(v / 16.0f);
+    if (s < 0) s = 0;
+    if (s >= cells) s = cells - 1;
+    return s;
+}
+
+static int gridCells(int size) {
+    int n = size / 16;
+    return n == 0 ? 1 : n;
+}
+
+void Entity_gridCell(const Entity* e, int* cx, int* cy, int* cz) {
+    float x = e->slotted ? e->xOld : e->x, y = e->slotted ? e->yOld : e->y, z = e->slotted ? e->zOld : e->z;
+    *cx = gridSlot(x, gridCells(e->level->width));
+    *cy = gridSlot(y, gridCells(e->level->depth));
+    *cz = gridSlot(z, gridCells(e->level->height));
+}
+
+void Entity_gridInsert(Entity* e) {
+    if (e->slotted) return;
+    e->slotted = true;
+    e->xOld = e->x;
+    e->yOld = e->y;
+    e->zOld = e->z;
+}
+
+void Entity_gridTick(Entity* e) {
+    if ((int)(e->xOld / 16.0f) == (int)(e->x / 16.0f) && (int)(e->yOld / 16.0f) == (int)(e->y / 16.0f) &&
+        (int)(e->zOld / 16.0f) == (int)(e->z / 16.0f)) return;
+    // BlockMap.moved, nothing changes when both land in the same clamped slot
+    int w = gridCells(e->level->width), d = gridCells(e->level->depth), h = gridCells(e->level->height);
+    if (gridSlot(e->xOld, w) == gridSlot(e->x, w) && gridSlot(e->yOld, d) == gridSlot(e->y, d) &&
+        gridSlot(e->zOld, h) == gridSlot(e->z, h)) return;
+    e->inGrid = true;
+    e->xOld = e->x;
+    e->yOld = e->y;
+    e->zOld = e->z;
 }
 
 // Entity.shouldRender, far small things aren't drawn

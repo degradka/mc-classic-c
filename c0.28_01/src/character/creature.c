@@ -3,7 +3,7 @@
 #include "creature.h"
 #include "mob_zombie_model.h"
 #include "mob_skeleton_model.h"
-#include "mob_pig_model.h"
+#include "quadruped_model.h"
 #include "mob_spider_model.h"
 #include "mob_creeper_model.h"
 #include "../renderer/textures.h"
@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include "../jrandom.h"
 #include "humanoid_armor_model.h"
+#include "../math_helper.h"
 
 extern bool Minecraft_spawnArrow(Level* lvl, Entity* owner, float x, float y, float z, float yaw, float pitch, float speed);
 extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
@@ -63,7 +64,7 @@ static void Creeper_onDeathTimeout(Ai* ai, Entity* mob) {
         float dx = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
         float dy = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
         float dz = (float)JRandom_nextGaussian(&ai->random) * radius / 4.0f;
-        float mag = sqrtf(dx * dx + dy * dy + dz * dz);
+        float mag = MathHelper_sqrt(dx * dx + dy * dy + dz * dz);
         float mx = dx / mag / mag;
         float my = dy / mag / mag;
         float mz = dz / mag / mag;
@@ -87,16 +88,67 @@ static void Creature_onDeath(Entity* self, Entity* attacker) {
             case CREATURE_CREEPER:  Player_awardKillScore(killer, 200); break;
             case CREATURE_PIG:      Player_awardKillScore(killer, 10);  break;
             case CREATURE_SPIDER:   Player_awardKillScore(killer, 105); break;
+            case CREATURE_SHEEP:    Player_awardKillScore(killer, 10);  break;
         }
     }
 
     // pigs and sheep drop 1-2 brown mushrooms no matter what killed them
-    if (c->kind == CREATURE_PIG) {
+    if (c->kind == CREATURE_PIG || c->kind == CREATURE_SHEEP) {
         int count = (int)(JRandom_mathRandom() + JRandom_mathRandom() + 1.0);
         for (int i = 0; i < count; ++i) {
             Minecraft_spawnItem(self->level, self->x, self->y, self->z, TILE_MUSHROOM_BROWN.id);
         }
     }
+}
+
+// eats the grass in front of it to grow its wool
+static void Sheep_update(Ai* ai, Entity* mob) {
+    Creature* c = (Creature*)mob;
+    float rad = mob->yRotation * 3.1415927f / 180.0f;
+    float fx = -0.7f * MathHelper_sin(rad);
+    float fz = 0.7f * MathHelper_cos(rad);
+    int x = (int)(mob->x + fx);
+    int y = (int)(mob->y - 2.0f);
+    int z = (int)(mob->z + fz);
+    if (c->grazing) {
+        if (Level_getTile(mob->level, x, y, z) != TILE_GRASS.id) {
+            c->grazing = false;
+            return;
+        }
+        if (++c->grazingTime == 60) {
+            level_setTile(mob->level, x, y, z, TILE_DIRT.id);
+            if (JRandom_nextIntN(&ai->random, 5) == 0) c->hasFur = true;
+        }
+        ai->speedX = 0.0f;
+        ai->speedZ = 0.0f;
+        mob->xRotation = (float)(40 + c->grazingTime / 2 % 2 * 10);
+        return;
+    }
+    if (Level_getTile(mob->level, x, y, z) == TILE_GRASS.id) {
+        c->grazing = true;
+        c->grazingTime = 0;
+    }
+    Ai_update(ai, mob);
+}
+
+static void Sheep_afterAiStep(Entity* e) {
+    Creature* c = (Creature*)e;
+    c->grazeO = c->graze;
+    c->graze = c->grazing ? (c->graze + 0.2f) : (c->graze - 0.2f);
+    if (c->graze < 0.0f) c->graze = 0.0f;
+    if (c->graze > 1.0f) c->graze = 1.0f;
+}
+
+static bool Sheep_hurtOverride(Entity* e, Entity* attacker) {
+    return Creature_shear((Creature*)e, attacker);
+}
+
+bool Creature_shear(Creature* c, Entity* attacker) {
+    if (c->kind != CREATURE_SHEEP || !c->hasFur || !attacker || attacker->aiClassTag != AI_CLASS_PLAYER) return false;
+    c->hasFur = false;
+    int count = (int)(JRandom_mathRandom() * 3.0 + 1.0);
+    for (int i = 0; i < count; ++i) Minecraft_spawnItem(c->e.level, c->e.x, c->e.y, c->e.z, TILE_CLOTH[15].id);
+    return true;
 }
 
 void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float y, float z) {
@@ -109,6 +161,10 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
     c->kind = kind;
     c->helmet = c->armor = false;
     c->bobStrength = 1.0f;
+    c->hasFur = true;
+    c->grazing = false;
+    c->grazingTime = 0;
+    c->graze = c->grazeO = 0.0f;
     if (kind == CREATURE_ZOMBIE || kind == CREATURE_SKELETON) {
         c->helmet = JRandom_mathRandom() < (double)0.2f;
         c->armor = JRandom_mathRandom() < (double)0.2f;
@@ -143,6 +199,14 @@ void Creature_init(Creature* c, CreatureKind kind, Level* level, float x, float 
             Ai_init(&c->ai, true, 0, 0.7f * 0.8f, 6);
             c->ai.jumpAttack = true;
             break;
+        case CREATURE_SHEEP:
+            c->e.heightOffset = 1.72f;
+            Entity_setSize(&c->e, 1.4f, 1.72f);
+            Ai_init(&c->ai, false, 0, 0.7f, 6);
+            c->ai.onUpdate = Sheep_update;
+            c->e.afterAiStep = Sheep_afterAiStep;
+            c->e.hurtOverride = Sheep_hurtOverride;
+            break;
     }
 
     Entity_setPosition(&c->e, x, y, z);
@@ -160,6 +224,7 @@ static const char* textureForKind(CreatureKind kind) {
         case CREATURE_CREEPER:  return "resources/mob/creeper.png";
         case CREATURE_PIG:      return "resources/mob/pig.png";
         case CREATURE_SPIDER:   return "resources/mob/spider.png";
+        case CREATURE_SHEEP:    return "resources/mob/sheep.png";
     }
     return "resources/mob/zombie.png";
 }
@@ -185,8 +250,8 @@ static void renderArmor(const Creature* c, const Cube* head, const Cube* rightAr
 }
 
 static void renderModelForKind(const Creature* c, CreatureKind kind, float animStep, float run, float age,
-                                float headYaw, float headPitch, float attackSwing) {
-    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0, texSpider = 0;
+                                float headYaw, float headPitch, float attackSwing, float partialTicks) {
+    static int texZombie = 0, texSkeleton = 0, texCreeper = 0, texPig = 0, texSpider = 0, texSheep = 0, texFur = 0;
     switch (kind) {
         case CREATURE_ZOMBIE:
             if (!texZombie) texZombie = loadTexture(textureForKind(kind), GL_NEAREST);
@@ -221,9 +286,45 @@ static void renderModelForKind(const Creature* c, CreatureKind kind, float animS
             if (!texPig) texPig = loadTexture(textureForKind(kind), GL_NEAREST);
             glBindTexture(GL_TEXTURE_2D, texPig);
             {
-                static MobPigModel sModel; static bool init = false;
-                if (!init) { MobPigModel_init(&sModel); init = true; }
-                MobPigModel_render(&sModel, animStep, run, age, headYaw, headPitch);
+                static QuadrupedModel sModel; static bool init = false;
+                if (!init) { QuadrupedModel_init(&sModel, 6); init = true; }
+                QuadrupedModel_render(&sModel, animStep, run, headYaw, headPitch);
+            }
+            break;
+        case CREATURE_SHEEP:
+            if (!texSheep) texSheep = loadTexture(textureForKind(kind), GL_NEAREST);
+            glBindTexture(GL_TEXTURE_2D, texSheep);
+            {
+                static QuadrupedModel sModel, sFur; static bool init = false;
+                if (!init) { SheepModel_init(&sModel); SheepFurModel_init(&sFur); init = true; }
+                float headY = sModel.head.y, headZ = sModel.head.z;
+                sModel.head.y += (c->grazeO + (c->graze - c->grazeO) * partialTicks) * 8.0f;
+                sModel.head.z -= c->grazeO + (c->graze - c->grazeO) * partialTicks;
+                QuadrupedModel_render(&sModel, animStep, run, headYaw, headPitch);
+                if (c->hasFur) {
+                    if (!texFur) texFur = loadTexture("resources/mob/sheep_fur.png", GL_NEAREST);
+                    glBindTexture(GL_TEXTURE_2D, texFur);
+                    glDisable(GL_CULL_FACE);
+                    // the head copies x not z, the fur head stays put while it grazes
+                    sFur.head.yRot = sModel.head.yRot;
+                    sFur.head.xRot = sModel.head.xRot;
+                    sFur.head.y = sModel.head.y;
+                    sFur.head.x = sModel.head.x;
+                    sFur.body.yRot = sModel.body.yRot;
+                    sFur.body.xRot = sModel.body.xRot;
+                    sFur.legBackLeft.xRot = sModel.legBackLeft.xRot;
+                    sFur.legBackRight.xRot = sModel.legBackRight.xRot;
+                    sFur.legFrontLeft.xRot = sModel.legFrontLeft.xRot;
+                    sFur.legFrontRight.xRot = sModel.legFrontRight.xRot;
+                    Cube_render(&sFur.head);
+                    Cube_render(&sFur.body);
+                    Cube_render(&sFur.legBackLeft);
+                    Cube_render(&sFur.legBackRight);
+                    Cube_render(&sFur.legFrontLeft);
+                    Cube_render(&sFur.legFrontRight);
+                }
+                sModel.head.y = headY;
+                sModel.head.z = headZ;
             }
             break;
         case CREATURE_SPIDER:
@@ -238,96 +339,19 @@ static void renderModelForKind(const Creature* c, CreatureKind kind, float animS
     }
 }
 
+static void creatureModel(const void* self, float animStep, float run, float age,
+                          float headYaw, float headPitch, float attackSwing, float partialTicks) {
+    const Creature* c = (const Creature*)self;
+    renderModelForKind(c, c->kind, animStep, run, age, headYaw, headPitch, attackSwing, partialTicks);
+}
+
 void Creature_render(const Creature* c, float partialTicks) {
     const Entity* e = &c->e;
-
-    // body yaw, run and animStep, wrapped then lerped like the network players
-    float bodyYawO = e->prevYBodyRotation;
-    while (bodyYawO - e->yBodyRotation < -180.0f) bodyYawO += 360.0f;
-    while (bodyYawO - e->yBodyRotation >= 180.0f) bodyYawO -= 360.0f;
-    float bodyYaw = bodyYawO + (e->yBodyRotation - bodyYawO) * partialTicks;
-
-    float headYawO = e->prevYRotation;
-    while (headYawO - e->yRotation < -180.0f) headYawO += 360.0f;
-    while (headYawO - e->yRotation >= 180.0f) headYawO -= 360.0f;
-    float headPitchO = e->prevXRotation;
-    while (headPitchO - e->xRotation < -180.0f) headPitchO += 360.0f;
-    while (headPitchO - e->xRotation >= 180.0f) headPitchO -= 360.0f;
-
-    float headYaw   = headYawO + (e->yRotation - headYawO) * partialTicks;
-    float headPitch = headPitchO + (e->xRotation - headPitchO) * partialTicks;
-    headYaw -= bodyYaw;
-
-    float run = e->oRun + (e->run - e->oRun) * partialTicks;
-    float animStep = e->animStepO + (e->animStep - e->animStepO) * partialTicks;
-    float age = (float)e->tickCount + partialTicks;
-    float attackSwing = (float)e->attackTime - partialTicks;
-    if (attackSwing < 0.0f) attackSwing = 0.0f;
-    attackSwing /= (float)MOB_ATTACK_DURATION;
-
-    float ix = e->prevX + (e->x - e->prevX) * partialTicks;
-    float iy = e->prevY + (e->y - e->prevY) * partialTicks;
-    float iz = e->prevZ + (e->z - e->prevZ) * partialTicks;
-
     float brightness = Entity_getBrightness(e);
     if (c->kind == CREATURE_CREEPER) {
         // Creeper.getBrightness, creepers pulse brighter as they get hurt
         float hurt = (float)(20 - e->health) / 20.0f;
-        brightness *= (float)(sin((double)((float)e->tickCount + partialTicks)) * 0.5 + 0.5) * hurt * 0.5f + 0.25f + hurt * 0.25f;
+        brightness *= (MathHelper_sin((float)e->tickCount + partialTicks) * 0.5f + 0.5f) * hurt * 0.5f + 0.25f + hurt * 0.25f;
     }
-    glColor3f(brightness, brightness, brightness);
-
-    glPushMatrix();
-    glTranslatef(ix, iy - 1.62f, iz); // a fixed offset, not the entity's heightOffset
-
-    // turned by 180 - bodyYaw
-    float renderYaw = 180.0f - bodyYaw;
-
-    // the hurt wobble, and once dead it tips over to 90 degrees in about a second
-    float hurtPulse = (float)e->hurtTime - partialTicks;
-    if (hurtPulse > 0.0f || e->health <= 0) {
-        if (hurtPulse < 0.0f) {
-            hurtPulse = 0.0f;
-        } else {
-            hurtPulse /= (float)e->hurtDuration;
-            hurtPulse = (float)sin(hurtPulse * hurtPulse * hurtPulse * hurtPulse * M_PI) * 14.0f;
-        }
-        if (e->health <= 0) {
-            float deathT = ((float)e->deathTime + partialTicks) / 20.0f;
-            hurtPulse += deathT * deathT * 800.0f;
-            if (hurtPulse > 90.0f) hurtPulse = 90.0f;
-        }
-        glRotatef(renderYaw, 0.0f, 1.0f, 0.0f);
-        glRotatef(-e->hurtDir, 0.0f, 1.0f, 0.0f);
-        glRotatef(-hurtPulse, 0.0f, 0.0f, 1.0f);
-        glRotatef(e->hurtDir, 0.0f, 1.0f, 0.0f);
-        glRotatef(-renderYaw, 0.0f, 1.0f, 0.0f);
-    }
-
-    glScalef(1.0f, -1.0f, 1.0f);
-    const float scale = 0.0625f;
-    glScalef(scale, scale, scale); // pixel-unit model boxes -> world block units
-    float bobY = (float)(-fabs(cos((double)animStep * 0.6662)) * 5.0 * (double)run * (double)c->bobStrength - 23.0);
-    glTranslatef(0.0f, bobY, 0.0f);
-    glRotatef(renderYaw, 0.0f, 1.0f, 0.0f);
-    // allowAlpha is true for every mob here, so culling is off for the model
-    glDisable(GL_CULL_FACE);
-    glScalef(-1.0f, 1.0f, 1.0f);
-
-    renderModelForKind(c, c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
-
-    // for the last 10 invulnerable ticks after a hit it draws the pose again additively, a white flash
-    if (e->invulnerableTime > MOB_INVULNERABLE_DURATION - 10) {
-        glColor4f(1.0f, 1.0f, 1.0f, 0.75f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        renderModelForKind(c, c->kind, animStep, run, age, headYaw, headPitch, attackSwing);
-        glDisable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    }
-    glEnable(GL_ALPHA_TEST);
-    glEnable(GL_CULL_FACE);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-
-    glPopMatrix();
+    Mob_render(e, partialTicks, brightness, c->bobStrength, true, creatureModel, c);
 }
