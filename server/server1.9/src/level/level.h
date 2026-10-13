@@ -15,6 +15,16 @@ typedef struct {
     int delay;
 } NextTick;
 
+// the BlockMap only travels with the save, the server never puts an entity in it
+typedef struct {
+    int width, depth, height;
+    // array lengths of the saved lists, all, tmp and every grid cell
+    int allCapacity, tmpCapacity;
+    int cells;
+    int* cellCapacity;
+    int slot[2][3];
+} BlockMap;
+
 typedef struct Level {
     int width, height, depth;
     int8_t* blocks;
@@ -23,11 +33,13 @@ typedef struct Level {
     int64_t createTime;
     int xSpawn, ySpawn, zSpawn;
     float rotSpawn;
+    BlockMap* blockMap;
+    bool networkMode;
+    bool creativeMode;
+    int waterLevel;
+    int skyColor, fogColor, cloudColor;
     int unprocessed;
     int tickCount;
-    int entitiesCapacity;
-    // saved with the level, the server never turns it on but a level that has it changes nothing
-    bool networkMode;
 
     // the server once it's listening, it sends every change on
     void (*listener)(void* ctx, int x, int y, int z);
@@ -41,6 +53,7 @@ typedef struct Level {
 } Level;
 
 Level* Level_create(void);
+BlockMap* BlockMap_create(int width, int depth, int height);
 void Level_setData(Level* level, int width, int depth, int height, int8_t* blocks);
 void Level_initTransient(Level* level);
 void Level_findSpawn(Level* level);
@@ -59,6 +72,8 @@ float Level_getGroundLevel(const Level* level);
 float Level_getWaterLevel(const Level* level);
 void Level_addToTickNextTick(Level* level, int x, int y, int z, int id);
 int  Level_getHighestTile(Level* level, int x, int z);
+void Level_setSpawnPos(Level* level, int x, int y, int z, float rot);
+bool Level_maybeGrowTree(Level* level, int x, int y, int z);
 int8_t* Level_copyBlocks(const Level* level);
 
 #endif

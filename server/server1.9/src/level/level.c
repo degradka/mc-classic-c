@@ -10,8 +10,22 @@ Level* Level_create(void) {
     Level* level = (Level*)calloc(1, sizeof *level);
     JRandom_initRandom(&level->random);
     level->randValue = JRandom_nextInt(&level->random);
-    level->entitiesCapacity = 10;
     return level;
+}
+
+BlockMap* BlockMap_create(int width, int depth, int height) {
+    BlockMap* map = (BlockMap*)calloc(1, sizeof *map);
+    map->width = width / 16;
+    map->depth = depth / 16;
+    map->height = height / 16;
+    if (map->width == 0) map->width = 1;
+    if (map->depth == 0) map->depth = 1;
+    if (map->height == 0) map->height = 1;
+    map->allCapacity = map->tmpCapacity = 10;
+    map->cells = map->width * map->depth * map->height;
+    map->cellCapacity = (int*)malloc((size_t)map->cells * sizeof(int));
+    for (int i = 0; i < map->cells; ++i) map->cellCapacity[i] = 10;
+    return map;
 }
 
 static void resetLight(Level* level) {
@@ -30,6 +44,7 @@ void Level_setData(Level* level, int width, int depth, int height, int8_t* block
     resetLight(level);
     level->tickHead = level->tickSize = 0;
     Level_findSpawn(level);
+    Level_initTransient(level);
 }
 
 void Level_initTransient(Level* level) {
@@ -37,7 +52,12 @@ void Level_initTransient(Level* level) {
     JRandom_initRandom(&level->random);
     level->randValue = JRandom_nextInt(&level->random);
     level->tickHead = level->tickSize = 0;
+    if (level->waterLevel == 0) level->waterLevel = level->depth / 2;
+    if (level->skyColor == 0) level->skyColor = 0x99CCFF;
+    if (level->fogColor == 0) level->fogColor = 0xFFFFFF;
+    if (level->cloudColor == 0) level->cloudColor = 0xFFFFFF;
     if (level->xSpawn == 0 && level->ySpawn == 0 && level->zSpawn == 0) Level_findSpawn(level);
+    if (!level->blockMap) level->blockMap = BlockMap_create(level->width, level->depth, level->height);
 }
 
 void Level_findSpawn(Level* level) {
@@ -65,7 +85,7 @@ void Level_calcLightDepths(Level* level, int x0, int z0, int w, int h) {
         for (int z = z0; z < z0 + h; ++z) {
             int y = level->depth - 1;
             while (y > 0 && !Level_isLightBlocker(level, x, y, z)) --y;
-            level->lightDepths[x + z * level->width] = y + 1;
+            level->lightDepths[x + z * level->width] = y;
         }
     }
 }
@@ -222,11 +242,11 @@ void Level_tick(Level* level) {
 }
 
 float Level_getGroundLevel(const Level* level) {
-    return (float)(level->depth / 2 - 2);
+    return Level_getWaterLevel(level) - 2.0f;
 }
 
 float Level_getWaterLevel(const Level* level) {
-    return (float)(level->depth / 2);
+    return (float)level->waterLevel;
 }
 
 void Level_addToTickNextTick(Level* level, int x, int y, int z, int id) {
@@ -245,6 +265,53 @@ int Level_getHighestTile(Level* level, int x, int z) {
         --y;
     }
     return y;
+}
+
+void Level_setSpawnPos(Level* level, int x, int y, int z, float rot) {
+    level->xSpawn = x;
+    level->ySpawn = y;
+    level->zSpawn = z;
+    level->rotSpawn = rot;
+}
+
+// needs grass under it and room for the whole tree
+bool Level_maybeGrowTree(Level* level, int x, int y, int z) {
+    int height = JRandom_nextIntN(&level->random, 3) + 4;
+    bool fits = true;
+    for (int yy = y; yy <= y + 1 + height; ++yy) {
+        int r = 1;
+        if (yy == y) r = 0;
+        if (yy >= y + 1 + height - 2) r = 2;
+        for (int xx = x - r; xx <= x + r && fits; ++xx) {
+            for (int zz = z - r; zz <= z + r && fits; ++zz) {
+                if (inBounds(level, xx, yy, zz)) {
+                    if ((level->blocks[(yy * level->height + zz) * level->width + xx] & 0xFF) != 0) fits = false;
+                    continue;
+                }
+                fits = false;
+            }
+        }
+    }
+    if (!fits) return false;
+    int i = ((y - 1) * level->height + z) * level->width + x;
+    if (i < 0) jthrowIndex(i);
+    int below = level->blocks[i] & 0xFF;
+    if (below != TILE_GRASS || y >= level->depth - height - 1) return false;
+    Level_setTile(level, x, y - 1, z, TILE_DIRT);
+    for (int yy = y - 3 + height; yy <= y + height; ++yy) {
+        int dy = yy - (y + height);
+        int r = 1 - dy / 2;
+        for (int xx = x - r; xx <= x + r; ++xx) {
+            int dx = xx - x;
+            for (int zz = z - r; zz <= z + r; ++zz) {
+                int dz = zz - z;
+                if (abs(dx) == r && abs(dz) == r && (JRandom_nextIntN(&level->random, 2) == 0 || dy == 0)) continue;
+                Level_setTile(level, xx, yy, zz, TILE_LEAVES);
+            }
+        }
+    }
+    for (int j = 0; j < height; ++j) Level_setTile(level, x, y + j, z, TILE_LOG);
+    return true;
 }
 
 int8_t* Level_copyBlocks(const Level* level) {

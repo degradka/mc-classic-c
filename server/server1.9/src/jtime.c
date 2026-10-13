@@ -96,3 +96,49 @@ void jtime_doubleString(double v, char* out, size_t size) {
     }
     snprintf(out, size, "%s", buf);
 }
+
+void jtime_floatString(float v, char* out, size_t size) {
+    char digits[40];
+    int exp10 = 0;
+    for (int p = 1; p <= 9; ++p) {
+        snprintf(digits, sizeof digits, "%.*e", p - 1, (double)v);
+        if (strtof(digits, NULL) == v) break;
+    }
+    char* e = strchr(digits, 'e');
+    exp10 = atoi(e + 1);
+    *e = '\0';
+    char mant[40];
+    int n = 0;
+    bool neg = digits[0] == '-';
+    for (char* c = digits + (neg ? 1 : 0); *c; ++c) if (*c != '.') mant[n++] = *c;
+    while (n > 1 && mant[n - 1] == '0') n--;
+    mant[n] = '\0';
+    char buf[64];
+    int k = 0;
+    if (neg) buf[k++] = '-';
+    if (v == 0.0f) {
+        snprintf(out, size, "%s0.0", neg ? "-" : "");
+        return;
+    }
+    if (exp10 >= -3 && exp10 < 7) {
+        if (exp10 < 0) {
+            buf[k++] = '0';
+            buf[k++] = '.';
+            for (int i = -1; i > exp10; --i) buf[k++] = '0';
+            for (int i = 0; i < n; ++i) buf[k++] = mant[i];
+        } else {
+            for (int i = 0; i <= exp10; ++i) buf[k++] = i < n ? mant[i] : '0';
+            buf[k++] = '.';
+            if (n > exp10 + 1) for (int i = exp10 + 1; i < n; ++i) buf[k++] = mant[i];
+            else buf[k++] = '0';
+        }
+        buf[k] = '\0';
+    } else {
+        buf[k++] = mant[0];
+        buf[k++] = '.';
+        if (n > 1) for (int i = 1; i < n; ++i) buf[k++] = mant[i];
+        else buf[k++] = '0';
+        k += snprintf(buf + k, sizeof buf - (size_t)k, "E%d", exp10);
+    }
+    snprintf(out, size, "%s", buf);
+}

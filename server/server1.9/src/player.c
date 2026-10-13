@@ -152,7 +152,7 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     if (other) Player_kick(other, "You logged in from another computer.");
     char who[512], n[JSTR_MAX * 3];
     Log_info("%s logged in as %s", Player_toString(p, who, sizeof who), jstr_c(&name, n, sizeof n));
-    if (protocol != 6) {
+    if (protocol != 7) {
         Player_kick(p, "Wrong protocol version.");
         return;
     }
@@ -163,7 +163,7 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
     p->loggedIn = true;
     jstr_copy(&p->name, &name);
     // 100 tells the client it's an op
-    PacketValue reply[4] = { { .i = 6 }, { .s = &p->server->serverName }, { .s = &p->server->motd },
+    PacketValue reply[4] = { { .i = 7 }, { .s = &p->server->serverName }, { .s = &p->server->motd },
                              { .i = PlayerList_contains(&p->server->admins, &name) ? 100 : 0 } };
     sendDirect(p, PACKET_LOGIN, reply);
     startLevelJob(p);
@@ -171,10 +171,11 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
 }
 
 // what a client may place, anything else is a cheat
-static const int PLACEABLE[32] = {
-    TILE_ROCK, TILE_STONEBRICK, TILE_DIRT, TILE_WOOD, TILE_LOG, TILE_LEAVES, TILE_BUSH, TILE_DANDELION, TILE_ROSE,
-    TILE_BROWN_MUSHROOM, TILE_RED_MUSHROOM, TILE_SAND, TILE_GRAVEL, TILE_GLASS, TILE_SPONGE, TILE_GOLD,
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+static const int PLACEABLE[42] = {
+    TILE_ROCK, TILE_STONEBRICK, TILE_BRICK, TILE_DIRT, TILE_WOOD, TILE_LOG, TILE_LEAVES, TILE_GLASS, TILE_SLAB,
+    TILE_MOSSY_ROCK, TILE_BUSH, TILE_DANDELION, TILE_ROSE, TILE_BROWN_MUSHROOM, TILE_RED_MUSHROOM, TILE_SAND,
+    TILE_GRAVEL, TILE_SPONGE, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, TILE_COAL_ORE,
+    TILE_IRON_ORE, TILE_GOLD_ORE, TILE_IRON, TILE_GOLD, TILE_BOOKSHELF, TILE_TNT, TILE_OBSIDIAN
 };
 
 static void broadcastText(MinecraftServer* s, const JStr* text) {
@@ -219,7 +220,7 @@ static void place(Player* p, const PendingAction* a) {
     float dist = dx * dx + dy * dy + dz * dz;
     if (dist >= 8.0f * 8.0f) {
         char d[64];
-        jtime_doubleString(sqrt((double)dist), d, sizeof d);
+        jtime_floatString((float)sqrt((double)dist), d, sizeof d);
         printf("Distance: %s\n", d);
         fflush(stdout);
         cheat(p, "Distance");
@@ -228,7 +229,7 @@ static void place(Player* p, const PendingAction* a) {
     // the tile object is looked up in the list, an id without a tile is never in it
     const Tile* tile = Tile_get(type);
     bool allowed = false;
-    for (int i = 0; i < 32 && tile && !allowed; ++i) if (PLACEABLE[i] == tile->id) allowed = true;
+    for (int i = 0; i < 42 && tile && !allowed; ++i) if (PLACEABLE[i] == tile->id) allowed = true;
     if (!allowed) {
         cheat(p, "Tile type");
         return;

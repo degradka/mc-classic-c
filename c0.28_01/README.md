@@ -36,7 +36,7 @@ Survival Test is over: it's creative building again, and multiplayer is back.
 
 ## Multiplayer
 
-There's no 0.28 server here yet. With a protocol 7 server running, from this version's folder:
+Start [server 1.9](../server/server1.9/), then from this version's folder:
 ```bash
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```

@@ -46,6 +46,7 @@ Dedicated servers:
 - [server 1.4.1](server/server1.4.1/)
 - [server 1.6](server/server1.6/)
 - [server 1.8.2](server/server1.8.2/)
+- [server 1.9](server/server1.9/)
 
 ---
 
@@ -61,7 +62,7 @@ They work with the original Java clients too, not just with these.
 | c0.0.18a_02 | [server 1.4.1](server/server1.4.1/) |
 | c0.0.19a_04 | [server 1.6](server/server1.6/) |
 | c0.0.20a_02, c0.0.23a_01 | [server 1.8.2](server/server1.8.2/) |
-| c0.28_01 | in progress |
+| c0.28_01 | [server 1.9](server/server1.9/) |
 
 The Survival Test versions (c0.24_st_03 to c0.27_st) are singleplayer only here. Their jars still have the
 multiplayer code, but it's left out of the port.

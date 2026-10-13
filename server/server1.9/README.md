@@ -1,19 +1,21 @@
-# Dedicated server 1.8.2
+# Dedicated server 1.9
 
 [Back to all versions](../../README.md)
 
-Released June 20, 2009, for the 0.0.20a_02 client. It also works with 0.0.23a_01, there was no new server for that one.
+Released October 27, 2009, for the 0.28 client. It first came out as 1.8.3, the next version's readme calls it 1.9.
 
 ## What changed
 
-- Only admins can break bedrock
-- /solid makes stone you place come out as bedrock
-- /tp works the same as /teleport
-- Cloth, gold block and the new plants can be placed, cobblestone and sand again too
-- Flowers and mushrooms die off dirt or grass or in the dark, like saplings (mushrooms too)
-- The login tells the client if it's an op
-- Commands can start with any number of `/`
-- "Too much lag" only past 1200 waiting block changes and moves
+- The level is the 0.28 client's level: same world generator, same tiles, same `server_level.dat` layout
+- Protocol version 7
+- All 49 tiles of 0.28 exist on the server
+- Bricks, slabs, mossy cobblestone, ores, iron and gold blocks, bookshelves, TNT and obsidian can be placed.
+  Grass, bedrock, liquids and double slabs still can't
+- A slab put on a slab turns into a double slab
+- Saplings grow into trees
+- Mushrooms only live in the dark on rock, gravel or cobblestone
+- Sand and gravel fall through water and lava
+- TNT is just a block here, nothing on the server makes it explode
 
 ## How it was ported
 
@@ -30,11 +32,14 @@ Like the original, `max-connections` is read from `server.properties` but always
 
 ## Playing on it
 
-Works with the [c0.0.20a_02](../../c0.0.20a_02/) and [c0.0.23a_01](../../c0.0.23a_01/) clients here and with the original Java ones. Start the server, then the client from its folder:
+Works with the [c0.28_01](../../c0.28_01/) client here and with the original Java one. Start the server, then the client from its folder:
 ```bash
-cd mc-classic-c/c0.0.20a_02
+cd mc-classic-c/c0.28_01
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```
+
+A level saved by a 0.28 client can't be used as `server_level.dat`, the server has no mob or player classes.
+It says so and generates a new level, like the original.
 
 ## Files
 
@@ -60,7 +65,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/server/server1.8.2/src
+cd mc-classic-c/server/server1.9/src
 make
 ```
 
@@ -77,4 +82,4 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic server 1.8.2](https://minecraft.wiki/w/Java_Edition_Classic_server_1.8.2)
+- [minecraft.wiki: Java Edition Classic server 1.9](https://minecraft.wiki/w/Java_Edition_Classic_server_1.9)

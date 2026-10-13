@@ -7,256 +7,248 @@
 #include "synth/distort.h"
 #include "../../log.h"
 #include "../../jtime.h"
+#include "../../math_helper.h"
 #include <math.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-
-// the LevelGen's Random, the server makes one LevelGen
-static JRandom genRandom;
+#define W 256
+#define H 256
+#define D 64
+#define G 32
 
 typedef struct {
-    int width, height, depth;
     int8_t* blocks;
+    JRandom random;
 } Gen;
 
-static int* raise(Gen* g) {
-    PerlinNoise p1, p2, p3, p4, p5;
-    Distort d1, d2;
-    PerlinNoise_init(&p1, &genRandom, 8);
-    PerlinNoise_init(&p2, &genRandom, 8);
-    Distort_init(&d1, &p1.synth, &p2.synth);
-    PerlinNoise_init(&p3, &genRandom, 8);
-    PerlinNoise_init(&p4, &genRandom, 8);
-    Distort_init(&d2, &p3.synth, &p4.synth);
-    PerlinNoise_init(&p5, &genRandom, 8);
+static int nextIntDiff(JRandom* r, int bound) {
+    int a = JRandom_nextIntN(r, bound);
+    int b = JRandom_nextIntN(r, bound);
+    return a - b;
+}
 
-    int* heightmap = (int*)malloc((size_t)g->width * g->height * sizeof(int));
-    float f = 1.3f;
-    for (int x = 0; x < g->width; ++x) {
-        for (int z = 0; z < g->height; ++z) {
-            double h1 = d1.synth.getValue(&d1.synth, (double)((float)x * f), (double)((float)z * f)) / 8.0 - 8.0;
-            double h2 = d2.synth.getValue(&d2.synth, (double)((float)x * f), (double)((float)z * f)) / 6.0 + 6.0;
-            double c = p5.synth.getValue(&p5.synth, x, z) / 8.0;
-            if (c > 0.0) h2 = h1;
-            double h = (h1 > h2 ? h1 : h2) / 2.0;
-            if (h < 0.0) h *= 0.8;
-            heightmap[x + z * g->width] = (int)h;
+static float nextFloatDiff(JRandom* r) {
+    float a = JRandom_nextFloat(r);
+    float b = JRandom_nextFloat(r);
+    return a - b;
+}
+
+static int* raise(Gen* gen) {
+    JRandom* r = &gen->random;
+    PerlinNoise a1, a2, b1, b2, selector;
+    PerlinNoise_init(&a1, r, 8);
+    PerlinNoise_init(&a2, r, 8);
+    Distort low;
+    Distort_init(&low, &a1.synth, &a2.synth);
+    PerlinNoise_init(&b1, r, 8);
+    PerlinNoise_init(&b2, r, 8);
+    Distort high;
+    Distort_init(&high, &b1.synth, &b2.synth);
+    PerlinNoise_init(&selector, r, 6);
+
+    int* heightmap = (int*)malloc((size_t)W * H * sizeof(int));
+    const float scale = 1.3f;
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < H; ++z) {
+            double lowH = low.synth.getValue(&low.synth, (double)((float)x * scale), (double)((float)z * scale)) / 6.0 + (double)-4;
+            double highH = high.synth.getValue(&high.synth, (double)((float)x * scale), (double)((float)z * scale)) / 5.0 + 10.0 + (double)-4;
+            double pick = selector.synth.getValue(&selector.synth, x, z) / 8.0;
+            if (pick > 0.0) highH = lowH;
+            double height = fmax(lowH, highH) / 2.0;
+            if (height < 0.0) height *= 0.8;
+            heightmap[x + z * W] = (int)height;
         }
     }
-    PerlinNoise_destroy(&p1); PerlinNoise_destroy(&p2); PerlinNoise_destroy(&p3);
-    PerlinNoise_destroy(&p4); PerlinNoise_destroy(&p5);
+    PerlinNoise_destroy(&a1); PerlinNoise_destroy(&a2);
+    PerlinNoise_destroy(&b1); PerlinNoise_destroy(&b2);
+    PerlinNoise_destroy(&selector);
     return heightmap;
 }
 
-static void erode(Gen* g, int* heightmap) {
-    PerlinNoise p1, p2, p3, p4;
-    Distort d1, d2;
-    PerlinNoise_init(&p1, &genRandom, 8);
-    PerlinNoise_init(&p2, &genRandom, 8);
-    Distort_init(&d1, &p1.synth, &p2.synth);
-    PerlinNoise_init(&p3, &genRandom, 8);
-    PerlinNoise_init(&p4, &genRandom, 8);
-    Distort_init(&d2, &p3.synth, &p4.synth);
-
-    for (int x = 0; x < g->width; ++x) {
-        for (int z = 0; z < g->height; ++z) {
-            double e = d1.synth.getValue(&d1.synth, x << 1, z << 1) / 8.0;
-            int o = d2.synth.getValue(&d2.synth, x << 1, z << 1) > 0.0 ? 1 : 0;
-            if (e > 2.0) {
-                int h = heightmap[x + z * g->width];
-                heightmap[x + z * g->width] = ((h - o) / 2 << 1) + o;
-            }
+static void erode(Gen* gen, int* heightmap) {
+    JRandom* r = &gen->random;
+    PerlinNoise c1, c2, d1, d2;
+    PerlinNoise_init(&c1, r, 8);
+    PerlinNoise_init(&c2, r, 8);
+    Distort amount;
+    Distort_init(&amount, &c1.synth, &c2.synth);
+    PerlinNoise_init(&d1, r, 8);
+    PerlinNoise_init(&d2, r, 8);
+    Distort parity;
+    Distort_init(&parity, &d1.synth, &d2.synth);
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < H; ++z) {
+            double a = amount.synth.getValue(&amount.synth, x << 1, z << 1) / 8.0;
+            int odd = parity.synth.getValue(&parity.synth, x << 1, z << 1) > 0.0 ? 1 : 0;
+            if (!(a > 2.0)) continue;
+            int hgt = heightmap[x + z * W];
+            heightmap[x + z * W] = ((hgt - odd) / 2 << 1) + odd;
         }
     }
-    PerlinNoise_destroy(&p1); PerlinNoise_destroy(&p2); PerlinNoise_destroy(&p3); PerlinNoise_destroy(&p4);
+    PerlinNoise_destroy(&c1); PerlinNoise_destroy(&c2);
+    PerlinNoise_destroy(&d1); PerlinNoise_destroy(&d2);
 }
 
-// dirt down to the heightmap, rock under a noisy depth, no grass yet
-static void soil(Gen* g, int* heightmap) {
-    int w = g->width, h = g->height, d = g->depth;
-    PerlinNoise p;
-    PerlinNoise_init(&p, &genRandom, 8);
-    for (int x = 0; x < w; ++x) {
-        for (int z = 0; z < h; ++z) {
-            int n = (int)(p.synth.getValue(&p.synth, x, z) / 24.0) - 4;
-            int dh = heightmap[x + z * w] + d / 2;
-            int rh = dh + n;
-            heightmap[x + z * w] = dh > rh ? dh : rh;
-            for (int y = 0; y < d; ++y) {
-                int i = (y * g->height + z) * g->width + x;
+static void soil(Gen* gen, int* heightmap) {
+    PerlinNoise rockNoise;
+    PerlinNoise_init(&rockNoise, &gen->random, 8);
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < H; ++z) {
+            int rockDepth = (int)(rockNoise.synth.getValue(&rockNoise.synth, x, z) / 24.0) - 4;
+            int dirtTop = heightmap[x + z * W] + G;
+            int rockTop = dirtTop + rockDepth;
+            int top = dirtTop > rockTop ? dirtTop : rockTop;
+            if (top > D - 2) top = D - 2;
+            if (top < 1) top = 1;
+            heightmap[x + z * W] = top;
+            for (int y = 0; y < D; ++y) {
                 int id = 0;
-                if (y <= dh) id = TILE_DIRT;
-                if (y <= rh) id = TILE_ROCK;
-                g->blocks[i] = (int8_t)id;
+                if (y <= dirtTop) id = TILE_DIRT;
+                if (y <= rockTop) id = TILE_ROCK;
+                if (y == 0) id = TILE_LAVA;
+                gen->blocks[(y * H + z) * W + x] = (int8_t)id;
             }
         }
     }
-    PerlinNoise_destroy(&p);
+    PerlinNoise_destroy(&rockNoise);
 }
 
-static void carveTunnels(Gen* g) {
-    int w = g->width, h = g->height, d = g->depth;
-    int count = w * h * d / 256 / 64;
-
+static void carveCaves(Gen* gen) {
+    JRandom* r = &gen->random;
+    int count = W * H * D / 256 / 64 << 1;
     for (int i = 0; i < count; ++i) {
-        float x = JRandom_nextFloat(&genRandom) * (float)w;
-        float y = JRandom_nextFloat(&genRandom) * (float)d;
-        float z = JRandom_nextFloat(&genRandom) * (float)h;
-        int length = (int)((JRandom_nextFloat(&genRandom) + JRandom_nextFloat(&genRandom)) * 75.0f);
-        float dir1 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
-        float dira1 = 0.0f;
-        float dir2 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
-        float dira2 = 0.0f;
-
-        for (int l = 0; l < length; ++l) {
-            x = (float)(x + sin(dir1) * cos(dir2));
-            z = (float)(z + cos(dir1) * cos(dir2));
-            y = (float)(y + sin(dir2));
-            dir1 += dira1 * 0.2f;
-            dira1 *= 0.9f;
-            dira1 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
-            dir2 += dira2 * 0.5f;
-            dir2 *= 0.5f;
-            dira2 *= 0.9f;
-            dira2 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
-            // 3 in 10 steps carve nothing, the rest carve a little off the path
-            if (JRandom_nextFloat(&genRandom) < 0.3f) continue;
-            float cx = x + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
-            float cy = y + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
-            float cz = z + JRandom_nextFloat(&genRandom) * 4.0f - 2.0f;
-            float size = (float)(sin(l * M_PI / length) * 2.5 + 1.0);
-
-            for (int xx = (int)(cx - size); xx <= (int)(cx + size); ++xx)
-            for (int yy = (int)(cy - size); yy <= (int)(cy + size); ++yy)
-            for (int zz = (int)(cz - size); zz <= (int)(cz + size); ++zz) {
-                float xd = (float)xx - cx;
-                float yd = (float)yy - cy;
-                float zd = (float)zz - cz;
-                float dd = xd * xd + yd * yd * 2.0f + zd * zd;
-                if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
-                    xx < g->width - 1 && yy < g->depth - 1 && zz < g->height - 1) {
-                    int ii = (yy * g->height + zz) * g->width + xx;
-                    if (g->blocks[ii] == TILE_ROCK) g->blocks[ii] = 0;
+        float x = JRandom_nextFloat(r) * (float)W;
+        float y = JRandom_nextFloat(r) * (float)D;
+        float z = JRandom_nextFloat(r) * (float)H;
+        int length = (int)((JRandom_nextFloat(r) + JRandom_nextFloat(r)) * 200.0f);
+        float yaw = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
+        float yawSpeed = 0.0f;
+        float pitch = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
+        float pitchSpeed = 0.0f;
+        float radiusScale = JRandom_nextFloat(r) * JRandom_nextFloat(r);
+        for (int step = 0; step < length; ++step) {
+            x += MathHelper_sin(yaw) * MathHelper_cos(pitch);
+            z += MathHelper_cos(yaw) * MathHelper_cos(pitch);
+            y += MathHelper_sin(pitch);
+            yaw += yawSpeed * 0.2f;
+            yawSpeed *= 0.9f;
+            yawSpeed += nextFloatDiff(r);
+            pitch += pitchSpeed * 0.5f;
+            pitch *= 0.5f;
+            pitchSpeed *= 0.75f;
+            pitchSpeed += nextFloatDiff(r);
+            if (JRandom_nextFloat(r) < 0.25f) continue;
+            float cx = x + (JRandom_nextFloat(r) * 4.0f - 2.0f) * 0.2f;
+            float cy = y + (JRandom_nextFloat(r) * 4.0f - 2.0f) * 0.2f;
+            float cz = z + (JRandom_nextFloat(r) * 4.0f - 2.0f) * 0.2f;
+            float radius = ((float)D - cy) / (float)D;
+            radius = 1.2f + (radius * 3.5f + 1.0f) * radiusScale;
+            radius = MathHelper_sin((float)step * 3.1415927f / (float)length) * radius;
+            for (int bx = (int)(cx - radius); bx <= (int)(cx + radius); ++bx) {
+                for (int by = (int)(cy - radius); by <= (int)(cy + radius); ++by) {
+                    for (int bz = (int)(cz - radius); bz <= (int)(cz + radius); ++bz) {
+                        float dx = (float)bx - cx;
+                        float dy = (float)by - cy;
+                        float dz = (float)bz - cz;
+                        float dist = dx * dx + dy * dy * 2.0f + dz * dz;
+                        if (!(dist < radius * radius) || bx < 1 || by < 1 || bz < 1 || bx >= W - 1 || by >= D - 1 || bz >= H - 1) continue;
+                        int idx = (by * H + bz) * W + bx;
+                        if (gen->blocks[idx] != TILE_ROCK) continue;
+                        gen->blocks[idx] = 0;
+                    }
                 }
             }
         }
     }
 }
 
-static void addOre(Gen* g, int tile, int chance, int step) {
-    (void)step;
-    int8_t ore = (int8_t)tile;
-    int w = g->width, h = g->height, d = g->depth;
-    int count = w * h * d / 256 / 64 * chance / 100;
+// ore veins wandering through rock
+static void placeOre(Gen* gen, int oreId, int percent) {
+    JRandom* r = &gen->random;
+    int count = W * H * D / 256 / 64 * percent / 100;
     for (int i = 0; i < count; ++i) {
-        float x = JRandom_nextFloat(&genRandom) * (float)w;
-        float y = JRandom_nextFloat(&genRandom) * (float)d;
-        float z = JRandom_nextFloat(&genRandom) * (float)h;
-        int length = (int)((JRandom_nextFloat(&genRandom) + JRandom_nextFloat(&genRandom)) * 75.0f * (float)chance / 100.0f);
-        float dir1 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
-        float dira1 = 0.0f;
-        float dir2 = (float)(JRandom_nextFloat(&genRandom) * M_PI * 2.0);
-        float dira2 = 0.0f;
-        for (int l = 0; l < length; ++l) {
-            x = (float)(x + sin(dir1) * cos(dir2));
-            z = (float)(z + cos(dir1) * cos(dir2));
-            y = (float)(y + sin(dir2));
-            dir1 += dira1 * 0.2f;
-            dira1 *= 0.9f;
-            dira1 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
-            dir2 += dira2 * 0.5f;
-            dir2 *= 0.5f;
-            dira2 *= 0.9f;
-            dira2 += JRandom_nextFloat(&genRandom) - JRandom_nextFloat(&genRandom);
-            float size = (float)(sin(l * M_PI / length) * chance / 100.0 + 1.0);
-            for (int xx = (int)(x - size); xx <= (int)(x + size); ++xx)
-            for (int yy = (int)(y - size); yy <= (int)(y + size); ++yy)
-            for (int zz = (int)(z - size); zz <= (int)(z + size); ++zz) {
-                float xd = (float)xx - x;
-                float yd = (float)yy - y;
-                float zd = (float)zz - z;
-                float dd = xd * xd + yd * yd * 2.0f + zd * zd;
-                if (dd < size * size && xx >= 1 && yy >= 1 && zz >= 1 &&
-                    xx < g->width - 1 && yy < g->depth - 1 && zz < g->height - 1) {
-                    int ii = (yy * g->height + zz) * g->width + xx;
-                    if (g->blocks[ii] == TILE_ROCK) g->blocks[ii] = ore;
+        float x = JRandom_nextFloat(r) * (float)W;
+        float y = JRandom_nextFloat(r) * (float)D;
+        float z = JRandom_nextFloat(r) * (float)H;
+        int length = (int)((JRandom_nextFloat(r) + JRandom_nextFloat(r)) * 75.0f * (float)percent / 100.0f);
+        float yaw = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
+        float yawSpeed = 0.0f;
+        float pitch = JRandom_nextFloat(r) * 3.1415927f * 2.0f;
+        float pitchSpeed = 0.0f;
+        for (int step = 0; step < length; ++step) {
+            x += MathHelper_sin(yaw) * MathHelper_cos(pitch);
+            z += MathHelper_cos(yaw) * MathHelper_cos(pitch);
+            y += MathHelper_sin(pitch);
+            yaw += yawSpeed * 0.2f;
+            yawSpeed *= 0.9f;
+            yawSpeed += nextFloatDiff(r);
+            pitch += pitchSpeed * 0.5f;
+            pitch *= 0.5f;
+            pitchSpeed *= 0.9f;
+            pitchSpeed += nextFloatDiff(r);
+            float radius = MathHelper_sin((float)step * 3.1415927f / (float)length) * (float)percent / 100.0f + 1.0f;
+            for (int bx = (int)(x - radius); bx <= (int)(x + radius); ++bx) {
+                for (int by = (int)(y - radius); by <= (int)(y + radius); ++by) {
+                    for (int bz = (int)(z - radius); bz <= (int)(z + radius); ++bz) {
+                        float dx = (float)bx - x;
+                        float dy = (float)by - y;
+                        float dz = (float)bz - z;
+                        float dist = dx * dx + dy * dy * 2.0f + dz * dz;
+                        if (!(dist < radius * radius) || bx < 1 || by < 1 || bz < 1 || bx >= W - 1 || by >= D - 1 || bz >= H - 1) continue;
+                        int idx = (by * H + bz) * W + bx;
+                        if (gen->blocks[idx] != TILE_ROCK) continue;
+                        gen->blocks[idx] = (int8_t)oreId;
+                    }
                 }
             }
         }
     }
 }
 
-// growable stack flood fill, it keeps the fill order of chained coordinate stacks
-static int growStack(int** stack, int* capacity) {
-    int newCap = *capacity * 2;
-    int* p = (int*)realloc(*stack, (size_t)newCap * sizeof(int));
-    if (!p) return 0;
-    *stack = p;
-    *capacity = newCap;
-    return 1;
-}
-
-static long long floodFillLiquid(Gen* level, int x, int y, int z, int source, int target) {
-    const int w = level->width, h = level->height;
-    const int upStep = w * h;
-
-    int capacity = 65536;
+// lava poured over water turns the water below it to rock
+static void floodFillLiquid(Gen* gen, int x, int y, int z, int target) {
+    const int upStep = W * H;
+    int8_t* blocks = gen->blocks;
+    int capacity = 0x100000;
     int* stack = (int*)malloc((size_t)capacity * sizeof(int));
-    if (!stack) return 0;
     int sp = 0;
-    stack[sp++] = (y * h + z) * w + x;
-
-    long long tiles = 0;
-
+    stack[sp++] = (y * H + z) * W + x;
     while (sp > 0) {
         int cl = stack[--sp];
-
-        int z0 = (cl / w) % h;
+        int z0 = (cl / W) % H;
         int y0 = cl / upStep;
-        int x0 = cl % w;
-
-        while (x0 > 0 && level->blocks[cl - 1] == source) { x0--; cl--; }
+        int x0 = cl % W;
+        while (x0 > 0 && blocks[cl - 1] == 0) { x0--; cl--; }
         int x1 = x0;
-        while (x1 < w && level->blocks[cl + (x1 - x0)] == source) x1++;
-
+        while (x1 < W && blocks[cl + (x1 - x0)] == 0) x1++;
         int lastNorth = 0, lastSouth = 0, lastBelow = 0;
-        tiles += (x1 - x0);
-
         for (int xx = x0; xx < x1; ++xx) {
-            level->blocks[cl] = (int8_t)target;
-
+            blocks[cl] = (int8_t)target;
             if (z0 > 0) {
-                int north = (level->blocks[cl - w] == source);
+                int north = blocks[cl - W] == 0;
                 if (north && !lastNorth) {
-                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
-                    stack[sp++] = cl - w;
+                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
+                    stack[sp++] = cl - W;
                 }
                 lastNorth = north;
             }
-            if (z0 < h - 1) {
-                int south = (level->blocks[cl + w] == source);
+            if (z0 < H - 1) {
+                int south = blocks[cl + W] == 0;
                 if (south && !lastSouth) {
-                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
-                    stack[sp++] = cl + w;
+                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
+                    stack[sp++] = cl + W;
                 }
                 lastSouth = south;
             }
             if (y0 > 0) {
-                int belowId = level->blocks[cl - upStep];
-                if (target == TILE_LAVA || target == TILE_CALM_LAVA) {
-                    if (belowId == TILE_WATER || belowId == TILE_CALM_WATER) {
-                        level->blocks[cl - upStep] = (int8_t)TILE_ROCK;
-                    }
+                int belowId = blocks[cl - upStep];
+                if ((target == TILE_LAVA || target == TILE_CALM_LAVA) && (belowId == TILE_WATER || belowId == TILE_CALM_WATER)) {
+                    blocks[cl - upStep] = TILE_ROCK;
                 }
-                int below = (belowId == source);
+                int below = belowId == 0;
                 if (below && !lastBelow) {
-                    if (sp == capacity && !growStack(&stack, &capacity)) { free(stack); return tiles; }
+                    if (sp == capacity) { capacity *= 2; stack = (int*)realloc(stack, (size_t)capacity * sizeof(int)); }
                     stack[sp++] = cl - upStep;
                 }
                 lastBelow = below;
@@ -264,163 +256,165 @@ static long long floodFillLiquid(Gen* level, int x, int y, int z, int source, in
             cl++;
         }
     }
-
     free(stack);
-    return tiles;
 }
 
-
-static void addWater(Gen* g) {
-    long long start = jtime_nanos();
-    int target = TILE_CALM_WATER;
-    long long tiles = 0;
-    for (int x = 0; x < g->width; ++x) {
-        tiles += floodFillLiquid(g, x, g->depth / 2 - 1, 0, 0, target);
-        tiles += floodFillLiquid(g, x, g->depth / 2 - 1, g->height - 1, 0, target);
+static void addWater(Gen* gen) {
+    JRandom* r = &gen->random;
+    for (int x = 0; x < W; ++x) {
+        floodFillLiquid(gen, x, D / 2 - 1, 0, TILE_CALM_WATER);
+        floodFillLiquid(gen, x, D / 2 - 1, H - 1, TILE_CALM_WATER);
     }
-    for (int z = 0; z < g->height; ++z) {
-        tiles += floodFillLiquid(g, 0, g->depth / 2 - 1, z, 0, target);
-        tiles += floodFillLiquid(g, g->width - 1, g->depth / 2 - 1, z, 0, target);
+    for (int z = 0; z < H; ++z) {
+        floodFillLiquid(gen, 0, D / 2 - 1, z, TILE_CALM_WATER);
+        floodFillLiquid(gen, W - 1, D / 2 - 1, z, TILE_CALM_WATER);
     }
-    int count = g->width * g->height / 200;
+    int count = W * H / 8000;
     for (int i = 0; i < count; ++i) {
-        int x = JRandom_nextIntN(&genRandom, g->width);
-        int y = g->depth / 2 - 1 - JRandom_nextIntN(&genRandom, 3);
-        int z = JRandom_nextIntN(&genRandom, g->height);
-        if (g->blocks[(y * g->height + z) * g->width + x] == 0) tiles += floodFillLiquid(g, x, y, z, 0, target);
+        int x = JRandom_nextIntN(r, W);
+        int y = G - 1 - JRandom_nextIntN(r, 2);
+        int z = JRandom_nextIntN(r, H);
+        if (gen->blocks[(y * H + z) * W + x] != 0) continue;
+        floodFillLiquid(gen, x, y, z, TILE_CALM_WATER);
     }
-    char ms[64];
-    jtime_doubleString((double)(jtime_nanos() - start) / 1000000.0, ms, sizeof ms);
-    printf("Flood filled %lld tiles in %s ms\n", tiles, ms);
-    fflush(stdout);
 }
 
-static void addLava(Gen* g) {
-    int lavaCount = 0;
-    int count = g->width * g->height * g->depth / 10000;
+static void addLava(Gen* gen) {
+    JRandom* r = &gen->random;
+    int count = W * H * D / 20000;
     for (int i = 0; i < count; ++i) {
-        int x = JRandom_nextIntN(&genRandom, g->width);
-        int y = JRandom_nextIntN(&genRandom, g->depth / 2 - 4);
-        int z = JRandom_nextIntN(&genRandom, g->height);
-        if (g->blocks[(y * g->height + z) * g->width + x] == 0) {
-            lavaCount++;
-            floodFillLiquid(g, x, y, z, 0, TILE_CALM_LAVA);
-        }
+        int x = JRandom_nextIntN(r, W);
+        int y = (int)(JRandom_nextFloat(r) * JRandom_nextFloat(r) * (float)(G - 3));
+        int z = JRandom_nextIntN(r, H);
+        if (gen->blocks[(y * H + z) * W + x] != 0) continue;
+        floodFillLiquid(gen, x, y, z, TILE_CALM_LAVA);
     }
-    printf("LavaCount: %d\n", lavaCount);
-    fflush(stdout);
 }
 
-// grass on top, sand near the water level, gravel under water
-static void grow(Gen* g, const int* heightmap) {
-    int w = g->width, h = g->height, d = g->depth;
-    PerlinNoise p1, p2;
-    PerlinNoise_init(&p1, &genRandom, 8);
-    PerlinNoise_init(&p2, &genRandom, 8);
-    for (int x = 0; x < w; ++x) {
-        for (int z = 0; z < h; ++z) {
-            bool sand = p1.synth.getValue(&p1.synth, x, z) > 8.0;
-            bool gravel = p2.synth.getValue(&p2.synth, x, z) > 12.0;
-            int y = heightmap[x + z * w];
-            int i = (y * g->height + z) * g->width + x;
-            int above = g->blocks[((y + 1) * g->height + z) * g->width + x] & 0xFF;
-            if ((above == TILE_WATER || above == TILE_CALM_WATER) && y <= d / 2 - 1 && gravel) {
-                g->blocks[i] = (int8_t)TILE_GRAVEL;
+// gravel on lake and sea beds, grass on dry ground, sand on low dry ground
+static void addBeaches(Gen* gen, const int* heightmap) {
+    PerlinNoise sandNoise, gravelNoise;
+    PerlinNoise_init(&sandNoise, &gen->random, 8);
+    PerlinNoise_init(&gravelNoise, &gen->random, 8);
+    for (int x = 0; x < W; ++x) {
+        for (int z = 0; z < H; ++z) {
+            bool sand = sandNoise.synth.getValue(&sandNoise.synth, x, z) > 8.0;
+            bool gravel = gravelNoise.synth.getValue(&gravelNoise.synth, x, z) > 12.0;
+            int top = heightmap[x + z * W];
+            int idx = (top * H + z) * W + x;
+            int above = gen->blocks[((top + 1) * H + z) * W + x] & 0xFF;
+            if ((above == TILE_WATER || above == TILE_CALM_WATER) && top <= D / 2 - 1 && gravel) {
+                gen->blocks[idx] = TILE_GRAVEL;
             }
             if (above != 0) continue;
             int id = TILE_GRASS;
-            if (y <= d / 2 - 1 && sand) id = TILE_SAND;
-            g->blocks[i] = (int8_t)id;
+            if (top <= D / 2 - 1 && sand) id = TILE_SAND;
+            gen->blocks[idx] = (int8_t)id;
         }
     }
-    PerlinNoise_destroy(&p1);
-    PerlinNoise_destroy(&p2);
+    PerlinNoise_destroy(&sandNoise);
+    PerlinNoise_destroy(&gravelNoise);
 }
 
-static void plant(Gen* g, const int* heightmap) {
-    int w = g->width;
-    int count = g->width * g->height / 4000;
+static void plantFlowers(Gen* gen, const int* heightmap) {
+    JRandom* r = &gen->random;
+    int count = W * H / 3000;
     for (int i = 0; i < count; ++i) {
-        int x0 = JRandom_nextIntN(&genRandom, g->width);
-        int z0 = JRandom_nextIntN(&genRandom, g->height);
-        for (int j = 0; j < 20; ++j) {
-            int x = x0;
-            int z = z0;
-            for (int k = 0; k < 20; ++k) {
-                // both steps happen before either is checked
-                x += JRandom_nextIntN(&genRandom, 6) - JRandom_nextIntN(&genRandom, 6);
-                z += JRandom_nextIntN(&genRandom, 6) - JRandom_nextIntN(&genRandom, 6);
-                if (x < 0 || z < 0 || x >= g->width || z >= g->height) continue;
-                int y = heightmap[x + z * w] + 1;
-                int trunk = JRandom_nextIntN(&genRandom, 3) + 4;
-                bool ok = true;
-                for (int yy = y; yy <= y + 1 + trunk; ++yy) {
-                    int r = 1;
-                    if (yy >= y + 1 + trunk - 2) r = 2;
-                    for (int xx = x - r; xx <= x + r && ok; ++xx) {
-                        for (int zz = z - r; zz <= z + r && ok; ++zz) {
-                            if (xx >= 0 && yy >= 0 && zz >= 0 && xx < g->width && yy < g->depth && zz < g->height) {
-                                if ((g->blocks[(yy * g->height + zz) * g->width + xx] & 0xFF) != 0) ok = false;
-                            } else {
-                                ok = false;
-                            }
-                        }
-                    }
-                }
-                if (!ok) continue;
-                int idx = (y * g->height + z) * g->width + x;
-                int below = g->blocks[((y - 1) * g->height + z) * g->width + x] & 0xFF;
-                if (below != TILE_GRASS || y >= g->depth - trunk - 1) continue;
-                g->blocks[idx - 1 * g->width * g->height] = (int8_t)TILE_DIRT;
-                for (int yy = y - 3 + trunk; yy <= y + trunk; ++yy) {
-                    int dy = yy - (y + trunk);
-                    int r = 1 - dy / 2;
-                    for (int xx = x - r; xx <= x + r; ++xx) {
-                        int dx = xx - x;
-                        for (int zz = z - r; zz <= z + r; ++zz) {
-                            int dz = zz - z;
-                            // a corner is left out half the time, always on the top layer
-                            if (abs(dx) == r && abs(dz) == r && (JRandom_nextIntN(&genRandom, 2) == 0 || dy == 0)) continue;
-                            g->blocks[(yy * g->height + zz) * g->width + xx] = (int8_t)TILE_LEAVES;
-                        }
-                    }
-                }
-                for (int t = 0; t < trunk; ++t) {
-                    g->blocks[idx + t * g->width * g->height] = (int8_t)TILE_LOG;
-                }
+        int kind = JRandom_nextIntN(r, 2);
+        int bx = JRandom_nextIntN(r, W);
+        int bz = JRandom_nextIntN(r, H);
+        for (int c = 0; c < 10; ++c) {
+            int x = bx, z = bz;
+            for (int s = 0; s < 5; ++s) {
+                x += nextIntDiff(r, 6);
+                z += nextIntDiff(r, 6);
+                if (x < 0 || z < 0 || x >= W || z >= H) continue;
+                int y = heightmap[x + z * W] + 1;
+                if ((gen->blocks[(y * H + z) * W + x] & 0xFF) != 0) continue;
+                if ((gen->blocks[((y - 1) * H + z) * W + x] & 0xFF) != TILE_GRASS) continue;
+                gen->blocks[(y * H + z) * W + x] = (int8_t)(kind == 0 ? TILE_DANDELION : TILE_ROSE);
             }
         }
     }
 }
 
-// the server always makes 256 x 256 x 64
+static void plantMushrooms(Gen* gen, const int* heightmap) {
+    JRandom* r = &gen->random;
+    int count = W * H * D / 2000;
+    for (int i = 0; i < count; ++i) {
+        int kind = JRandom_nextIntN(r, 2);
+        int bx = JRandom_nextIntN(r, W);
+        int by = JRandom_nextIntN(r, D);
+        int bz = JRandom_nextIntN(r, H);
+        for (int c = 0; c < 20; ++c) {
+            int x = bx, y = by, z = bz;
+            for (int s = 0; s < 5; ++s) {
+                x += nextIntDiff(r, 6);
+                y += nextIntDiff(r, 2);
+                z += nextIntDiff(r, 6);
+                if (x < 0 || z < 0 || y < 1 || x >= W || z >= H || y >= heightmap[x + z * W] - 1) continue;
+                if ((gen->blocks[(y * H + z) * W + x] & 0xFF) != 0) continue;
+                if ((gen->blocks[((y - 1) * H + z) * W + x] & 0xFF) != TILE_ROCK) continue;
+                gen->blocks[(y * H + z) * W + x] = (int8_t)(kind == 0 ? TILE_BROWN_MUSHROOM : TILE_RED_MUSHROOM);
+            }
+        }
+    }
+}
+
+static void plantTrees(Gen* gen, Level* level, const int* heightmap) {
+    JRandom* r = &gen->random;
+    int count = W * H / 4000;
+    for (int i = 0; i < count; ++i) {
+        int bx = JRandom_nextIntN(r, W);
+        int bz = JRandom_nextIntN(r, H);
+        for (int c = 0; c < 20; ++c) {
+            int x = bx, z = bz;
+            for (int s = 0; s < 20; ++s) {
+                x += nextIntDiff(r, 6);
+                z += nextIntDiff(r, 6);
+                if (x < 0 || z < 0 || x >= W || z >= H) continue;
+                int y = heightmap[x + z * W] + 1;
+                if (JRandom_nextIntN(r, 4) != 0) continue;
+                Level_maybeGrowTree(level, x, y, z);
+            }
+        }
+    }
+}
+
+static JStr* newJStr(const char* s) {
+    JStr tmp;
+    jstr_set(&tmp, s);
+    JStr* out = (JStr*)malloc(sizeof *out);
+    jstr_copy(out, &tmp);
+    return out;
+}
+
 Level* LevelGen_generateLevel(const char* creator) {
-    JRandom_initRandom(&genRandom);
+    MathHelper_init();
+    Gen gen;
+    JRandom_initRandom(&gen.random);
     Log_info("Generating level");
-    Gen g = { 256, 256, 64, NULL };
-    g.blocks = (int8_t*)calloc((size_t)256 * 256 * 64 + 1, 1);
-    int* heightmap = raise(&g);
-    erode(&g, heightmap);
-    soil(&g, heightmap);
-    carveTunnels(&g);
-    addOre(&g, TILE_COAL_ORE, 90, 1);
-    addOre(&g, TILE_IRON_ORE, 70, 2);
-    addOre(&g, TILE_GOLD_ORE, 50, 3);
-    addWater(&g);
-    addLava(&g);
-    grow(&g, heightmap);
-    plant(&g, heightmap);
-    free(heightmap);
+    gen.blocks = (int8_t*)calloc((size_t)W * H * D + 1, 1);
+    int* heightmap = raise(&gen);
+    erode(&gen, heightmap);
+    soil(&gen, heightmap);
+    carveCaves(&gen);
+    placeOre(&gen, TILE_COAL_ORE, 90);
+    placeOre(&gen, TILE_IRON_ORE, 70);
+    placeOre(&gen, TILE_GOLD_ORE, 50);
+    addWater(&gen);
+    addLava(&gen);
+    addBeaches(&gen, heightmap);
+    plantFlowers(&gen, heightmap);
+    plantMushrooms(&gen, heightmap);
 
     Level* level = Level_create();
-    Level_setData(level, 256, 64, 256, g.blocks);
+    level->waterLevel = G;
+    Level_setData(level, W, D, H, gen.blocks);
     level->createTime = jtime_millis();
-    JStr s;
-    jstr_set(&s, creator);
-    level->creator = (JStr*)malloc(sizeof(JStr));
-    jstr_copy(level->creator, &s);
-    jstr_set(&s, "A Nice World");
-    level->name = (JStr*)malloc(sizeof(JStr));
-    jstr_copy(level->name, &s);
+    level->creator = newJStr(creator);
+    level->name = newJStr("A Nice World");
+    plantTrees(&gen, level, heightmap);
+    free(heightmap);
     return level;
 }

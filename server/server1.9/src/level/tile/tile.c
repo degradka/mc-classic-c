@@ -5,7 +5,7 @@
 #include "../../jexc.h"
 #include <string.h>
 
-static Tile tiles[42];
+static Tile tiles[50];
 static const Tile* registry[256];
 bool Tile_shouldTick[256];
 
@@ -33,7 +33,7 @@ static Tile* add(int id) {
 static void Grass_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
     (void)t;
     if (JRandom_nextIntN(random, 4) != 0) return;
-    if (!Level_isLit(level, x, y + 1, z)) {
+    if (!Level_isLit(level, x, y, z)) {
         Level_setTile(level, x, y, z, TILE_DIRT);
         return;
     }
@@ -41,12 +41,12 @@ static void Grass_tick(const Tile* t, Level* level, int x, int y, int z, JRandom
         int nx = x + JRandom_nextIntN(random, 3) - 1;
         int ny = y + JRandom_nextIntN(random, 5) - 3;
         int nz = z + JRandom_nextIntN(random, 3) - 1;
-        if (Level_getTile(level, nx, ny, nz) != TILE_DIRT || !Level_isLit(level, nx, ny + 1, nz)) continue;
+        if (Level_getTile(level, nx, ny, nz) != TILE_DIRT || !Level_isLit(level, nx, ny, nz)) continue;
         Level_setTile(level, nx, ny, nz, TILE_GRASS);
     }
 }
 
-static void Bush_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
+static void Flower_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
     (void)t; (void)random;
     int below = Level_getTile(level, x, y - 1, z);
     if (!Level_isLit(level, x, y, z) || (below != TILE_DIRT && below != TILE_GRASS)) {
@@ -54,11 +54,40 @@ static void Bush_tick(const Tile* t, Level* level, int x, int y, int z, JRandom*
     }
 }
 
-// sand and gravel only fall through air on this server
+static void Sapling_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
+    int below = Level_getTile(level, x, y - 1, z);
+    if (!Level_isLit(level, x, y, z) || (below != TILE_DIRT && below != TILE_GRASS)) {
+        Level_setTile(level, x, y, z, 0);
+        return;
+    }
+    if (JRandom_nextIntN(random, 5) == 0) {
+        Level_setTileNoUpdate(level, x, y, z, 0);
+        if (!Level_maybeGrowTree(level, x, y, z)) Level_setTileNoUpdate(level, x, y, z, t->id);
+    }
+}
+
+// mushrooms need the dark and rock, gravel or cobblestone under them
+static void Mushroom_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
+    (void)t; (void)random;
+    int below = Level_getTile(level, x, y - 1, z);
+    if (Level_isLit(level, x, y, z) || (below != TILE_ROCK && below != TILE_GRAVEL && below != TILE_STONEBRICK)) {
+        Level_setTile(level, x, y, z, 0);
+    }
+}
+
+// sand and gravel sink through air and liquids, a liquid where they land is removed
 static void Falling_fall(Level* level, int x, int y, int z) {
     int ny = y;
-    while (Level_getTile(level, x, ny - 1, z) == 0 && ny > 0) ny--;
-    if (ny != y) Level_swap(level, x, y, z, x, ny, z);
+    for (;;) {
+        int id = Level_getTile(level, x, ny - 1, z);
+        bool open = id == 0 || Tile_req(id)->liquid != LIQUID_NONE;
+        if (!open || ny <= 0) break;
+        --ny;
+    }
+    if (ny == y) return;
+    int id = Level_getTile(level, x, ny, z);
+    if (id > 0 && Tile_req(id)->liquid != LIQUID_NONE) Level_setTileNoUpdate(level, x, ny, z, 0);
+    Level_swap(level, x, y, z, x, ny, z);
 }
 
 static void Falling_onPlace(const Tile* t, Level* level, int x, int y, int z) {
@@ -181,12 +210,28 @@ static void Sponge_onRemoved(const Tile* t, Level* level, int x, int y, int z) {
     }
 }
 
-static void bush(int id) {
+// either slab put on a slab merges into a double slab below
+static void Slab_onAdded(const Tile* t, Level* level, int x, int y, int z) {
+    (void)t;
+    if (Level_getTile(level, x, y - 1, z) == TILE_SLAB) {
+        Level_setTile(level, x, y, z, 0);
+        Level_setTile(level, x, y - 1, z, TILE_DOUBLE_SLAB);
+    }
+}
+
+static Tile* plant(int id, void (*tick)(const Tile*, Level*, int, int, int, JRandom*)) {
     Tile* t = add(id);
     t->blocksLight = false;
     t->solid = false;
-    t->tick = Bush_tick;
+    t->tick = tick;
     Tile_shouldTick[id] = true;
+    return t;
+}
+
+static void see(int id) {
+    Tile* t = add(id);
+    t->blocksLight = false;
+    t->solid = false;
 }
 
 void Tile_registerAll(void) {
@@ -198,7 +243,7 @@ void Tile_registerAll(void) {
     add(TILE_DIRT);
     add(TILE_STONEBRICK);
     add(TILE_WOOD);
-    bush(TILE_BUSH);
+    plant(TILE_BUSH, Sapling_tick);
     add(TILE_UNBREAKABLE);
     liquid(TILE_WATER, LIQUID_WATER, false);
     liquid(TILE_CALM_WATER, LIQUID_WATER, true);
@@ -213,17 +258,26 @@ void Tile_registerAll(void) {
     add(TILE_IRON_ORE);
     add(TILE_COAL_ORE);
     add(TILE_LOG);
-    Tile* leaves = add(TILE_LEAVES);
-    leaves->blocksLight = false;
-    leaves->solid = false;
+    see(TILE_LEAVES);
     Tile* sponge = add(TILE_SPONGE);
     sponge->onAdded = Sponge_onAdded;
     sponge->onRemoved = Sponge_onRemoved;
-    Tile* glass = add(TILE_GLASS);
-    glass->blocksLight = false;
-    glass->solid = false;
+    see(TILE_GLASS);
     for (int id = TILE_CLOTH_FIRST; id <= TILE_CLOTH_LAST; ++id) add(id);
-    // flowers and mushrooms are the sapling's class, they die the same way
-    for (int id = TILE_DANDELION; id <= TILE_RED_MUSHROOM; ++id) bush(id);
+    plant(TILE_DANDELION, Flower_tick);
+    plant(TILE_ROSE, Flower_tick);
+    plant(TILE_BROWN_MUSHROOM, Mushroom_tick);
+    plant(TILE_RED_MUSHROOM, Mushroom_tick);
     add(TILE_GOLD);
+    add(TILE_IRON);
+    for (int id = TILE_DOUBLE_SLAB; id <= TILE_SLAB; ++id) {
+        Tile* t = add(id);
+        t->solid = id == TILE_DOUBLE_SLAB;
+        t->onAdded = Slab_onAdded;
+    }
+    add(TILE_BRICK);
+    add(TILE_TNT);
+    add(TILE_BOOKSHELF);
+    add(TILE_MOSSY_ROCK);
+    add(TILE_OBSIDIAN);
 }
