@@ -355,11 +355,20 @@ static int collect(const World* wd, const Entity** out) {
     return n;
 }
 
+// the array length of a list that grew one add at a time from 10
+static int capacityFor(int n) {
+    int c = 10;
+    while (c < n) c = c * 3 / 2 + 1;
+    return c;
+}
+
 static void writeList(Out* o, const void* id, const Entity** list, int n) {
     JWriter* w = &o->w;
     JW_object(w, &ARRAYLIST, id);
     JW_i4(w, n);
-    unsigned char b[4] = { (unsigned char)(n >> 24), (unsigned char)(n >> 16), (unsigned char)(n >> 8), (unsigned char)n };
+    // the array length goes in the block, not the size
+    int c = capacityFor(n);
+    unsigned char b[4] = { (unsigned char)(c >> 24), (unsigned char)(c >> 16), (unsigned char)(c >> 8), (unsigned char)c };
     JW_block(w, b, 4);
     for (int i = 0; i < n; ++i) writeEntityRef(o, list[i]);
     JW_endBlock(w);
