@@ -766,6 +766,9 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     // so every thread is running before the window opens
     Options_init(&gOptions);
     Sound_init(gOptions.music, gOptions.sound);
+    if (gConnectHost[0]) {
+        NetConnection_startConnect(&gConn, gConnectHost, gConnectPort, gConnectUsername[0] ? gConnectUsername : "guest");
+    }
 
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
@@ -881,7 +884,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
         // tick polls the connect thread and shows "Connecting.." meanwhile
         PlayerMap_clear();
         gMultiplayer = true;
-        NetConnection_beginConnect(&gConn, gConnectHost, gConnectPort, Minecraft_getUserName());
+        NetConnection_beginConnect(&gConn);
         gConnecting = true;
         gLoading = true;
     }

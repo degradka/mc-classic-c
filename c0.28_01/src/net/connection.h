@@ -37,7 +37,10 @@ typedef struct {
 } NetConnection;
 
 // connects on its own thread, poll NetConnection_pollConnecting every tick
-void NetConnection_beginConnect(NetConnection* c, const char* host, int port, const char* username);
+// the connect thread, started before the window opens
+void NetConnection_startConnect(NetConnection* c, const char* host, int port, const char* username);
+// the "Connecting.." screen while it runs
+void NetConnection_beginConnect(NetConnection* c);
 
 // true once the connect finished either way
 // the Login or the error screen has been handled by then

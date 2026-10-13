@@ -84,7 +84,7 @@ static DWORD WINAPI connectThreadMain(LPVOID arg) { runConnect((NetConnection*)a
 static void* connectThreadMain(void* arg) { runConnect((NetConnection*)arg); return NULL; }
 #endif
 
-void NetConnection_beginConnect(NetConnection* c, const char* host, int port, const char* username) {
+void NetConnection_startConnect(NetConnection* c, const char* host, int port, const char* username) {
     memset(c, 0, sizeof *c);
     snprintf(c->connectHost, sizeof c->connectHost, "%s", host);
     c->connectPort = port;
@@ -98,7 +98,10 @@ void NetConnection_beginConnect(NetConnection* c, const char* host, int port, co
     pthread_t t;
     if (pthread_create(&t, NULL, connectThreadMain, c) == 0) pthread_detach(t);
 #endif
+}
 
+void NetConnection_beginConnect(NetConnection* c) {
+    (void)c;
     Minecraft_beginLevelLoading("Connecting..");
 }
 
