@@ -11,6 +11,17 @@
 This is the sequel to [mc-preclassic-c](https://github.com/degradka/mc-preclassic-c).
 **Minecraft Classic**, from **c0.0.11a** to **c0.28_01**, rewritten from Java into plain C99 + OpenGL.
 
+<details>
+<summary>Why some versions are missing</summary>
+
+Not every Classic version is here. Some only had minor changes or bug fixes over the one before,
+and some I skipped because their files didn't survive and thus can't be ported at all,
+their changes come in with the next version that did.
+
+If you want one of the skipped versions ported, ask me, or port it yourself and open a pull request.
+
+</details>
+
 The rules I stick to:
 - **It has to be the same game.** Same constants, same formulas, same tick order, same render order,
   same bugs. If something looks stupid or illogical by modern standards, that's how it was in the
