@@ -465,8 +465,8 @@ int MobSpawner_spawn(Level* level, int attempts, const Entity* referenceEntity, 
             int x = sx, y = sy, z = sz;
             for (int step = 0; step < 3; ++step) {
                 x += nextIntDiff(r, 6);
-                z += nextIntDiff(r, 6);
                 y += nextIntDiff(r, 1);
+                z += nextIntDiff(r, 6);
                 if (x < 0 || z < 1 || y < 0 || y >= d - 2 || x >= w || z >= h) continue;
                 if (!Level_isSolidTile(level, x, y - 1, z)) continue;
                 if (Level_isSolidTile(level, x, y, z) || Level_isSolidTile(level, x, y + 1, z)) continue;
