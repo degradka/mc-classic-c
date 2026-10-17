@@ -13,6 +13,7 @@
 
 void Entity_init(Entity* e, Level* level) {
     e->level = level;
+    e->renderOffset = 0.0f;
     e->x = e->y = e->z = 0.0f;
     e->xRotation = e->yRotation = 0.f;
     e->prevXRotation = e->prevYRotation = 0.f;

@@ -1,31 +1,25 @@
-# Classic 0.28_01
+# Classic 0.29_02
 
 [Back to all versions](../README.md)
 
-Released October 27, 2009, the same day as 0.28, which is folded in here.
-Survival Test is over: it's creative building again, and multiplayer is back.
+Released October 30, 2009. 0.29 and 0.29_01 came out the day before, they're folded in here.
+A multiplayer fix release for 0.28.
 
 ## What changed
 
-- Creative
-  - Blocks break right away, placing uses nothing up, nothing takes damage, reach is 5 again
-  - Hearts, air, score and the arrow count are hidden
-  - The survival code is still in the jar, but it always starts in creative
-- **B** opens the block select screen with every placeable tile, obsidian included
-- Middle click picks the block you look at into the hotbar
-- **Enter** sets the spawn point, **R** takes you back to it
-- TNT doesn't explode anymore, it just breaks
-- Sheep, they eat grass and regrow their wool. They only spawn in survival, so you won't see them normally
-- Multiplayer is back
-  - Other players are full humanoid mobs with name tags, they push you a little when you walk into them
-  - **Tab** shows who's connected
-- Menus have their gradient back, water and lava sides use the whole texture
-- Chunks are drawn in two layers, sorted the way java does it
+- Other players face the right way, in 0.28 everyone saw everyone else's yaw mirrored
+- Other players are drawn a bit higher
+- Names only show for the player the crosshair is on, out to 32 blocks, and they show through walls
+- Ops get their op status as soon as the server changes it, and keep it when the level loads,
+  so they can break bedrock now
+- **F5** toggles rain in multiplayer too
+- Dandelions and roses stop dying off in the dark or off grass, except in creative
+- Aiming at slabs, flowers and other blocks that aren't full cubes uses the real hit point
 
 ## How it was ported
 
-- Ported with names: the RetroMCP names for 0.0.23a_01 carried to this jar with a matcher that pairs classes and methods by their structure, the rest named by hand
-- Afterwards the whole C code was checked against the whole jar, not just the diff, and the bugs it found were fixed
+- Ported with names: the names for 0.28_01 carried to this jar with the matcher, it paired every class
+- The whole diff was read with local names evened out, and every change checked against the bytecode
 
 ## Differences from the original
 
@@ -60,7 +54,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/c0.28_01/src
+cd mc-classic-c/c0.29_02/src
 make
 ```
 
@@ -83,5 +77,6 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic 0.28_01](https://minecraft.wiki/w/Java_Edition_Classic_0.28_01)
-- [minecraft.wiki: Java Edition Classic 0.28](https://minecraft.wiki/w/Java_Edition_Classic_0.28)
+- [minecraft.wiki: Java Edition Classic 0.29_02](https://minecraft.wiki/w/Java_Edition_Classic_0.29_02)
+- [minecraft.wiki: Java Edition Classic 0.29_01](https://minecraft.wiki/w/Java_Edition_Classic_0.29_01)
+- [minecraft.wiki: Java Edition Classic 0.29](https://minecraft.wiki/w/Java_Edition_Classic_0.29)

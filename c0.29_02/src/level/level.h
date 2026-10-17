@@ -54,6 +54,8 @@ typedef struct Level {
     bool networkMode;
     // set by the game mode, mobs take no damage while it's on
     bool creativeMode;
+    // set by every game mode but creative, flowers stop ticking while it's on
+    bool growTrees;
 
     // the local player, mobs chase it
     Entity* player;

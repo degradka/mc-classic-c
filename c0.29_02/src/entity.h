@@ -58,6 +58,7 @@ typedef struct Entity {
     bool slotted, inGrid;
     float xOld, yOld, zOld;
     float pushthrough; // how much of a push goes through, network players
+    float renderOffset; // Mob.renderOffset, network players are drawn this much higher
     float timeOffs, mobRot, rotA; // Mob fields only kept for the save
     float animStep, animStepO;
     // fired once, the tick health first reaches 0

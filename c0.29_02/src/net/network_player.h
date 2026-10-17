@@ -32,8 +32,9 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* dis
                         int xRaw, int yRaw, int zRaw, float yaw, float pitch);
 void NetworkPlayer_free(NetworkPlayer* np);
 void NetworkPlayer_onTick(NetworkPlayer* np);
-// the name tag faces the local player's yRot
-void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font);
+void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks);
+// the name tag, only for the player the crosshair is on, it faces the local player's yRot
+void NetworkPlayer_renderHover(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font);
 
 void NetworkPlayer_teleport(NetworkPlayer* np, int xRaw, int yRaw, int zRaw, float yaw, float pitch);
 void NetworkPlayer_queueMoveLook(NetworkPlayer* np, int dx, int dy, int dz, float yaw, float pitch);

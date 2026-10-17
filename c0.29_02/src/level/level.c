@@ -408,11 +408,10 @@ static bool clipShape(const Tile* t, int x, int y, int z, const float* start, co
         }
     }
     if (bestFace < 0) return false;
-    // no add back to world space, the hit point stays tile local
     *face = bestFace;
-    hit[0] = best[0];
-    hit[1] = best[1];
-    hit[2] = best[2];
+    hit[0] = best[0] + (float)x;
+    hit[1] = best[1] + (float)y;
+    hit[2] = best[2] + (float)z;
     return true;
 }
 
@@ -455,29 +454,20 @@ bool Level_clipHit(const Level* level, float* sx, float* sy, float* sz, float ex
             *sy += dy * tz;
             *sz = bz;
         }
-        float hx = (float)floor(*sx), hy, hz;
-        x = (int)hx;
-        if (face == 5) { x--; hx += 1.0f; }
-        hy = (float)floor(*sy);
-        y = (int)hy;
-        if (face == 1) { y--; hy += 1.0f; }
-        hz = (float)floor(*sz);
-        z = (int)hz;
-        if (face == 3) { z--; hz += 1.0f; }
+        x = (int)(float)floor(*sx);
+        if (face == 5) x--;
+        y = (int)(float)floor(*sy);
+        if (face == 1) y--;
+        z = (int)(float)floor(*sz);
+        if (face == 3) z--;
         int id = Level_getTile(level, x, y, z);
         if (id <= 0 || !gTiles[id] || gTiles[id]->liquidType != LIQUID_NONE) continue;
-        const Tile* t = gTiles[id];
-        if (!t->isCube) {
-            // anything not a full cube is hit against its own shape, and missed if the ray passes it
-            float start[3] = { *sx, *sy, *sz }, end[3] = { ex, ey, ez }, hit[3];
-            int f;
-            if (!clipShape(t, x, y, z, start, end, &f, hit)) continue;
-            *outX = x; *outY = y; *outZ = z; *outFace = f;
-            *hitX = hit[0]; *hitY = hit[1]; *hitZ = hit[2];
-            return true;
-        }
-        *outX = x; *outY = y; *outZ = z; *outFace = face;
-        *hitX = hx; *hitY = hy; *hitZ = hz;
+        // the tile's own shape decides, a ray that passes it goes on
+        float start[3] = { *sx, *sy, *sz }, end[3] = { ex, ey, ez }, hit[3];
+        int f;
+        if (!clipShape(gTiles[id], x, y, z, start, end, &f, hit)) continue;
+        *outX = x; *outY = y; *outZ = z; *outFace = f;
+        *hitX = hit[0]; *hitY = hit[1]; *hitZ = hit[2];
         return true;
     }
     return false;

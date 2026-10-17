@@ -226,7 +226,7 @@ void Mob_render(const Entity* e, float partialTicks, float brightness, float bob
     float animStep = e->animStepO + (e->animStep - e->animStepO) * t;
     glColor3f(brightness, brightness, brightness);
     float bob = -fabsf(MathHelper_cos(animStep * 0.6662f)) * 5.0f * run * bobStrength - 23.0f;
-    glTranslatef(e->prevX + (e->x - e->prevX) * t, e->prevY + (e->y - e->prevY) * t - 1.62f, e->prevZ + (e->z - e->prevZ) * t);
+    glTranslatef(e->prevX + (e->x - e->prevX) * t, e->prevY + (e->y - e->prevY) * t - 1.62f + e->renderOffset, e->prevZ + (e->z - e->prevZ) * t);
     float hurt = (float)e->hurtTime - t;
     if (hurt > 0.0f || e->health <= 0) {
         if (hurt < 0.0f) {

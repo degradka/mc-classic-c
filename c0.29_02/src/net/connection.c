@@ -64,8 +64,8 @@ static void readString(const unsigned char* p, char* out, size_t outCapacity) {
     out[len] = '\0';
 }
 
-// byte angle to degrees, yaw negated
-static float angleYaw(signed char b)   { return (-(float)b * 360.0f) / 256.0f; }
+// byte angle to degrees, another player's yaw comes half a turn around
+static float angleYaw(signed char b)   { return ((float)(signed char)(b + 128) * 360.0f) / 256.0f; }
 static float anglePitch(signed char b) { return ((float)b * 360.0f) / 256.0f; }
 
 /* connect / disconnect */
@@ -182,7 +182,7 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             readString(f + 1 + PACKET_STRING_LEN, motd, sizeof motd);
             Minecraft_beginLevelLoading(serverName);
             Minecraft_levelLoadUpdate(motd);
-            Minecraft_setUserType(f[1 + PACKET_STRING_LEN + PACKET_STRING_LEN]);
+            Minecraft_setUserType((signed char)f[1 + PACKET_STRING_LEN + PACKET_STRING_LEN]);
             break;
         }
         case PACKET_PING:
@@ -227,12 +227,13 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             int sz = (short)readU16(f + 1 + PACKET_STRING_LEN + 4);
             signed char syaw   = (signed char)f[1 + PACKET_STRING_LEN + 6];
             signed char spitch = (signed char)f[1 + PACKET_STRING_LEN + 7];
-            float yaw = angleYaw(syaw), pitch = anglePitch(spitch);
+            float pitch = anglePitch(spitch);
             if (sid >= 0) {
-                Minecraft_spawnNetworkPlayer(sid, name, sx, sy, sz, yaw, pitch);
+                // others are sent 22/32 lower, the model's render offset puts them back
+                Minecraft_spawnNetworkPlayer(sid, name, sx, (short)(sy - 22), sz, angleYaw(syaw), pitch);
             } else {
                 // our own spawn, the stored yaw and the applied one use different math
-                // and neither is negated like angleYaw
+                // and neither is turned like angleYaw
                 float appliedYaw = ((float)syaw * 360.0f) / 256.0f;
                 int spawnYaw = ((int)syaw * 320) / 256;
                 Minecraft_setLevelSpawnPos(sx / 32, sy / 32, sz / 32, (float)spawnYaw);
@@ -245,9 +246,9 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             int sx = (short)readU16(f + 1), sy = (short)readU16(f + 3), sz = (short)readU16(f + 5);
             signed char syaw = (signed char)f[7], spitch = (signed char)f[8];
             if (sid >= 0) {
-                Minecraft_teleportNetworkPlayer(sid, sx, sy, sz, angleYaw(syaw), anglePitch(spitch));
+                Minecraft_teleportNetworkPlayer(sid, sx, (short)(sy - 22), sz, angleYaw(syaw), anglePitch(spitch));
             } else {
-                // moves the local player, the yaw is not negated like angleYaw
+                // moves the local player, the yaw is not turned like angleYaw
                 float yaw = ((float)syaw * 360.0f) / 256.0f;
                 Minecraft_networkTeleportSelf(sx / 32.0f, sy / 32.0f, sz / 32.0f, yaw, anglePitch(spitch));
             }
@@ -297,6 +298,9 @@ static int dispatchOne(NetConnection* c, const unsigned char* p, int available) 
             Minecraft_openMessageScreen("Connection lost", reason);
             break;
         }
+        case PACKET_SET_USER_TYPE:
+            Minecraft_setUserType((signed char)f[0]);
+            break;
     }
 
     return need;

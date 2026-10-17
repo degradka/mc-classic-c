@@ -17,5 +17,6 @@ const int PacketPayloadLen[PACKET_COUNT] = {
     1 + 1 + 1,       // Look
     1,               // DespawnPlayer
     1 + 64,          // Message
-    64               // Disconnect
+    64,              // Disconnect
+    1                // SetUserType
 };

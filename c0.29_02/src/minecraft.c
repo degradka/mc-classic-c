@@ -158,6 +158,8 @@ static float fogRed, fogGreen, fogBlue;
 
 static int      isHitNull = 1;
 static HitResult hitResult;
+// the entity under the crosshair, its name tag is drawn
+static Entity*  gHovered = NULL;
 
 static PauseScreen gPauseScreen;
 static GameOverScreen gGameOverScreen;
@@ -211,6 +213,7 @@ static void GameMode_spawnInitial(Level* lvl) {
 // creative takes everything but players out of the grid (not out of the level)
 static void GameMode_setLevel(Level* lvl) {
     lvl->creativeMode = !gSurvival;
+    lvl->growTrees = gSurvival;
     if (gSurvival) return;
     for (int i = 0; i < mobCount; ++i) mobs[i].e.inGrid = false;
     for (int i = 0; i < arrowCount; ++i) arrows[i].e.inGrid = false;
@@ -409,10 +412,11 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     // the new level has none of the network players, the map still does
     while (netPlayerCount > 0) removeNetPlayerFromLevel(netOrder[0]);
     GameMode_setLevel(&level);
-    // the new level has no Player, so it's a new one, userType back to 0
-    memset(&player, 0, sizeof player);
-    Player_init(&player, &level);
+    // the player is kept and goes back into the new level's grid
+    Player_resetPos(&player);
     GameMode_newPlayer(&player);
+    player.e.slotted = false;
+    player.e.inGrid = true;
     GameMode_adjustPlayer(&player);
     ParticleEngine_clear(&particleEngine);
     gLoading = false;
@@ -1201,27 +1205,52 @@ static void drawGui(float partialTicks) {
 /* picking */
 
 // strict, a point on the edge is outside
-static bool aabbContainsPoint(const AABB* box, float x, float y, float z) {
-    return x > box->minX && x < box->maxX &&
-           y > box->minY && y < box->maxY &&
-           z > box->minZ && z < box->maxZ;
+// where the segment crosses the plane axis = v, false outside the segment
+static bool planeHit(const float* s, const float* e, int axis, float v, float* out) {
+    float d[3] = { e[0] - s[0], e[1] - s[1], e[2] - s[2] };
+    if (d[axis] * d[axis] < 1.0E-7f) return false;
+    float f = (v - s[axis]) / d[axis];
+    if (f < 0.0f || f > 1.0f) return false;
+    for (int i = 0; i < 3; ++i) out[i] = s[i] + d[i] * f;
+    return true;
 }
 
-// one pickable entity against the ray, shrinking dist on a hit
-static bool pickEntity(Entity* e, const AABB* reachBox, float px, float py, float pz,
-                       float dx, float dy, float dz, float* dist) {
-    if (e->removed || !AABB_intersects(&e->boundingBox, reachBox)) return false;
-    AABB box = AABB_grow(&e->boundingBox, 0.1f, 0.1f, 0.1f);
-    for (float s = 0.0f; s < *dist; s += 0.05f) {
-        if (aabbContainsPoint(&box, px + dx * s, py + dy * s, pz + dz * s)) {
-            *dist = s;
-            return true;
-        }
+// AABB.clip, the nearest of the six face crossings, x0 x1 y0 y1 z0 z1 in that order
+static bool clipBox(const AABB* box, const float* s, const float* e, float* hit) {
+    const float lo[3] = { box->minX, box->minY, box->minZ }, hi[3] = { box->maxX, box->maxY, box->maxZ };
+    float bestDist = 0.0f;
+    bool found = false;
+    for (int k = 0; k < 6; ++k) {
+        int axis = k / 2;
+        float p[3];
+        if (!planeHit(s, e, axis, (k & 1) ? hi[axis] : lo[axis], p)) continue;
+        int a1 = axis == 0 ? 1 : 0, a2 = axis == 2 ? 1 : 2;
+        if (!(p[a1] >= lo[a1] && p[a1] <= hi[a1] && p[a2] >= lo[a2] && p[a2] <= hi[a2])) continue;
+        float dx = p[0] - s[0], dy = p[1] - s[1], dz = p[2] - s[2];
+        float dist = dx * dx + dy * dy + dz * dz;
+        if (found && !(dist < bestDist)) continue;
+        found = true;
+        bestDist = dist;
+        hit[0] = p[0]; hit[1] = p[1]; hit[2] = p[2];
     }
-    return false;
+    return found;
 }
 
-// the pick in Minecraft's render: Level.clip out to the game mode's reach, then pickable entities
+// the nearest pickable entity the ray goes through, a tie keeps the first
+static void pickEntity(Entity* e, const AABB* reachBox, const float* eye, const float* end, float* best) {
+    if (e->removed || !e->inGrid || !AABB_intersects(&e->boundingBox, reachBox)) return;
+    AABB box = AABB_grow(&e->boundingBox, 0.1f, 0.1f, 0.1f);
+    float hit[3];
+    if (!clipBox(&box, eye, end, hit)) return;
+    float dx = hit[0] - eye[0], dy = hit[1] - eye[1], dz = hit[2] - eye[2];
+    float dist = MathHelper_sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(dist < *best) && *best != 0.0f) return;
+    gHovered = e;
+    *best = dist;
+}
+
+// the pick before the eye passes: Level.clip out to the game mode's reach, then the entity
+// under the crosshair, creative only hovers it out to 32
 static void pick(float t) {
     float px = player.e.prevX + (player.e.x - player.e.prevX) * t;
     float py = player.e.prevY + (player.e.y - player.e.prevY) * t;
@@ -1241,24 +1270,23 @@ static void pick(float t) {
     float vx, vy, vz;
     bool hasBlock = Level_clipHit(&level, &sx, &sy2, &sz, px + dx * reach, py + dy * reach, pz + dz * reach,
                                   &hx, &hy, &hz, &face, &vx, &vy, &vz);
+    // measured from where the clip left the start point, not from the eye
     float dist = reach;
     if (hasBlock) {
-        float ax = px - vx, ay = py - vy, az = pz - vz;
+        float ax = sx - vx, ay = sy2 - vy, az = sz - vz;
         dist = MathHelper_sqrt(ax * ax + ay * ay + az * az);
     }
 
-    AABB reachBox = AABB_expand(&player.e.boundingBox, dx * dist, dy * dist, dz * dist);
-    Entity* hitEntity = NULL;
-    for (int i = 0; i < mobCount; i++) {
-        if (mobs[i].e.inGrid && pickEntity(&mobs[i].e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = &mobs[i].e;
-    }
-    for (int i = 0; i < netPlayerCount; i++) {
-        Entity* e = &netPlayers[netOrder[i]].e;
-        if (e->inGrid && pickEntity(e, &reachBox, px, py, pz, dx, dy, dz, &dist)) hitEntity = e;
-    }
+    float range = gSurvival ? dist : 32.0f;
+    float eye[3] = { px, py, pz }, end[3] = { px + dx * range, py + dy * range, pz + dz * range };
+    AABB reachBox = AABB_expand(&player.e.boundingBox, dx * range, dy * range, dz * range);
+    gHovered = NULL;
+    float best = 0.0f;
+    for (int i = 0; i < mobCount; i++) pickEntity(&mobs[i].e, &reachBox, eye, end, &best);
+    for (int i = 0; i < netPlayerCount; i++) pickEntity(&netPlayers[netOrder[i]].e, &reachBox, eye, end, &best);
 
-    if (hitEntity) {
-        hitresult_createEntity(&hitResult, hitEntity);
+    if (gHovered && gSurvival) {
+        hitresult_createEntity(&hitResult, gHovered);
         isHitNull = 0;
     } else if (hasBlock) {
         hitresult_create(&hitResult, hx, hy, hz, 0, face);
@@ -1618,8 +1646,8 @@ static void handleKeyEvent(const InputEvent* ev) {
             }
         }
         // F5 toggles rain, offline only
-        if (key == GLFW_KEY_F5 && !gMultiplayer) gRaining = !gRaining;
-        if (key == GLFW_KEY_TAB && !gMultiplayer && player.arrows > 0 && arrowCount < MAX_ARROWS) {
+        if (key == GLFW_KEY_F5) gRaining = !gRaining;
+        if (key == GLFW_KEY_TAB && gSurvival && player.arrows > 0 && arrowCount < MAX_ARROWS) {
             Arrow_init(&arrows[arrowCount++], &level, &player.e,
                        player.e.x, player.e.y, player.e.z, player.e.yRotation, player.e.xRotation, 1.2f);
             player.arrows--;
@@ -1887,6 +1915,8 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         glfwSetCursorPos(window, cx, cy);
     }
 
+    pick(t);
+
     // anaglyph draws everything twice, once per eye
     int passCount = gOptions.anaglyph3d ? 2 : 1;
     for (int pass = 0; pass < passCount; ++pass) {
@@ -1901,7 +1931,6 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glEnable(GL_CULL_FACE);
 
     setupCamera(p, t, pass);
-    pick(t);
 
     Frustum frustum;
     frustum_calculate(&frustum);
@@ -1937,7 +1966,7 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     for (int i = 0; i < netPlayerCount; ++i) {
         const NetworkPlayer* np = &netPlayers[netOrder[i]];
         if (entityVisible(&frustum, &np->e, camX, camY, camZ)) {
-            NetworkPlayer_render(np, t, p->e.yRotation, &gFont);
+            NetworkPlayer_render(np, t);
         }
     }
 
@@ -1993,6 +2022,10 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
     glDisable(GL_BLEND);
     glDisable(GL_FOG);
     if (gRaining) renderRain(p, t);
+    // only a network player draws anything
+    for (int i = 0; i < netPlayerCount; ++i) {
+        if (gHovered == &netPlayers[netOrder[i]].e) NetworkPlayer_renderHover(&netPlayers[netOrder[i]], t, p->e.yRotation, &gFont);
+    }
 
     // the hand clears the depth buffer, so it goes last
     renderHand(p, t, pass);

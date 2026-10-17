@@ -25,14 +25,14 @@ static const JField RANDOM_F[] = { F('Z', "haveNextNextGaussian"), F('D', "nextN
 static const JDesc RANDOM = { "java.util.Random", 3905348978240129619LL, 3, 3, RANDOM_F, NULL };
 
 static const JField LEVEL_F[] = {
-    F('I', "cloudColor"), F('J', "createTime"), F('Z', "creativeMode"), F('I', "depth"), F('I', "fogColor"), F('I', "height"),
-    F('Z', "networkMode"), F('F', "rotSpawn"), F('I', "skyColor"), F('I', "tickCount"), F('I', "unprocessed"),
+    F('I', "cloudColor"), F('J', "createTime"), F('Z', "creativeMode"), F('I', "depth"), F('I', "fogColor"), F('Z', "growTrees"),
+    F('I', "height"), F('Z', "networkMode"), F('F', "rotSpawn"), F('I', "skyColor"), F('I', "tickCount"), F('I', "unprocessed"),
     F('I', "waterLevel"), F('I', "width"), F('I', "xSpawn"), F('I', "ySpawn"), F('I', "zSpawn"),
     L('L', "blockMap", "Lcom/mojang/minecraft/level/BlockMap;"), L('[', "blocks", "[B"),
     L('L', "creator", "Ljava/lang/String;"), L('L', "name", "Ljava/lang/String;"),
     L('L', "player", "Lcom/mojang/minecraft/Entity;")
 };
-static const JDesc LEVEL = { "com.mojang.minecraft.level.Level", 0, 2, 21, LEVEL_F, NULL };
+static const JDesc LEVEL = { "com.mojang.minecraft.level.Level", 0, 2, 22, LEVEL_F, NULL };
 
 static const JField BLOCKMAP_F[] = {
     F('I', "depth"), F('I', "height"), F('I', "width"), L('L', "all", "Ljava/util/List;"),
@@ -51,7 +51,7 @@ static const JDesc AABB_D = { "com.mojang.minecraft.phys.AABB", 0, 2, 7, AABB_F,
 
 static const JField ENTITY_F[] = {
     F('F', "bbHeight"), F('F', "bbWidth"), F('Z', "collision"), F('F', "fallDistance"), F('F', "footSize"),
-    F('F', "heightOffset"), F('Z', "horizontalCollision"), F('Z', "makeStepSound"), F('I', "nextStep"),
+    F('F', "heightOffset"), F('Z', "horizontalCollision"), F('Z', "hovered"), F('Z', "makeStepSound"), F('I', "nextStep"),
     F('Z', "noPhysics"), F('Z', "onGround"), F('F', "pushthrough"), F('Z', "removed"), F('Z', "slide"), F('I', "textureId"), F('F', "walkDist"),
     F('F', "walkDistO"), F('F', "x"), F('F', "xOld"), F('F', "xRot"), F('F', "xRotO"), F('F', "xd"), F('F', "xo"),
     F('F', "y"), F('F', "yOld"), F('F', "yRot"), F('F', "yRotO"), F('F', "ySlideOffset"), F('F', "yd"), F('F', "yo"),
@@ -59,18 +59,18 @@ static const JField ENTITY_F[] = {
     L('L', "bb", "Lcom/mojang/minecraft/phys/AABB;"), L('L', "blockMap", "Lcom/mojang/minecraft/level/BlockMap;"),
     L('L', "level", "Lcom/mojang/minecraft/level/Level;")
 };
-static const JDesc ENTITY = { "com.mojang.minecraft.Entity", 0, 2, 37, ENTITY_F, NULL };
+static const JDesc ENTITY = { "com.mojang.minecraft.Entity", 0, 2, 38, ENTITY_F, NULL };
 
 static const JField MOB_F[] = {
     F('I', "airSupply"), F('Z', "allowAlpha"), F('F', "animStep"), F('F', "animStepO"), F('I', "attackTime"),
     F('F', "bobStrength"), F('Z', "dead"), F('I', "deathScore"), F('I', "deathTime"), F('Z', "hasHair"), F('I', "health"), F('F', "hurtDir"), F('I', "hurtDuration"),
     F('I', "hurtTime"), F('I', "invulnerableDuration"), F('I', "invulnerableTime"), F('I', "lastHealth"),
-    F('F', "oRun"), F('F', "oTilt"), F('F', "rot"), F('F', "rotA"), F('F', "rotOffs"), F('F', "run"), F('F', "speed"),
+    F('F', "oRun"), F('F', "oTilt"), F('F', "renderOffset"), F('F', "rot"), F('F', "rotA"), F('F', "rotOffs"), F('F', "run"), F('F', "speed"),
     F('I', "tickCount"), F('F', "tilt"), F('F', "timeOffs"), F('F', "yBodyRot"), F('F', "yBodyRotO"),
     L('L', "ai", "Lcom/mojang/minecraft/mob/ai/AI;"), L('L', "modelName", "Ljava/lang/String;"),
     L('L', "textureName", "Ljava/lang/String;")
 };
-static const JDesc MOB = { "com.mojang.minecraft.mob.Mob", 0, 2, 32, MOB_F, &ENTITY };
+static const JDesc MOB = { "com.mojang.minecraft.mob.Mob", 0, 2, 33, MOB_F, &ENTITY };
 
 static const JField PLAYER_F[] = {
     F('I', "arrows"), F('F', "bob"), F('F', "oBob"), F('I', "score"), F('B', "userType"),
@@ -172,6 +172,8 @@ static void entityFields(Out* o, const Entity* e, bool own) {
     JW_f4(w, e->footSize);
     JW_f4(w, e->heightOffset);
     JW_u1(w, e->horizontalCollision);
+    // Entity.hovered, nothing ever sets it
+    JW_u1(w, 0);
     JW_u1(w, e->makeStepSound);
     JW_i4(w, e->nextStep);
     JW_u1(w, e->noPhysics);
@@ -227,6 +229,7 @@ static void mobFields(Out* o, const Entity* e, const char* model, const char* te
     JW_i4(w, e->lastHealth);
     JW_f4(w, e->oRun);
     JW_f4(w, player ? p->oTilt : 0.0f);
+    JW_f4(w, e->renderOffset);
     JW_f4(w, e->mobRot);
     JW_f4(w, e->rotA);
     JW_f4(w, player ? 180.0f : 0.0f);
@@ -403,6 +406,7 @@ bool Save_write(const World* wd, const char* path) {
     JW_u1(w, lv->creativeMode);
     JW_i4(w, lv->depth);
     JW_i4(w, lv->fogColor);
+    JW_u1(w, lv->growTrees);
     JW_i4(w, lv->height);
     JW_u1(w, 0);
     JW_f4(w, lv->rotSpawn);
@@ -607,6 +611,7 @@ static bool loadV2(Level* level, const unsigned char* p, size_t len) {
     nodeString(JNode_obj(root, LV, "creator"), level->creator, sizeof level->creator);
     level->createTime = JNode_int(root, LV, "createTime");
     level->creativeMode = JNode_int(root, LV, "creativeMode") != 0;
+    level->growTrees = JNode_int(root, LV, "growTrees") != 0;
     level->xSpawn = (int)JNode_int(root, LV, "xSpawn");
     level->ySpawn = (int)JNode_int(root, LV, "ySpawn");
     level->zSpawn = (int)JNode_int(root, LV, "zSpawn");
@@ -715,6 +720,7 @@ static void readMob(Entity* e, const JNode* n) {
     e->timeOffs = JNode_float(n, MB, "timeOffs");
     e->mobRot = JNode_float(n, MB, "rot");
     e->rotA = JNode_float(n, MB, "rotA");
+    e->renderOffset = JNode_float(n, MB, "renderOffset");
 }
 
 static void readRandom(JRandom* r, const JNode* n) {

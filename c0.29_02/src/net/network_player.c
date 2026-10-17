@@ -107,6 +107,7 @@ void NetworkPlayer_init(NetworkPlayer* np, Level* level, int id, const char* dis
     Entity_setPosition(&np->e, (float)xRaw / 32.0f, (float)yRaw / 32.0f, (float)zRaw / 32.0f);
     np->e.xRotation = pitch;
     np->e.yRotation = yaw;
+    np->e.renderOffset = 0.6875f;
     np->e.afterAiStep = aiStep;
 
     if (!sModelInit) { ZombieModel_init(&sModel); sModelInit = 1; }
@@ -137,12 +138,15 @@ static void networkPlayerModel(const void* self, float animStep, float run, floa
     glDisable(GL_ALPHA_TEST);
 }
 
-void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font) {
+void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks) {
     const Entity* e = &np->e;
     Mob_render(e, partialTicks, Entity_getBrightness(e), 1.0f, false, networkPlayerModel, np);
+}
 
+void NetworkPlayer_renderHover(const NetworkPlayer* np, float partialTicks, float localPlayerYaw, Font* font) {
+    const Entity* e = &np->e;
     glPushMatrix();
-    glTranslatef(e->prevX + (e->x - e->prevX) * partialTicks, e->prevY + (e->y - e->prevY) * partialTicks + 0.8f,
+    glTranslatef(e->prevX + (e->x - e->prevX) * partialTicks, e->prevY + (e->y - e->prevY) * partialTicks + 0.8f + e->renderOffset,
                  e->prevZ + (e->z - e->prevZ) * partialTicks);
     glRotatef(-localPlayerYaw, 0.0f, 1.0f, 0.0f);
     glScalef(0.05f, -0.05f, 0.05f);
@@ -151,10 +155,20 @@ void NetworkPlayer_render(const NetworkPlayer* np, float partialTicks, float loc
     glDisable(GL_LIGHTING);
     glDisable(GL_LIGHT0);
     Font_draw(font, &sNameTess, np->displayName, 0, 0, equalsIgnoreCase(np->name, "Notch") ? 0xFFFF00 : 0xFFFFFF);
-    glEnable(GL_LIGHT0);
-    glEnable(GL_LIGHTING);
+    // again where something is in front of it, so it shows through walls
+    glDepthFunc(GL_GREATER);
+    glDepthMask(GL_FALSE);
+    glColor4f(1.0f, 1.0f, 1.0f, 0.8f);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    Font_draw(font, &sNameTess, np->displayName, 0, 0, 0xFFFFFF);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL);
     glTranslatef(1.0f, 1.0f, -0.05f);
     Font_draw(font, &sNameTess, np->name, 0, 0, 0x505050);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHTING);
     glPopMatrix();
 }
 

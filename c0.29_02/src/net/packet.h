@@ -20,7 +20,8 @@ enum {
     PACKET_DESPAWN_PLAYER = 12, // byte id
     PACKET_MESSAGE        = 13, // byte senderId, String text
     PACKET_DISCONNECT     = 14, // String reason
-    PACKET_COUNT          = 15
+    PACKET_SET_USER_TYPE  = 15, // byte userType, 100 is an op
+    PACKET_COUNT          = 16
 };
 
 #define PACKET_STRING_LEN 64
