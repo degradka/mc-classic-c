@@ -36,6 +36,8 @@ typedef struct Level {
     BlockMap* blockMap;
     bool networkMode;
     bool creativeMode;
+    // dandelions and roses stop ticking while it's on
+    bool growTrees;
     int waterLevel;
     int skyColor, fogColor, cloudColor;
     int unprocessed;

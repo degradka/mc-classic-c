@@ -48,6 +48,7 @@ static void Grass_tick(const Tile* t, Level* level, int x, int y, int z, JRandom
 
 static void Flower_tick(const Tile* t, Level* level, int x, int y, int z, JRandom* random) {
     (void)t; (void)random;
+    if (level->growTrees) return;
     int below = Level_getTile(level, x, y - 1, z);
     if (!Level_isLit(level, x, y, z) || (below != TILE_DIRT && below != TILE_GRASS)) {
         Level_setTile(level, x, y, z, 0);

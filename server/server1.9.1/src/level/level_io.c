@@ -172,7 +172,7 @@ static Level* loadV2(const uint8_t* p, size_t len) {
                  "java.io.InvalidClassException: local class incompatible: stream classdesc serialVersionUID = %lld, local class serialVersionUID = 0",
                  (long long)c->suid);
     } else if (isLevel && (!fieldType(c, "cloudColor", 'I', NULL) || !fieldType(c, "createTime", 'J', NULL) || !fieldType(c, "creativeMode", 'Z', NULL) ||
-               !fieldType(c, "depth", 'I', NULL) || !fieldType(c, "fogColor", 'I', NULL) || !fieldType(c, "height", 'I', NULL) ||
+               !fieldType(c, "depth", 'I', NULL) || !fieldType(c, "fogColor", 'I', NULL) || !fieldType(c, "growTrees", 'Z', NULL) || !fieldType(c, "height", 'I', NULL) ||
                !fieldType(c, "networkMode", 'Z', NULL) || !fieldType(c, "rotSpawn", 'F', NULL) || !fieldType(c, "skyColor", 'I', NULL) ||
                !fieldType(c, "tickCount", 'I', NULL) || !fieldType(c, "unprocessed", 'I', NULL) || !fieldType(c, "waterLevel", 'I', NULL) ||
                !fieldType(c, "width", 'I', NULL) || !fieldType(c, "xSpawn", 'I', NULL) || !fieldType(c, "ySpawn", 'I', NULL) ||
@@ -221,6 +221,7 @@ static Level* loadV2(const uint8_t* p, size_t len) {
     level->rotSpawn = JNode_float(root, LV, "rotSpawn");
     level->networkMode = JNode_int(root, LV, "networkMode") != 0;
     level->creativeMode = JNode_int(root, LV, "creativeMode") != 0;
+    level->growTrees = JNode_int(root, LV, "growTrees") != 0;
     level->waterLevel = (int)JNode_int(root, LV, "waterLevel");
     level->skyColor = (int)JNode_int(root, LV, "skyColor");
     level->fogColor = (int)JNode_int(root, LV, "fogColor");
@@ -259,14 +260,14 @@ Level* LevelIO_load(const uint8_t* data, int len) {
 
 static const JField LEVEL_FIELDS[] = {
     { 'I', "cloudColor", NULL }, { 'J', "createTime", NULL }, { 'Z', "creativeMode", NULL }, { 'I', "depth", NULL },
-    { 'I', "fogColor", NULL }, { 'I', "height", NULL }, { 'Z', "networkMode", NULL }, { 'F', "rotSpawn", NULL },
+    { 'I', "fogColor", NULL }, { 'Z', "growTrees", NULL }, { 'I', "height", NULL }, { 'Z', "networkMode", NULL }, { 'F', "rotSpawn", NULL },
     { 'I', "skyColor", NULL }, { 'I', "tickCount", NULL }, { 'I', "unprocessed", NULL }, { 'I', "waterLevel", NULL },
     { 'I', "width", NULL }, { 'I', "xSpawn", NULL }, { 'I', "ySpawn", NULL }, { 'I', "zSpawn", NULL },
     { 'L', "blockMap", "Lcom/mojang/minecraft/level/BlockMap;" }, { '[', "blocks", "[B" },
     { 'L', "creator", "Ljava/lang/String;" }, { 'L', "name", "Ljava/lang/String;" },
     { 'L', "player", "Lcom/mojang/minecraft/Entity;" }
 };
-static const JDesc LEVEL_DESC = { LV, 0, 2, 21, LEVEL_FIELDS, NULL };
+static const JDesc LEVEL_DESC = { LV, 0, 2, 22, LEVEL_FIELDS, NULL };
 static const JField BLOCK_MAP_FIELDS[] = {
     { 'I', "depth", NULL }, { 'I', "height", NULL }, { 'I', "width", NULL }, { 'L', "all", "Ljava/util/List;" },
     { '[', "entityGrid", "[Ljava/util/List;" }, { 'L', "slot", "Lcom/mojang/minecraft/level/BlockMap$Slot;" },
@@ -364,6 +365,7 @@ void LevelIO_save(const Level* level, void* file) {
     JW_u1(&w, level->creativeMode ? 1 : 0);
     JW_i4(&w, level->depth);
     JW_i4(&w, level->fogColor);
+    JW_u1(&w, level->growTrees ? 1 : 0);
     JW_i4(&w, level->height);
     JW_u1(&w, level->networkMode ? 1 : 0);
     JW_f4(&w, level->rotSpawn);

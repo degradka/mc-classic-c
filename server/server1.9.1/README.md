@@ -1,21 +1,17 @@
-# Dedicated server 1.9
+# Dedicated server 1.9.1
 
 [Back to all versions](../../README.md)
 
-Released October 27, 2009, for the 0.28 client. It first came out as 1.8.3, the next version's readme calls it 1.9.
+Released October 29, 2009, for the 0.29 clients.
 
 ## What changed
 
-- The level is the 0.28 client's level: same world generator, same tiles, same `server_level.dat` layout
-- Protocol version 7
-- All 49 tiles of 0.28 exist on the server
-- Bricks, slabs, mossy cobblestone, ores, iron and gold blocks, bookshelves, TNT and obsidian can be placed.
-  Grass, bedrock, liquids and double slabs still can't
-- A slab put on a slab turns into a double slab
-- Saplings grow into trees
-- Mushrooms only live in the dark on rock, gravel or cobblestone
-- Sand and gravel fall through water and lava
-- TNT is just a block here, nothing on the server makes it explode
+- `/op` and `/deop` update the player's client right away, no relog needed. With the 0.29_02 client an op
+  can break bedrock as soon as they're opped
+- `/deop` also turns `/solid` off
+- `grow-trees` in `server.properties`, off by default. Despite the name it doesn't touch saplings,
+  while it's on dandelions and roses stop ticking, so they stop dying off in the dark or off grass
+- The level is saved as creative
 
 ## How it was ported
 
@@ -32,9 +28,9 @@ Like the original, `max-connections` is read from `server.properties` but always
 
 ## Playing on it
 
-Works with the [c0.28_01](../../c0.28_01/) client here and with the original Java one. Start the server, then the client from its folder:
+Works with the [c0.29_02](../../c0.29_02/) client here and with the original Java one. Start the server, then the client from its folder:
 ```bash
-cd mc-classic-c/c0.28_01
+cd mc-classic-c/c0.29_02
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```
 
@@ -44,7 +40,7 @@ It says so and generates a new level, like the original.
 ## Files
 
 These are located in the folder the server runs from:
-- `server.properties`: `server-name`, `motd`, `port`, `max-players`, `public`, `verify-names`, `max-connections`
+- `server.properties`: `server-name`, `motd`, `port`, `max-players`, `public`, `verify-names`, `max-connections`, `grow-trees`
 - `admins.txt`, `banned.txt`, `banned-ip.txt`, `players.txt`: one name or ip per line
 - `server.log`: the log
 - `server_level.dat`: the level, saved every minute or so
@@ -65,7 +61,7 @@ pacman -S --needed \
 Build it:
 ```bash
 git clone https://github.com/degradka/mc-classic-c.git
-cd mc-classic-c/server/server1.9/src
+cd mc-classic-c/server/server1.9.1/src
 make
 ```
 
@@ -82,4 +78,4 @@ The Makefile has targets for both, but **neither has been tested yet**.
 
 ## References
 
-- [minecraft.wiki: Java Edition Classic server 1.9](https://minecraft.wiki/w/Java_Edition_Classic_server_1.9)
+- [minecraft.wiki: Java Edition Classic server 1.9.1](https://minecraft.wiki/w/Java_Edition_Classic_server_1.9.1)

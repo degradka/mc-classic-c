@@ -30,7 +30,7 @@ A multiplayer fix release for 0.28.
 
 ## Multiplayer
 
-Start [server 1.9](../server/server1.9/), then from this version's folder:
+Start [server 1.9.1](../server/server1.9.1/), then from this version's folder:
 ```bash
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```

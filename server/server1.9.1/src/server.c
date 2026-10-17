@@ -118,6 +118,8 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     // off by default, it needs minecraft.net
     Properties_get(p, "verify-names", "false", &v);
     s->verifyNames = jstr_eqIgnoreCase(&v, &t);
+    Properties_get(p, "grow-trees", "false", &v);
+    s->growTrees = jstr_eqIgnoreCase(&v, &t);
     if (s->maxPlayers < 1) s->maxPlayers = 1;
     if (s->maxPlayers > 32) s->maxPlayers = 32;
     Properties_get(p, "max-connections", "3", &v);
@@ -136,6 +138,8 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     // 3 goes back whatever the file said
     jstr_set(&v, "3");
     Properties_set(p, "max-connections", &v);
+    jstr_set(&v, s->growTrees ? "true" : "false");
+    Properties_set(p, "grow-trees", &v);
     if (!Properties_store(p, "server.properties", "Minecraft server properties")) Log_warning("Failed to save server.properties!");
 
     if (!NetSocket_listen(s->port, &s->listenSock, exception, size)) return false;
@@ -433,14 +437,22 @@ void Server_ban(MinecraftServer* s, const JStr* name) {
 void Server_op(MinecraftServer* s, const JStr* name) {
     PlayerList_add(&s->admins, name);
     for (int i = 0; i < s->playerCount; ++i) {
-        if (jstr_eqIgnoreCase(&s->players[i]->name, name)) Player_message(s->players[i], "You're now op!");
+        if (!jstr_eqIgnoreCase(&s->players[i]->name, name)) continue;
+        Player_message(s->players[i], "You're now op!");
+        PacketValue v[1] = { { .i = 100 } };
+        Player_send(s->players[i], PACKET_SET_USER_TYPE, v);
     }
 }
 
 void Server_deop(MinecraftServer* s, const JStr* name) {
     PlayerList_remove(&s->admins, name);
     for (int i = 0; i < s->playerCount; ++i) {
-        if (jstr_eqIgnoreCase(&s->players[i]->name, name)) Player_message(s->players[i], "You're no longer op!");
+        if (!jstr_eqIgnoreCase(&s->players[i]->name, name)) continue;
+        // a deop also ends /solid
+        s->players[i]->solid = false;
+        Player_message(s->players[i], "You're no longer op!");
+        PacketValue v[1] = { { .i = 0 } };
+        Player_send(s->players[i], PACKET_SET_USER_TYPE, v);
     }
 }
 

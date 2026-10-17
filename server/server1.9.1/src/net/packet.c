@@ -17,5 +17,6 @@ const PacketType PACKETS[PACKET_COUNT] = {
     { "BBB", 3 },
     { "B", 1 },
     { "BT", 1 + 64 },
-    { "T", 64 }
+    { "T", 64 },
+    { "B", 1 }
 };

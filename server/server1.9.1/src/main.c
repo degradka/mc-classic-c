@@ -36,6 +36,8 @@ int main(void) {
     }
     if (!server.level) server.level = LevelGen_generateLevel("--");
     Server_save(&server, true);
+    server.level->creativeMode = true;
+    server.level->growTrees = server.growTrees;
     server.level->listener = Server_tileChanged;
     server.level->listenerCtx = &server;
     Server_run(&server);
