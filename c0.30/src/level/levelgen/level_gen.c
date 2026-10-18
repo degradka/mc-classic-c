@@ -19,7 +19,6 @@ extern void Minecraft_levelLoadProgress(int percent);
 extern const char* Minecraft_getUserName(void);
 // false if the mob's box overlaps another entity
 extern bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z);
-extern void Minecraft_buildDiscardedMob(Level* lvl, int kind, float x, float y, float z);
 
 typedef struct {
     Level* level;
@@ -441,16 +440,14 @@ static void plantTrees(Gen* gen, const int* heightmap) {
     }
 }
 
-// the rolled mob is built (its constructor still eats Math.random) and dropped, only a sheep gets added
 int MobSpawner_spawn(Level* level, int attempts, const Entity* referenceEntity, bool reportProgress) {
     JRandom* r = &level->random;
     const int w = level->width, h = level->height, d = level->depth;
-    // the rolls 0 1 2 3 are Zombie, Skeleton, Pig, Creeper
-    static const int kindForRoll[5] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER, CREATURE_SPIDER };
+    static const int kindForRoll[6] = { CREATURE_ZOMBIE, CREATURE_SKELETON, CREATURE_PIG, CREATURE_CREEPER, CREATURE_SPIDER, CREATURE_SHEEP };
     int placed = 0;
     for (int a = 0; a < attempts; ++a) {
         if (reportProgress) setNextPhase(a * 100 / steps(attempts));
-        int kind = kindForRoll[JRandom_nextIntN(r, 5)];
+        int kind = kindForRoll[JRandom_nextIntN(r, 6)];
         int sx = JRandom_nextIntN(r, w);
         float f1 = JRandom_nextFloat(r);
         float f2 = JRandom_nextFloat(r);
@@ -465,8 +462,8 @@ int MobSpawner_spawn(Level* level, int attempts, const Entity* referenceEntity, 
             int x = sx, y = sy, z = sz;
             for (int step = 0; step < 3; ++step) {
                 x += nextIntDiff(r, 6);
-                z += nextIntDiff(r, 6);
                 y += nextIntDiff(r, 1);
+                z += nextIntDiff(r, 6);
                 if (x < 0 || z < 1 || y < 0 || y >= d - 2 || x >= w || z >= h) continue;
                 if (!Level_isSolidTile(level, x, y - 1, z)) continue;
                 if (Level_isSolidTile(level, x, y, z) || Level_isSolidTile(level, x, y + 1, z)) continue;
@@ -484,8 +481,7 @@ int MobSpawner_spawn(Level* level, int attempts, const Entity* referenceEntity, 
                     dz = fz - (float)level->zSpawn;
                 }
                 if (dx * dx + dy * dy + dz * dz < 256.0f) continue;
-                Minecraft_buildDiscardedMob(level, kind, fx, fy, fz);
-                if (Minecraft_spawnMob(level, CREATURE_SHEEP, fx, fy, fz)) placed++;
+                if (Minecraft_spawnMob(level, kind, fx, fy, fz)) placed++;
             }
         }
     }

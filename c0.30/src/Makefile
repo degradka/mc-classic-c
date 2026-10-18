@@ -1,4 +1,5 @@
 # Makefile: minecraft for linux, macos and windows (mingw)
+# two games from one source, creative and survival, only minecraft.c differs
 
 CC      := gcc
 CSTD    := -std=c99
@@ -12,7 +13,7 @@ SRC = minecraft.c player.c mob.c mob_ai.c timer.c  hitresult.c user.c options.c 
       inventory.c \
       level/chunk.c level/level.c level/level_renderer.c level/javaser.c \
       level/tile/tile.c phys/aabb.c entity.c character/creature.c \
-      item/arrow.c item/item.c \
+      item/arrow.c item/item.c item/primed_tnt.c \
       character/polygon.c character/cube.c \
       level/levelgen/level_gen.c \
       level/levelgen/synth/synth.c level/levelgen/synth/improved_noise.c \
@@ -46,6 +47,7 @@ endif
 
 ifeq ($(UNAME_S),Linux)
     EXE     := minecraft
+    EXE_S   := minecraft-survival
     # -lpthread for the connect thread, -lasound for audio
     SRC     += audio/audio_backend_alsa.c
     LDFLAGS := -lglfw -lGLEW -lGL -lGLU -lm -lz -lpthread -lasound
@@ -53,6 +55,7 @@ endif
 
 ifeq ($(UNAME_S),Darwin)
     EXE     := minecraft
+    EXE_S   := minecraft-survival
     # glfw and glew from homebrew, AudioToolbox for audio
     SRC     += audio/audio_backend_coreaudio.c
     LDFLAGS := -lglfw -lGLEW -framework OpenGL -framework AudioToolbox -lz -lpthread
@@ -60,6 +63,7 @@ endif
 
 ifeq ($(OS),Windows_NT)
     EXE := minecraft.exe
+    EXE_S := minecraft-survival.exe
     # -lwinmm for timeBeginPeriod and audio
     SRC += audio/audio_backend_win.c
     ifeq ($(BUILD),release)
@@ -73,11 +77,19 @@ endif
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)
 
+OBJ_S := $(filter-out minecraft.o,$(OBJ)) minecraft-survival.o
+
 .PHONY: all
-all: $(EXE)
+all: $(EXE) $(EXE_S)
 
 $(EXE): $(OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(EXE_S): $(OBJ_S)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+minecraft-survival.o: minecraft.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) -DSURVIVAL -c $< -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
@@ -91,6 +103,6 @@ run: $(EXE)
 	./$(EXE)
 
 clean:
-	@rm -f $(EXE) $(OBJ) $(DEP) 2>/dev/null || true
+	@rm -f $(EXE) $(EXE_S) $(OBJ) minecraft-survival.o $(DEP) minecraft-survival.d 2>/dev/null || true
 
--include $(DEP)
+-include $(DEP) minecraft-survival.d

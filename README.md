@@ -9,7 +9,7 @@
 
 ## What is this?
 This is the sequel to [mc-preclassic-c](https://github.com/degradka/mc-preclassic-c).
-**Minecraft Classic**, from **c0.0.11a** to **c0.29_02**, rewritten from Java into plain C99 + OpenGL.
+**Minecraft Classic**, from **c0.0.11a** to **c0.30**, rewritten from Java into plain C99 + OpenGL.
 
 <details>
 <summary>Why some versions are missing</summary>
@@ -50,6 +50,7 @@ Every version has its own README with what changed, how it was ported and the we
 - [c0.27_st](c0.27_st/)
 - [c0.28_01](c0.28_01/)
 - [c0.29_02](c0.29_02/)
+- [c0.30](c0.30/) (creative and survival)
 
 Dedicated servers:
 
@@ -77,9 +78,13 @@ They work with the original Java clients too, not just with these.
 | c0.0.20a_02, c0.0.23a_01 | [server 1.8.2](server/server1.8.2/) |
 | c0.28_01 | [server 1.9](server/server1.9/) |
 | c0.29_02 | [server 1.9.1](server/server1.9.1/) |
+| c0.30 | [server 1.9.1](server/server1.9.1/) for now, server 1.10 is next |
 
 The Survival Test versions (c0.24_st_03 to c0.27_st) are singleplayer only here. Their jars still have the
 multiplayer code, but it's left out of the port.
+
+The c0.30 survival build can join a server too. It works, but it's not the intended way to play,
+the servers are made for creative. More in the [c0.30 README](c0.30/#multiplayer).
 
 Build the server like a client (see [Building](#building)), then start it from its folder in the MINGW64 shell.
 It reads `server.properties` from the folder it runs in, the port is 25565 by default:

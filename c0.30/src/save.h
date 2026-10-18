@@ -9,6 +9,7 @@
 #include "character/creature.h"
 #include "item/item.h"
 #include "item/arrow.h"
+#include "item/primed_tnt.h"
 
 typedef struct World {
     Level* level;
@@ -16,6 +17,7 @@ typedef struct World {
     Creature* mobs; int* mobCount; int maxMobs;
     Item* items; int* itemCount; int maxItems;
     Arrow* arrows; int* arrowCount; int maxArrows;
+    PrimedTnt* tnts; int* tntCount; int maxTnts;
 } World;
 
 // loads the level part, a version 2 file keeps its entities for Save_loadEntities

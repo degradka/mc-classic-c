@@ -86,6 +86,8 @@ struct Tile {
     // only the sponge has these
     void (*onPlace)(const Tile* self, Level* lvl, int x, int y, int z);
     void (*onRemoved)(const Tile* self, Level* lvl, int x, int y, int z);
+    // after an explosion broke it, only tnt has it
+    void (*onExploded)(const Tile* self, Level* lvl, int x, int y, int z);
     // only called right after the player places the tile
     void (*onBlockAdded)(const Tile* self, Level* lvl, int x, int y, int z);
 

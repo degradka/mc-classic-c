@@ -44,11 +44,13 @@
 #include "gui/game_over_screen.h"
 #include "net/network_player.h"
 #include "save.h"
+#include "item/primed_tnt.h"
 
 #define MAX_MOBS 4096 // the in play cap is 320 on a normal map and 1280 on a huge one
 #define MAX_NET_PLAYERS 256
 #define MAX_ARROWS 64
 #define MAX_ITEMS 256
+#define MAX_TNTS 256
 
 static GLFWwindow*    window;
 static Level          level;
@@ -58,18 +60,20 @@ static Timer          timer;
 static Creature       mobs[MAX_MOBS];
 static Arrow          arrows[MAX_ARROWS];
 static Item           items[MAX_ITEMS];
+static PrimedTnt      tnts[MAX_TNTS];
 static ParticleEngine particleEngine;
 static User           user;
 
 static int mobCount = 0;
 static int arrowCount = 0;
 static int itemCount = 0;
+static int tntCount = 0;
 // F5, offline only
 static bool gRaining = false;
 
 static World currentWorld(void) {
     return (World){ &level, &player, mobs, &mobCount, MAX_MOBS, items, &itemCount, MAX_ITEMS,
-                    arrows, &arrowCount, MAX_ARROWS };
+                    arrows, &arrowCount, MAX_ARROWS, tnts, &tntCount, MAX_TNTS };
 }
 
 // the first person hand, heldBlend fades the held block out and back in when it changes
@@ -200,8 +204,12 @@ void Minecraft_closeScreenAndGrabMouse(void) {
 void Minecraft_levelLoadUpdate(const char* status);
 int Minecraft_countMobs(void);
 
-// the jar always builds a CreativeGameMode, survival is only there by editing the code
+// creative and survival are two builds of the same code, SURVIVAL picks survival
+#ifdef SURVIVAL
+static const bool gSurvival = true;
+#else
 static const bool gSurvival = false;
+#endif
 
 // survival spawns the first mobs of a new level
 static void GameMode_spawnInitial(Level* lvl) {
@@ -218,6 +226,7 @@ static void GameMode_setLevel(Level* lvl) {
     for (int i = 0; i < mobCount; ++i) mobs[i].e.inGrid = false;
     for (int i = 0; i < arrowCount; ++i) arrows[i].e.inGrid = false;
     for (int i = 0; i < itemCount; ++i) items[i].e.inGrid = false;
+    for (int i = 0; i < tntCount; ++i) tnts[i].e.inGrid = false;
 }
 
 // only for a player the level didn't already have
@@ -253,6 +262,7 @@ void Minecraft_generateNewLevelSized(int sizePreset) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
+    tntCount = 0;
 
     LevelRenderer_destroy(&levelRenderer);
     Level_resize(&level, size, size, 64);
@@ -409,6 +419,7 @@ void Minecraft_installNetworkLevel(int w, int h, int d, const byte* blocks) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
+    tntCount = 0;
     // the new level has none of the network players, the map still does
     while (netPlayerCount > 0) removeNetPlayerFromLevel(netOrder[0]);
     GameMode_setLevel(&level);
@@ -525,7 +536,13 @@ void Minecraft_beginLevelLoading(const char* title) {
 static char gLoadStatus[64] = "";
 
 // the dirt background, the title, the status and the bar when percent >= 0
+// the loading screen draws at most every 20 ms
+static long long gLastLoadingDraw;
+
 static void Minecraft_drawLoadingScreen(int percent) {
+    long long now = currentTimeMillis();
+    if (now - gLastLoadingDraw >= 0 && now - gLastLoadingDraw < 20) return;
+    gLastLoadingDraw = now;
     int fbw, fbh;
     glfwGetFramebufferSize(window, &fbw, &fbh);
     int screenWidth  = fbw * 240 / fbh;
@@ -768,6 +785,7 @@ static void checkGlError(const char* where) {
 static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     // a thread started once the gl context exists makes nvidia's driver stall a sync for seconds,
     // so every thread is running before the window opens
+    gLastLoadingDraw = currentTimeMillis();
     Options_init(&gOptions);
     Sound_init(gOptions.music, gOptions.sound);
     if (gConnectHost[0]) {
@@ -863,6 +881,7 @@ static int init(Level* lvl, LevelRenderer* lr, Player* p) {
     mobCount = 0;
     arrowCount = 0;
     itemCount = 0;
+    tntCount = 0;
 
     // nothing gets loaded or generated when it's about to connect
     if (gConnectHost[0]) Level_initPlaceholder(lvl);
@@ -1270,10 +1289,9 @@ static void pick(float t) {
     float vx, vy, vz;
     bool hasBlock = Level_clipHit(&level, &sx, &sy2, &sz, px + dx * reach, py + dy * reach, pz + dz * reach,
                                   &hx, &hy, &hz, &face, &vx, &vy, &vz);
-    // measured from where the clip left the start point, not from the eye
     float dist = reach;
     if (hasBlock) {
-        float ax = sx - vx, ay = sy2 - vy, az = sz - vz;
+        float ax = px - vx, ay = py - vy, az = pz - vz;
         dist = MathHelper_sqrt(ax * ax + ay * ay + az * az);
     }
 
@@ -1284,6 +1302,7 @@ static void pick(float t) {
     float best = 0.0f;
     for (int i = 0; i < mobCount; i++) pickEntity(&mobs[i].e, &reachBox, eye, end, &best);
     for (int i = 0; i < netPlayerCount; i++) pickEntity(&netPlayers[netOrder[i]].e, &reachBox, eye, end, &best);
+    for (int i = 0; i < tntCount; i++) pickEntity(&tnts[i].e, &reachBox, eye, end, &best);
 
     if (gHovered && gSurvival) {
         hitresult_createEntity(&hitResult, gHovered);
@@ -1396,12 +1415,6 @@ void Minecraft_pushNearby(Entity* mob) {
     }
 }
 
-// MobSpawner builds the rolled mob and drops it, only its Math.random calls matter
-void Minecraft_buildDiscardedMob(Level* lvl, int kind, float x, float y, float z) {
-    Creature scratch;
-    Creature_init(&scratch, (CreatureKind)kind, lvl, x, y, z);
-}
-
 // MobSpawner builds the mob first and drops it if its box overlaps any entity
 static bool isFreeOfEntities(const AABB* box);
 
@@ -1418,6 +1431,32 @@ bool Minecraft_spawnMob(Level* lvl, int kind, float x, float y, float z) {
 void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource) {
     if (itemCount >= MAX_ITEMS) return;
     Item_init(&items[itemCount++], lvl, x, y, z, resource);
+}
+
+// PrimedTnt's debris, textured as tnt
+void Minecraft_spawnTntParticle(Level* lvl, float x, float y, float z, float mx, float my, float mz) {
+    Particle p;
+    Particle_initTerrain(&p, lvl, x, y, z, mx, my, mz, &TILE_TNT);
+    ParticleEngine_add(&particleEngine, &p);
+}
+
+void Minecraft_spawnSmoke(Level* lvl, float x, float y, float z) {
+    Particle p;
+    Particle_initSmoke(&p, lvl, x, y, z);
+    ParticleEngine_add(&particleEngine, &p);
+}
+
+// life < 0 keeps the full fuse
+void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z, int life) {
+    if (tntCount >= MAX_TNTS) return;
+    PrimedTnt* t = &tnts[tntCount++];
+    PrimedTnt_init(t, lvl, x, y, z);
+    if (life >= 0) t->life = life;
+}
+
+static PrimedTnt* tntOf(Entity* e) {
+    if ((PrimedTnt*)e >= tnts && (PrimedTnt*)e < tnts + tntCount) return (PrimedTnt*)e;
+    return NULL;
 }
 
 // Player.aiStep touching the items
@@ -1528,6 +1567,9 @@ static bool isFreeOfEntities(const AABB* box) {
     for (int i = 0; i < itemCount; ++i) {
         if (items[i].e.inGrid && AABB_intersects(&items[i].e.boundingBox, box)) return false;
     }
+    for (int i = 0; i < tntCount; ++i) {
+        if (tnts[i].e.inGrid && AABB_intersects(&tnts[i].e.boundingBox, box)) return false;
+    }
     for (int i = 0; i < netPlayerCount; ++i) {
         const Entity* e = &netPlayers[netOrder[i]].e;
         if (e->inGrid && AABB_intersects(&e->boundingBox, box)) return false;
@@ -1557,7 +1599,11 @@ static void clickMouse(int button) {
         return;
     }
     if (hitResult.type == HITRESULT_ENTITY) {
-        if (button == 0) Mob_hurt(hitResult.entity, &player.e, 4);
+        if (button == 0) {
+            PrimedTnt* tnt = tntOf(hitResult.entity);
+            if (tnt) PrimedTnt_hurt(tnt, &player.e, true);
+            else Mob_hurt(hitResult.entity, &player.e, 4);
+        }
         return;
     }
 
@@ -1627,6 +1673,7 @@ static void handleMouseEvent(const InputEvent* ev) {
         int id = Level_getTile(&level, hitResult.x, hitResult.y, hitResult.z);
         if (id == TILE_GRASS.id) id = TILE_DIRT.id;
         if (id == TILE_DOUBLE_SLAB.id) id = TILE_SLAB.id;
+        if (id == TILE_BEDROCK.id) id = TILE_ROCK.id;
         Inventory_grabTexture(&player.inventory, id, !gSurvival);
     }
 }
@@ -1984,6 +2031,13 @@ static void render(Level* lvl, LevelRenderer* lr, Player* p, GLFWwindow* w, floa
         }
     }
 
+    for (int i = 0; i < tntCount; ++i) {
+        const PrimedTnt* tnt = &tnts[i];
+        if (entityVisible(&frustum, &tnt->e, camX, camY, camZ)) {
+            PrimedTnt_render(tnt, t);
+        }
+    }
+
     setupEntityLighting(false);
     setupFog();
     ParticleEngine_render(&particleEngine, p, t);
@@ -2294,6 +2348,18 @@ static void tick(Player* p, GLFWwindow* w) {
             continue;
         }
         Entity_gridTick(&items[i].e);
+        i++;
+    }
+
+    for (int i = 0; i < tntCount; ) {
+        Entity_gridInsert(&tnts[i].e);
+        PrimedTnt_onTick(&tnts[i]);
+        if (tnts[i].e.removed) {
+            tnts[i] = tnts[tntCount - 1];
+            tntCount--;
+            continue;
+        }
+        Entity_gridTick(&tnts[i].e);
         i++;
     }
 

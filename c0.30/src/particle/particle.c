@@ -47,6 +47,18 @@ void Particle_initTerrain(Particle* p, Level* level, float x, float y, float z,
     p->r = p->g = p->b = 0.6f;
 }
 
+void Particle_initSmoke(Particle* p, Level* level, float x, float y, float z) {
+    initBase(p, level, x, y, z, 0.0f, 0.0f, 0.0f);
+    p->kind = PARTICLE_SMOKE;
+    p->base.motionX *= 0.1f;
+    p->base.motionY *= 0.1f;
+    p->base.motionZ *= 0.1f;
+    p->g = p->b = (float)(JRandom_mathRandom() * (double)0.3f);
+    p->r = p->b;
+    p->lifetime = (int)(8.0 / (JRandom_mathRandom() * 0.8 + 0.2));
+    p->base.noPhysics = true;
+}
+
 void Particle_initWaterDrop(Particle* p, Level* level, float x, float y, float z) {
     initBase(p, level, x, y, z, 0.0f, 0.0f, 0.0f);
     p->kind = PARTICLE_WATER_DROP;
@@ -106,11 +118,18 @@ void Particle_onTick(Particle* p) {
     // the removed particle still moves this tick
     if (p->age++ >= p->lifetime) Entity_remove(e);
 
-    e->motionY = (float)((double)e->motionY - 0.04 * (double)p->gravity);
+    float drag = 0.98f;
+    if (p->kind == PARTICLE_SMOKE) {
+        p->textureId = 7 - (p->age << 3) / p->lifetime;
+        e->motionY = (float)((double)e->motionY + 0.004);
+        drag = 0.96f;
+    } else {
+        e->motionY = (float)((double)e->motionY - 0.04 * (double)p->gravity);
+    }
     move(p);
-    e->motionX *= 0.98f;
-    e->motionY *= 0.98f;
-    e->motionZ *= 0.98f;
+    e->motionX *= drag;
+    e->motionY *= drag;
+    e->motionZ *= drag;
     if (e->onGround) {
         e->motionX *= 0.7f;
         e->motionZ *= 0.7f;

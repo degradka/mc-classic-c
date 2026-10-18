@@ -245,6 +245,16 @@ static int Tnt_getTexture(const Tile* self, int face) {
 }
 static int NoDrop_getDropCount(const Tile* self) { (void)self; return 0; }
 
+extern void Minecraft_spawnPrimedTnt(Level* lvl, float x, float y, float z, int life);
+
+// TntTile.onTileRemoved, one an explosion broke goes off sooner
+static void Tnt_onExploded(const Tile* self, Level* lvl, int x, int y, int z) {
+    (void)self;
+    if (lvl->creativeMode) return;
+    const int life = 40;
+    Minecraft_spawnPrimedTnt(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f, JRandom_nextIntN(tileRandom(), life / 4) + life / 8);
+}
+
 static int Bookshelf_getTexture(const Tile* self, int face) { return face <= 1 ? 4 : self->textureId; }
 
 /* tile instances and registry */
@@ -284,6 +294,7 @@ static void registerTile(Tile* t, int id, int tex, int (*getTex)(const Tile*,int
     t->renderGuiItem = Tile_default_renderGuiItem;
     t->onPlace = NULL;
     t->onRemoved = NULL;
+    t->onExploded = NULL;
     t->getDropCount    = Tile_default_getDropCount;
 
     gTiles[id] = t;
@@ -837,6 +848,7 @@ void Tile_registerAll(void) {
     TILE_TNT.soundType = SOUND_CLOTH;
     TILE_TNT.hardnessTicks = 0;
     TILE_TNT.getDropCount = NoDrop_getDropCount;
+    TILE_TNT.onExploded = Tnt_onExploded;
 
     registerTile(&TILE_BOOKSHELF, 47, 35, Bookshelf_getTexture);
     TILE_BOOKSHELF.soundType = SOUND_WOOD;
@@ -855,7 +867,10 @@ void Tile_registerAll(void) {
 }
 
 void Tile_onDestroy(const Tile* self, Level* lvl, int x, int y, int z, ParticleEngine* engine) {
-    if (self == &TILE_TNT && !lvl->creativeMode) return;
+    if (self == &TILE_TNT && !lvl->creativeMode) {
+        Minecraft_spawnPrimedTnt(lvl, (float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f, -1);
+        return;
+    }
     const int spread = 4;
 
     for (int ox = 0; ox < spread; ++ox)
@@ -894,14 +909,32 @@ void Tile_spawnHitParticle(const Tile* self, Level* lvl, int x, int y, int z, in
     ParticleEngine_add(engine, &p);
 }
 
+extern void Minecraft_spawnItem(Level* lvl, float x, float y, float z, int resource);
+
+// what a broken tile drops, ores drop the metal blocks and coal a slab
+static int dropId(const Tile* self) {
+    // obsidian is a stone tile, it drops cobblestone too
+    if (self == &TILE_ROCK || self == &TILE_OBSIDIAN) return TILE_STONEBRICK.id;
+    if (self == &TILE_GRASS) return TILE_DIRT.id;
+    if (self == &TILE_LEAVES) return TILE_BUSH.id;
+    if (self == &TILE_LOG) return TILE_WOOD.id;
+    if (self == &TILE_COAL_ORE) return TILE_SLAB.id;
+    if (self == &TILE_GOLD_ORE) return TILE_GOLD_BLOCK.id;
+    if (self == &TILE_IRON_ORE) return TILE_IRON_BLOCK.id;
+    if (self == &TILE_SLAB || self == &TILE_DOUBLE_SLAB) return TILE_SLAB.id;
+    return self->id;
+}
+
 void Tile_dropItemsChance(const Tile* self, Level* lvl, int x, int y, int z, float chance) {
-    (void)lvl; (void)x; (void)y; (void)z;
+    if (lvl->creativeMode) return;
     int count = self->getDropCount(self);
     for (int i = 0; i < count; i++) {
         if (JRandom_nextFloat(tileRandom()) > chance) continue;
-        JRandom_nextFloat(tileRandom());
-        JRandom_nextFloat(tileRandom());
-        JRandom_nextFloat(tileRandom());
+        float spread = 0.7f;
+        float dx = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
+        float dy = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
+        float dz = JRandom_nextFloat(tileRandom()) * spread + (1.0f - spread) * 0.5f;
+        Minecraft_spawnItem(lvl, (float)x + dx, (float)y + dy, (float)z + dz, dropId(self));
     }
 }
 

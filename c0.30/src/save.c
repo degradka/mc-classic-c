@@ -122,9 +122,12 @@ static const JField ARROW_F[] = {
 };
 static const JDesc ARROW = { "com.mojang.minecraft.item.Arrow", 0, 2, 14, ARROW_F, &ENTITY };
 
+static const JField TNT_F[] = { F('Z', "defused"), F('I', "life"), F('F', "xd"), F('F', "yd"), F('F', "zd") };
+static const JDesc TNT = { "com.mojang.minecraft.item.PrimedTnt", 0, 2, 5, TNT_F, &ENTITY };
+
 /* writing */
 
-enum { K_NONE, K_PLAYER, K_MOB, K_ITEM, K_ARROW };
+enum { K_NONE, K_PLAYER, K_MOB, K_ITEM, K_ARROW, K_TNT };
 
 typedef struct {
     JWriter w;
@@ -138,6 +141,7 @@ static int kindOf(const World* wd, const Entity* e) {
     if ((const Creature*)e >= wd->mobs && (const Creature*)e < wd->mobs + *wd->mobCount) return K_MOB;
     if ((const Item*)e >= wd->items && (const Item*)e < wd->items + *wd->itemCount) return ((const Item*)e)->pickedUp ? K_NONE : K_ITEM;
     if ((const Arrow*)e >= wd->arrows && (const Arrow*)e < wd->arrows + *wd->arrowCount) return ((const Arrow*)e)->pickedUp ? K_NONE : K_ARROW;
+    if ((const PrimedTnt*)e >= wd->tnts && (const PrimedTnt*)e < wd->tnts + *wd->tntCount) return K_TNT;
     return K_NONE;
 }
 
@@ -339,6 +343,13 @@ static void writeEntity(Out* o, const Entity* e) {
         JW_f4(w, e->yRotation); JW_f4(w, e->prevYRotation); JW_f4(w, e->motionY);
         JW_f4(w, e->motionZ);
         writeEntityRef(o, a->owner);
+    } else if (kind == K_TNT) {
+        const PrimedTnt* t = (const PrimedTnt*)e;
+        JW_object(w, &TNT, e);
+        entityFields(o, e, true);
+        JW_u1(w, t->defused);
+        JW_i4(w, t->life);
+        JW_f4(w, t->xd); JW_f4(w, t->yd); JW_f4(w, t->zd);
     } else {
         JW_null(w);
     }
@@ -350,6 +361,7 @@ static int collect(const World* wd, const Entity** out) {
     for (int i = 0; i < *wd->mobCount; ++i) out[n++] = &wd->mobs[i].e;
     for (int i = 0; i < *wd->itemCount; ++i) if (!wd->items[i].pickedUp) out[n++] = &wd->items[i].e;
     for (int i = 0; i < *wd->arrowCount; ++i) if (!wd->arrows[i].pickedUp) out[n++] = &wd->arrows[i].e;
+    for (int i = 0; i < *wd->tntCount; ++i) out[n++] = &wd->tnts[i].e;
     return n;
 }
 
@@ -394,7 +406,7 @@ bool Save_write(const World* wd, const char* path) {
     JWriter_init(&o.w);
     JWriter* w = &o.w;
 
-    int total = 1 + *wd->mobCount + *wd->itemCount + *wd->arrowCount;
+    int total = 1 + *wd->mobCount + *wd->itemCount + *wd->arrowCount + *wd->tntCount;
     const Entity** all = (const Entity**)malloc((size_t)total * sizeof(Entity*));
     const Entity** tmp = (const Entity**)malloc((size_t)total * sizeof(Entity*));
     if (!all || !tmp) { free(all); free(tmp); JWriter_free(w); return false; }
@@ -846,6 +858,18 @@ bool Save_loadEntities(World* w) {
             e->motionX = JNode_float(n, AR, "xd");
             e->motionY = JNode_float(n, AR, "yd");
             e->motionZ = JNode_float(n, AR, "zd");
+        } else if (strcmp(cls, "com.mojang.minecraft.item.PrimedTnt") == 0) {
+            if (*w->tntCount >= w->maxTnts) continue;
+            PrimedTnt* t = &w->tnts[(*w->tntCount)++];
+            PrimedTnt_init(t, w->level, JNode_float(n, EN, "x"), JNode_float(n, EN, "y"), JNode_float(n, EN, "z"));
+            e = &t->e;
+            readEntity(e, n, true);
+            const char* TN = "com.mojang.minecraft.item.PrimedTnt";
+            t->defused = JNode_int(n, TN, "defused") != 0;
+            t->life = (int)JNode_int(n, TN, "life");
+            t->xd = JNode_float(n, TN, "xd");
+            t->yd = JNode_float(n, TN, "yd");
+            t->zd = JNode_float(n, TN, "zd");
         }
         if (e) {
             pairs[np].node = n;

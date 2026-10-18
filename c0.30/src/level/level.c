@@ -680,6 +680,7 @@ void Level_explode(Level* level, Entity* source, float x, float y, float z, floa
                 if (!t || !t->explodable) continue;
                 Tile_dropItemsChance(t, level, bx, by, bz, 0.3f);
                 level_setTile(level, bx, by, bz, 0);
+                if (t->onExploded) t->onExploded(t, level, bx, by, bz);
             }
         }
     }

@@ -26,9 +26,8 @@ extern Tessellator TESSELLATOR;
 
 // the ground and water around the map
 // list 0 is ground and list 1 is water
-// the top uses whatever is bound when the list is called, render binds rock.png first
+// it uses whatever is bound when the list is called, render binds rock.png first
 static void compileSurroundingGround(LevelRenderer* r) {
-    GLuint rockTex = loadTexture("resources/rock.png", GL_NEAREST);
     glColor4f(0.5f, 0.5f, 0.5f, 1.0f);
 
     const float y = Level_getGroundLevel(r->level);
@@ -51,7 +50,6 @@ static void compileSurroundingGround(LevelRenderer* r) {
     Tessellator_end(&TESSELLATOR);
 
     // walls at the map edge down to the ground plane
-    glBindTexture(GL_TEXTURE_2D, rockTex);
     glColor3f(0.8f, 0.8f, 0.8f);
     Tessellator_begin(&TESSELLATOR);
     for (int xx = 0; xx < r->level->width; xx += s) {
