@@ -102,7 +102,7 @@ cd mc-classic-c/c0.0.23a_01
 ```
 No arguments means singleplayer. Without a name you're `guest`.
 
-<!-- multiplayer video goes here -->
+![Multiplayer in c0.30](.assets/multiplayer.gif)
 
 ---
 
