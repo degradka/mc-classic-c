@@ -24,7 +24,7 @@ CFLAGS  := $(CSTD) $(WARN) $(INCLUDE)
 DEPFLAGS := -MMD -MP
 
 ifeq ($(BUILD),release)
-    CFLAGS += -O2 -DNDEBUG
+    CFLAGS += -O2 -fwrapv -DNDEBUG
 else
     CFLAGS += -O0 -g
 endif
