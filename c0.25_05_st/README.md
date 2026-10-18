@@ -4,6 +4,8 @@
 
 Released September 3, 2009. 0.25 SURVIVAL TEST to 0.25 SURVIVAL TEST 4 are folded in here.
 
+![c0.25_05_st](../.assets/c0.25_05_st.png)
+
 ## What changed
 
 - Mobs

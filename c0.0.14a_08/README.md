@@ -5,6 +5,8 @@
 Released May 28, 2009. The versions between 0.0.13a_03 and this one aren't ported separately,
 everything they changed is in here.
 
+![c0.0.14a_08](../.assets/c0.0.14a_08.png)
+
 ## What changed
 
 - New tiles

@@ -4,6 +4,8 @@
 
 Released June 20, 2009. 0.0.19a to 0.0.19a_03 are folded in here.
 
+![c0.0.19a_04](../.assets/c0.0.19a_04.png)
+
 ## What changed
 
 - New tiles

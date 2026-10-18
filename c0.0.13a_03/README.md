@@ -4,6 +4,8 @@
 
 Released May 22, 2009, the same day as 0.0.13a. The first obfuscated version.
 
+![c0.0.13a_03](../.assets/c0.0.13a_03.png)
+
 ## What changed
 
 - World generation

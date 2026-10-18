@@ -7,6 +7,8 @@ The two are the same code with one line different, the game mode the game starts
 folder that builds both: `minecraft.exe` is creative and `minecraft-survival.exe` is survival. The 2011
 re-signed creative jar has the same code as the 2009 one, only its signature changed.
 
+![c0.30](../.assets/c0.30.png)
+
 ## What changed
 
 - Survival

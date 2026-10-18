@@ -5,6 +5,8 @@
 Released October 27, 2009, the same day as 0.28, which is folded in here.
 Survival Test is over: it's creative building again, and multiplayer is back.
 
+![c0.28_01](../.assets/c0.28_01.png)
+
 ## What changed
 
 - Creative

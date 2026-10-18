@@ -5,6 +5,8 @@
 Released May 17, 2009, three minutes after 0.0.10a, to fix that one being unplayable.
 This is where the project starts.
 
+![c0.0.11a](../.assets/c0.0.11a.png)
+
 ## What it has
 
 - Six tiles: rock, grass, dirt, stone brick, wood and bush

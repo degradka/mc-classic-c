@@ -4,6 +4,8 @@
 
 Released June 10, 2009.
 
+![c0.0.17a](../.assets/c0.0.17a.png)
+
 ## What changed
 
 - Hold **Tab** while connected to see everyone on the server

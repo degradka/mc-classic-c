@@ -3,7 +3,7 @@
 
 ---
 
-<!-- screenshot goes here -->
+![Minecraft Classic 0.30](.assets/c0.30.png)
 
 ---
 

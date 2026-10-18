@@ -5,6 +5,8 @@
 Released June 7, 2009. The first version with multiplayer. Everything since 0.0.14a_08,
 the whole 0.0.15a multiplayer test included, is folded in here.
 
+![c0.0.16a_02](../.assets/c0.0.16a_02.png)
+
 ## What changed
 
 - Multiplayer

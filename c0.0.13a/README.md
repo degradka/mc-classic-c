@@ -5,6 +5,8 @@
 Released May 22, 2009. The wiki says the jar that survived is an early development build of 0.0.13a,
 not the one that was released. That build is what's ported here.
 
+![c0.0.13a](../.assets/c0.0.13a.png)
+
 ## What changed
 
 - Water and lava, flowing and still. Where they meet they turn into rock

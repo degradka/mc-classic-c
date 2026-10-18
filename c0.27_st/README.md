@@ -4,6 +4,8 @@
 
 Released October 24, 2009. 0.26 SURVIVAL TEST is folded in here.
 
+![c0.27_st](../.assets/c0.27_st.png)
+
 ## What changed
 
 - TNT: you start a new level with 10, hitting it lights it, it explodes a bit later

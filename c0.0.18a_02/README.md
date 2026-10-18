@@ -4,6 +4,8 @@
 
 Released June 14, 2009. 0.0.18a is folded in here.
 
+![c0.0.18a_02](../.assets/c0.0.18a_02.png)
+
 ## What changed
 
 - Chat can send `\`, `@`, `|` and `$` too

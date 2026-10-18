@@ -4,6 +4,8 @@
 
 Released July 11, 2009. 0.0.21a to 0.0.23a are folded in here.
 
+![c0.0.23a_01](../.assets/c0.0.23a_01.png)
+
 ## What changed
 
 - Sound

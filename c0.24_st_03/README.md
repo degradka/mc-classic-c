@@ -5,6 +5,8 @@
 Released September 1, 2009. The start of Survival Test.
 0.24_SURVIVAL_TEST to 0.24_SURVIVAL_TEST_02 are folded in here.
 
+![c0.24_st_03](../.assets/c0.24_st_03.png)
+
 ## What changed
 
 - Health

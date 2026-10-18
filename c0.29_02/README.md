@@ -5,6 +5,8 @@
 Released October 30, 2009. 0.29 and 0.29_01 came out the day before, they're folded in here.
 A multiplayer fix release for 0.28.
 
+![c0.29_02](../.assets/c0.29_02.png)
+
 ## What changed
 
 - Other players face the right way, in 0.28 everyone saw everyone else's yaw mirrored
