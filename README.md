@@ -61,6 +61,7 @@ Dedicated servers:
 - [server 1.8.2](server/server1.8.2/)
 - [server 1.9](server/server1.9/)
 - [server 1.9.1](server/server1.9.1/)
+- [server 1.10.1](server/server1.10.1/)
 
 ---
 
@@ -78,7 +79,7 @@ They work with the original Java clients too, not just with these.
 | c0.0.20a_02, c0.0.23a_01 | [server 1.8.2](server/server1.8.2/) |
 | c0.28_01 | [server 1.9](server/server1.9/) |
 | c0.29_02 | [server 1.9.1](server/server1.9.1/) |
-| c0.30 | [server 1.9.1](server/server1.9.1/) for now, server 1.10 is next |
+| c0.30 | [server 1.10.1](server/server1.10.1/) |
 
 The Survival Test versions (c0.24_st_03 to c0.27_st) are singleplayer only here. Their jars still have the
 multiplayer code, but it's left out of the port.
@@ -186,6 +187,7 @@ Open an issue or a pull request, or reach out to me on social media or email.
 ## References
 - [minecraft.wiki: Java Edition Classic](https://minecraft.wiki/w/Java_Edition_Classic), every version's page is linked from its own README
 - [#minecraft IRC logs from 2009](https://archive.org/details/Minecraft_IRC_Logs_2009)
+- [Omniarchive](https://omniarchive.uk), where the original client and server jars come from
 - [RetroMCP](https://github.com/MCPHackers/RetroMCP-Java), the c0.0.23a_01 names everything else is mapped from
 - [CFR](https://github.com/leibnitz27/cfr), the decompiler
 - [mc-preclassic-c](https://github.com/degradka/mc-preclassic-c), the part before this one

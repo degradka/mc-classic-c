@@ -46,6 +46,7 @@ typedef struct MinecraftServer {
     bool verifyNames;
     // copied to the level, it only stops dandelions and roses ticking
     bool growTrees;
+    bool adminSlot;
     // what the name check hashes with, minecraft.net got it with the heartbeat
     JStr salt;
     int maxConnections;
@@ -57,6 +58,7 @@ void Server_run(MinecraftServer* s);
 void Server_broadcast(MinecraftServer* s, int id, const PacketValue* values);
 void Server_broadcastExcept(MinecraftServer* s, const Player* except, int id, const PacketValue* values);
 void Server_closeLater(MinecraftServer* s, SocketConnection* conn);
+int Server_freeSlots(const MinecraftServer* s);
 void Server_tileChanged(void* ctx, int x, int y, int z);
 void Server_kick(MinecraftServer* s, const JStr* name);
 void Server_ban(MinecraftServer* s, const JStr* name);

@@ -140,18 +140,16 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
         cheat(p, "Bad name!");
         return;
     }
+    // no return, the login goes on after this kick
+    if (name.n < 2 || name.n > 16) Player_kick(p, "Illegal name.");
     if (p->server->verifyNames) {
         if (!present[2]) jthrowNull();
         Server_nameKey(p->server, &name, &key);
         if (!jstr_eq(v[2].s, &key)) {
-            Player_kick(p, "Illegal name.");
+            Player_kick(p, "The name wasn't verified by minecraft.net!");
             return;
         }
     }
-    Player* other = Server_findPlayer(p->server, &name);
-    if (other) Player_kick(other, "You logged in from another computer.");
-    char who[512], n[JSTR_MAX * 3];
-    Log_info("%s logged in as %s", Player_toString(p, who, sizeof who), jstr_c(&name, n, sizeof n));
     if (protocol != 7) {
         Player_kick(p, "Wrong protocol version.");
         return;
@@ -160,6 +158,21 @@ static void handleLogin(Player* p, const PacketValue* v, const bool* present) {
         Player_kick(p, "You're banned!");
         return;
     }
+    char who[512], n[JSTR_MAX * 3];
+    // with admin-slot the last free slot is kept for admins
+    if (p->server->adminSlot && !PlayerList_contains(&p->server->admins, &name) && Server_freeSlots(p->server) < 1) {
+        static JStr full;
+        jstr_set(&full, "The server is full!");
+        PacketValue msg[1] = { { .s = &full } };
+        sendDirect(p, PACKET_DISCONNECT, msg);
+        Log_info("%s connected, but got kicked because the server was almost full and there are reserved admin slots.", jstr_c(&name, n, sizeof n));
+        Server_closeLater(p->server, p->conn);
+        p->kicked = true;
+        return;
+    }
+    Player* other = Server_findPlayer(p->server, &name);
+    if (other) Player_kick(other, "You logged in from another computer.");
+    Log_info("%s logged in as %s", Player_toString(p, who, sizeof who), jstr_c(&name, n, sizeof n));
     p->loggedIn = true;
     jstr_copy(&p->name, &name);
     // 100 tells the client it's an op

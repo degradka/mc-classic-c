@@ -39,7 +39,7 @@ re-signed creative jar has the same code as the 2009 one, only its signature cha
 
 ## Multiplayer
 
-Start [server 1.9.1](../server/server1.9.1/), then from this version's folder:
+Start [server 1.10.1](../server/server1.10.1/), then from this version's folder:
 ```bash
 ./src/minecraft.exe 127.0.0.1 25565 yourname
 ```

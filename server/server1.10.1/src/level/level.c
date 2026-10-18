@@ -305,12 +305,16 @@ bool Level_maybeGrowTree(Level* level, int x, int y, int z) {
             int dx = xx - x;
             for (int zz = z - r; zz <= z + r; ++zz) {
                 int dz = zz - z;
-                if (abs(dx) == r && abs(dz) == r && (JRandom_nextIntN(&level->random, 2) == 0 || dy == 0)) continue;
+                if ((abs(dx) == r && abs(dz) == r && (JRandom_nextIntN(&level->random, 2) == 0 || dy == 0)) ||
+                    Level_getTile(level, xx, yy, zz) != 0) continue;
                 Level_setTile(level, xx, yy, zz, TILE_LEAVES);
             }
         }
     }
-    for (int j = 0; j < height; ++j) Level_setTile(level, x, y + j, z, TILE_LOG);
+    for (int j = 0; j < height; ++j) {
+        if (Level_getTile(level, x, y + j, z) != 0) continue;
+        Level_setTile(level, x, y + j, z, TILE_LOG);
+    }
     return true;
 }
 

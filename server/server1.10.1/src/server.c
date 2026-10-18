@@ -120,6 +120,8 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     s->verifyNames = jstr_eqIgnoreCase(&v, &t);
     Properties_get(p, "grow-trees", "false", &v);
     s->growTrees = jstr_eqIgnoreCase(&v, &t);
+    Properties_get(p, "admin-slot", "false", &v);
+    s->adminSlot = jstr_eqIgnoreCase(&v, &t);
     if (s->maxPlayers < 1) s->maxPlayers = 1;
     if (s->maxPlayers > 32) s->maxPlayers = 32;
     Properties_get(p, "max-connections", "3", &v);
@@ -140,6 +142,22 @@ bool Server_init(MinecraftServer* s, char* exception, size_t size) {
     Properties_set(p, "max-connections", &v);
     jstr_set(&v, s->growTrees ? "true" : "false");
     Properties_set(p, "grow-trees", &v);
+    jstr_set(&v, s->adminSlot ? "true" : "false");
+    Properties_set(p, "admin-slot", &v);
+    if (!s->verifyNames) {
+        Log_warning("######################### WARNING #########################");
+        Log_warning("verify-names is set to false! This means that anyone who");
+        Log_warning("connects to this server can choose any username he or she");
+        Log_warning("wants! This includes impersonating an OP!");
+        if (s->isPublic) {
+            Log_warning("");
+            Log_warning("AND SINCE THIS IS A PUBLIC SERVER, IT WILL HAPPEN TO YOU!");
+            Log_warning("");
+        }
+        Log_warning("If you wish to fix this, edit server.properties, and change");
+        Log_warning("verify-names to true.");
+        Log_warning("###########################################################");
+    }
     if (!Properties_store(p, "server.properties", "Minecraft server properties")) Log_warning("Failed to save server.properties!");
 
     if (!NetSocket_listen(s->port, &s->listenSock, exception, size)) return false;
@@ -197,6 +215,12 @@ void Server_broadcastExcept(MinecraftServer* s, const Player* except, int id, co
             Player_onException(s->players[i], &e);
         }
     }
+}
+
+int Server_freeSlots(const MinecraftServer* s) {
+    int n = 0;
+    for (int i = 0; i < s->maxPlayers; ++i) if (!s->slots[i]) n++;
+    return n;
 }
 
 static int freeSlot(const MinecraftServer* s) {
